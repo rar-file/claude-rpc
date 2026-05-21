@@ -1,0 +1,121 @@
+name: Release
+
+# Two paths in:
+#  - push a tag like v0.2.1 → full build + GitHub Release with attached artifacts
+#  - workflow_dispatch     → full build, artifacts uploaded but no Release created
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write   # required for the release job to upload assets
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest      # Apple Silicon — produces arm64 .dmg
+            cli-out: claude-rpc
+            artifact-name: claude-rpc-macos-arm64
+            # .yml + .blockmap are the auto-update feed files electron-updater
+            # reads to discover new versions. They MUST land in the release.
+            dist-glob: |
+              dashboard/dist/*.dmg
+              dashboard/dist/*.yml
+              dashboard/dist/*.blockmap
+          - os: windows-latest    # x64 Windows — produces NSIS .exe + portable .exe
+            cli-out: claude-rpc.exe
+            artifact-name: claude-rpc-windows-x64
+            dist-glob: |
+              dashboard/dist/*.exe
+              dashboard/dist/*.yml
+              dashboard/dist/*.blockmap
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Root deps (esbuild, postject for the SEA build).
+      - name: Install root deps
+        run: npm ci || npm install
+
+      # Build the SEA CLI binary for THIS runner's platform.
+      - name: Build CLI binary
+        run: npm run build:exe
+
+      # Stage the binary into dashboard/resources/bin/ so electron-builder
+      # bundles it via extraResources.
+      - name: Stage CLI into dashboard
+        run: node scripts/prep-dashboard.js
+
+      # Dashboard deps + installer build.
+      - name: Install dashboard deps
+        working-directory: dashboard
+        run: npm ci || npm install
+
+      - name: Build installer (mac)
+        if: runner.os == 'macOS'
+        working-directory: dashboard
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        # --publish never: electron-builder picks up the github publish config
+        # from package.json but we want the release job (not the build job) to
+        # attach files, so explicitly tell it not to publish itself.
+        run: npx electron-builder --mac dmg --publish never
+
+      - name: Build installer (win)
+        if: runner.os == 'Windows'
+        working-directory: dashboard
+        run: npx electron-builder --win nsis portable --x64 --publish never
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact-name }}
+          path: |
+            dist/${{ matrix.cli-out }}
+            ${{ matrix.dist-glob }}
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten artifact tree
+        # Include update-feed files (latest*.yml, *.blockmap) alongside the
+        # installers so electron-updater can discover new versions.
+        run: |
+          mkdir -p release
+          find artifacts -type f \( \
+              -name '*.dmg' \
+              -o -name '*.exe' \
+              -o -name '*.yml' \
+              -o -name '*.blockmap' \
+              -o -name 'claude-rpc' \
+            \) -exec cp {} release/ \;
+          ls -la release
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
+          draft: false
+          prerelease: false

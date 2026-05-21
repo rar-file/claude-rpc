@@ -164,7 +164,27 @@ function buildActivity(opts = {}) {
 async function pushPresence() {
   if (!connected || !client?.user) return;
   try {
-    const activity = buildActivity();
+    // Resolve state once so we can decide whether to push or clear.
+    // Mirrors buildActivity's first two lines — kept here so we don't
+    // have to round-trip through buildActivity just to learn the status.
+    let resolved = readState();
+    resolved.liveSessions = liveSessions;
+    resolved = applyIdle(resolved, config);
+
+    const hideWhenStale = config.hideWhenStale !== false;
+    if (resolved.status === 'stale' && hideWhenStale) {
+      const stamp = 'cleared';
+      if (lastPayloadHash === stamp) return;
+      lastPayloadHash = stamp;
+      // Wipe effectiveSessionStart so the next active push gets a fresh
+      // elapsed timer rather than counting from a previous session.
+      effectiveSessionStart = null;
+      await client.user.clearActivity();
+      log('Presence cleared (stale — Claude Code not running)');
+      return;
+    }
+
+    const activity = buildActivity({ state: resolved });
     const hash = JSON.stringify(activity);
     if (hash === lastPayloadHash) return;
     lastPayloadHash = hash;

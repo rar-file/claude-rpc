@@ -1,25 +1,40 @@
 {
   "name": "claude-rpc-dashboard",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "private": true,
-  "description": "GUI editor for claude-rpc config — Electron popup for timing and rotation frames",
+  "description": "Desktop control panel for claude-rpc — daemon control, config editor, presence preview",
   "license": "MIT",
   "author": "Archer Simmons",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "build": "electron-builder --win portable"
+    "dist": "electron-builder",
+    "dist:mac": "electron-builder --mac dmg",
+    "dist:win": "electron-builder --win nsis portable --x64"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
   },
   "devDependencies": {
     "electron": "^30.5.1",
     "electron-builder": "^24.13.3"
   },
   "build": {
-    "appId": "com.archersimmons.claude-rpc-dashboard",
-    "productName": "Claude RPC Dashboard",
+    "appId": "com.archersimmons.claude-rpc",
+    "productName": "Claude RPC",
+    "copyright": "Copyright © 2026 Archer Simmons",
     "directories": {
-      "output": "dist"
+      "output": "dist",
+      "buildResources": "build"
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "rar-file",
+        "repo": "claude-rpc",
+        "releaseType": "release"
+      }
+    ],
     "files": [
       "main.js",
       "preload.js",
@@ -27,13 +42,57 @@
       "styles.css",
       "renderer.js"
     ],
+    "extraResources": [
+      {
+        "from": "resources/bin",
+        "to": "bin",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "../config.example.json",
+        "to": "config.example.json"
+      }
+    ],
     "asar": true,
+    "mac": {
+      "target": [
+        { "target": "dmg", "arch": ["arm64"] }
+      ],
+      "category": "public.app-category.developer-tools",
+      "identity": null,
+      "artifactName": "claude-rpc-${version}-${arch}.${ext}",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false
+    },
+    "dmg": {
+      "title": "Claude RPC ${version}",
+      "contents": [
+        { "x": 130, "y": 220 },
+        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+      ],
+      "window": {
+        "width": 540,
+        "height": 380
+      }
+    },
     "win": {
-      "target": "portable",
-      "artifactName": "claude-rpc-dashboard.exe"
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ],
+      "artifactName": "claude-rpc-${version}-${arch}-${target}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Claude RPC"
     },
     "portable": {
-      "artifactName": "claude-rpc-dashboard.exe"
+      "artifactName": "claude-rpc-${version}-${arch}-portable.${ext}"
     }
   }
 }

@@ -594,6 +594,18 @@ function showPreview() {
   });
 }
 
+// Emit the autocomplete payload the dashboard needs as JSON, without the
+// dashboard having to inline-eval ESM source. Output shape matches the
+// previous helper exactly: { vars: [sorted keys], live: <full vars object> }.
+function dumpVars() {
+  let state = readState();
+  const config = readJson(CONFIG_PATH, {});
+  state.liveSessions = findLiveSessions({ thresholdMs: 90_000 });
+  state = applyIdle(state, config);
+  const live = buildVars(state, config, readAggregate() || {});
+  process.stdout.write(JSON.stringify({ vars: Object.keys(live).sort(), live }));
+}
+
 function doScan(force = false) {
   console.log(`${c.dim}Scanning ~/.claude/projects${c.reset}`, force ? '(force re-parse)' : '(incremental)…');
   const t0 = Date.now();
@@ -737,6 +749,7 @@ const packagedDefault = IS_PACKAGED && !cmd;
     case 'week':      showWeek(); break;
     case 'serve':     await import('./server.js'); break;
     case 'preview':   showPreview(); break;
+    case 'vars':      dumpVars(); break;
     case 'scan':      doScan(false); break;
     case 'rescan':    doScan(true); break;
     case 'insights':  showInsights(); break;

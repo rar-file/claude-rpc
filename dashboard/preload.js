@@ -12,4 +12,11 @@ contextBridge.exposeInMainWorld('api', {
   listVars:      () => ipcRenderer.invoke('list-vars'),
   startServe:    () => ipcRenderer.invoke('start-serve'),
   openExternal:  (url) => ipcRenderer.invoke('open-external', url),
+  checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
+  onUpdateEvent:   (handler) => {
+    const wrap = (channel) => (_, payload) => handler({ channel, ...payload });
+    ipcRenderer.on('update-available',  wrap('available'));
+    ipcRenderer.on('update-progress',   wrap('progress'));
+    ipcRenderer.on('update-downloaded', wrap('downloaded'));
+  },
 });

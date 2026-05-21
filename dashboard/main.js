@@ -4,10 +4,98 @@ const fs = require('node:fs');
 const { spawn, spawnSync } = require('node:child_process');
 const os = require('node:os');
 
+// Lazy-require electron-updater so dev mode (where the dep may not be
+// installed yet) doesn't crash on import. It's only meaningful in a
+// packaged app anyway.
+function loadAutoUpdater() {
+  try { return require('electron-updater').autoUpdater; }
+  catch { return null; }
+}
+
 let configPath = null;
-let repoRoot = null;
+let cliResolution = null;   // { kind: 'binary'|'node', path, args? }
 let mainWindow = null;
 let serveChild = null;
+
+// ── CLI resolver ─────────────────────────────────────────────────────────────
+// Three runtime modes the dashboard can land in:
+//
+//   1. Packaged Electron app   → bundled SEA binary at process.resourcesPath/bin/
+//   2. Dev with a pre-built exe → repo's dist/claude-rpc[.exe]
+//   3. Pure dev mode           → fall back to `node src/cli.js` against the
+//      repo source tree
+//
+// First match wins.
+function resolveCli() {
+  if (cliResolution) return cliResolution;
+  const isWin = process.platform === 'win32';
+  const binName = isWin ? 'claude-rpc.exe' : 'claude-rpc';
+
+  // (1) Packaged app — Electron exposes process.resourcesPath even outside
+  //     packaging, so checking the file existence is what actually matters.
+  const bundled = path.join(process.resourcesPath || '', 'bin', binName);
+  if (fs.existsSync(bundled)) {
+    cliResolution = { kind: 'binary', path: bundled };
+    return cliResolution;
+  }
+
+  // (2) Dev tree with `npm run build:exe` already produced a binary.
+  for (const root of devRepoCandidates()) {
+    const candidate = path.join(root, 'dist', binName);
+    if (fs.existsSync(candidate)) {
+      cliResolution = { kind: 'binary', path: candidate };
+      return cliResolution;
+    }
+  }
+
+  // (3) Pure dev — spawn node on the source cli.
+  for (const root of devRepoCandidates()) {
+    const cli = path.join(root, 'src', 'cli.js');
+    if (fs.existsSync(cli)) {
+      cliResolution = {
+        kind: 'node',
+        path: isWin ? 'node.exe' : 'node',
+        args: [cli],
+        cwd: root,
+      };
+      return cliResolution;
+    }
+  }
+
+  cliResolution = { kind: 'missing' };
+  return cliResolution;
+}
+
+function devRepoCandidates() {
+  // Walk up from __dirname (dashboard/) and process.cwd() looking for a
+  // src/cli.js sibling. Covers both `electron .` from dashboard/ and from
+  // the repo root.
+  const roots = new Set();
+  for (const start of [__dirname, process.cwd()]) {
+    let dir = start;
+    for (let i = 0; i < 4; i++) {
+      roots.add(dir);
+      const parent = path.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  }
+  return Array.from(roots);
+}
+
+// Per-OS default config path — matches src/paths.js logic so the dashboard
+// edits the same file the CLI reads in packaged mode.
+function defaultUserConfigPath() {
+  if (process.platform === 'win32') {
+    const appdata = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
+    return path.join(appdata, 'claude-rpc', 'config.json');
+  }
+  if (process.platform === 'darwin') {
+    return path.join(os.homedir(), 'Library', 'Application Support', 'claude-rpc', 'config.json');
+  }
+  const xdg = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+  return path.join(xdg, 'claude-rpc', 'config.json');
+}
 
 function findConfigPath() {
   const exeDir = path.dirname(process.execPath);
@@ -17,6 +105,7 @@ function findConfigPath() {
     path.join(exeDir, '..', 'config.json'),
     path.resolve(__dirname, '..', 'config.json'),
     path.resolve(__dirname, '..', '..', 'config.json'),
+    defaultUserConfigPath(),
   ];
   for (const c of candidates) {
     try { if (fs.existsSync(c) && fs.statSync(c).isFile()) return c; } catch {}
@@ -24,14 +113,25 @@ function findConfigPath() {
   return null;
 }
 
-function findRepoRoot(cfgPath) {
-  if (!cfgPath) return null;
-  let dir = path.dirname(cfgPath);
-  for (let i = 0; i < 4; i++) {
-    if (fs.existsSync(path.join(dir, 'src', 'cli.js'))) return dir;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
+// First-launch seeding: if no config exists anywhere, copy the bundled
+// config.example.json (shipped alongside the CLI binary or in the repo) to
+// the per-OS user config dir.
+function seedUserConfigIfMissing() {
+  const target = defaultUserConfigPath();
+  if (fs.existsSync(target)) return target;
+
+  const sources = [];
+  if (process.resourcesPath) sources.push(path.join(process.resourcesPath, 'config.example.json'));
+  for (const root of devRepoCandidates()) sources.push(path.join(root, 'config.example.json'));
+
+  for (const src of sources) {
+    if (fs.existsSync(src)) {
+      try {
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.copyFileSync(src, target);
+        return target;
+      } catch {}
+    }
   }
   return null;
 }
@@ -71,16 +171,90 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  configPath = findConfigPath();
-  repoRoot = findRepoRoot(configPath);
+  configPath = findConfigPath() || seedUserConfigIfMissing();
   createWindow();
+  initAutoUpdater();
 });
+
+// ── Auto-update ──────────────────────────────────────────────────────────────
+// Strategy: check once on startup (after a short delay so the window is up),
+// then every hour. electron-updater downloads in the background and installs
+// on next quit. Skipped in dev (not packaged) and in portable mode (where
+// there's no installer to re-run — electron-updater handles this internally
+// but we guard explicitly to avoid noisy logs).
+const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;  // 1 hour
+let updateCheckTimer = null;
+let updateDownloaded = false;
+
+function initAutoUpdater() {
+  if (!app.isPackaged) {
+    console.log('[updater] skipped — not packaged');
+    return;
+  }
+  // PORTABLE_EXECUTABLE_DIR is set by electron-builder's portable wrapper.
+  // Auto-update can't replace a portable .exe in place; let it no-op.
+  if (process.env.PORTABLE_EXECUTABLE_DIR) {
+    console.log('[updater] skipped — portable build');
+    return;
+  }
+  const autoUpdater = loadAutoUpdater();
+  if (!autoUpdater) {
+    console.log('[updater] electron-updater not available');
+    return;
+  }
+
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.logger = { info: console.log, warn: console.warn, error: console.error, debug: () => {} };
+
+  autoUpdater.on('checking-for-update', () => console.log('[updater] checking'));
+  autoUpdater.on('update-available', (info) => {
+    console.log('[updater] update available:', info.version);
+    sendToRenderer('update-available', { version: info.version });
+  });
+  autoUpdater.on('update-not-available', () => console.log('[updater] up to date'));
+  autoUpdater.on('error', (e) => console.error('[updater] error:', e?.message || e));
+  autoUpdater.on('download-progress', (p) => {
+    sendToRenderer('update-progress', { percent: Math.round(p.percent || 0) });
+  });
+  autoUpdater.on('update-downloaded', async (info) => {
+    if (updateDownloaded) return;  // guard against duplicate fires
+    updateDownloaded = true;
+    console.log('[updater] downloaded:', info.version);
+    sendToRenderer('update-downloaded', { version: info.version });
+    const choice = await dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      buttons: ['Restart now', 'Later'],
+      defaultId: 0,
+      cancelId: 1,
+      title: 'Update ready',
+      message: `Claude RPC ${info.version} is ready to install.`,
+      detail: 'The app will restart and apply the update.',
+    });
+    if (choice.response === 0) {
+      autoUpdater.quitAndInstall();
+    }
+    // Otherwise installs automatically on next app quit.
+  });
+
+  // Initial check shortly after launch so we don't fight window paint.
+  setTimeout(() => autoUpdater.checkForUpdates().catch(() => {}), 10_000);
+  updateCheckTimer = setInterval(
+    () => autoUpdater.checkForUpdates().catch(() => {}),
+    UPDATE_CHECK_INTERVAL_MS,
+  );
+}
+
+function sendToRenderer(channel, payload) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(channel, payload);
+  }
+}
 
 // ── Config ───────────────────────────────────────────────────────────────────
 ipcMain.handle('load-config', async () => {
   if (!configPath) configPath = await pickConfigPath();
   if (!configPath) return { error: 'No config path selected' };
-  repoRoot = findRepoRoot(configPath);
   try {
     const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     return { configPath, config };
@@ -91,7 +265,7 @@ ipcMain.handle('load-config', async () => {
 
 ipcMain.handle('pick-config', async () => {
   const picked = await pickConfigPath();
-  if (picked) { configPath = picked; repoRoot = findRepoRoot(picked); }
+  if (picked) { configPath = picked; }
   return { configPath };
 });
 
@@ -120,14 +294,21 @@ ipcMain.handle('daemon-status', async () => {
   } catch { return { running: false }; }
 });
 
+// Spawn the resolved CLI with the given subcommand args. Returns combined
+// stdout/stderr for short-lived commands; for detached spawns just acks.
 function runCli(args, opts = {}) {
-  if (!repoRoot) return Promise.resolve({ ok: false, output: 'Repo root not found' });
-  const cli = path.join(repoRoot, 'src', 'cli.js');
-  if (!fs.existsSync(cli)) return Promise.resolve({ ok: false, output: `cli.js not found at ${cli}` });
+  const cli = resolveCli();
+  if (cli.kind === 'missing') {
+    return Promise.resolve({ ok: false, output: 'CLI binary not found (run `npm run build:exe` for dev, or reinstall the app).' });
+  }
+
+  const cmd = cli.path;
+  const fullArgs = (cli.args || []).concat(args);
+
   return new Promise((resolve) => {
-    const child = spawn(process.platform === 'win32' ? 'node.exe' : 'node', [cli, ...args], {
+    const child = spawn(cmd, fullArgs, {
       stdio: ['ignore', 'pipe', 'pipe'],
-      cwd: repoRoot,
+      cwd: cli.cwd || process.cwd(),
       windowsHide: true,
       detached: opts.detached || false,
     });
@@ -144,7 +325,7 @@ function runCli(args, opts = {}) {
   });
 }
 
-ipcMain.handle('daemon-start',   async () => runCli(['start'], { detached: false }));
+ipcMain.handle('daemon-start',   async () => runCli(['start']));
 ipcMain.handle('daemon-stop',    async () => runCli(['stop']));
 ipcMain.handle('daemon-restart', async () => runCli(['restart']));
 
@@ -154,7 +335,6 @@ ipcMain.handle('tail-log', async () => {
   try {
     if (!fs.existsSync(p)) return { path: p, content: '' };
     const raw = fs.readFileSync(p, 'utf8');
-    // Tail the last ~80 lines.
     const lines = raw.split('\n');
     const tail = lines.slice(-80).join('\n');
     return { path: p, content: tail };
@@ -164,30 +344,18 @@ ipcMain.handle('tail-log', async () => {
 });
 
 // ── Variables (for autocomplete) ─────────────────────────────────────────────
-// Spawn a tiny one-shot via node that imports format.js, builds vars from
-// real state + aggregate, and prints JSON. Falls back to a static key list
-// when the helper isn't available.
+// Calls `claude-rpc vars`, which emits the same JSON shape the previous
+// inline-ESM helper produced — works identically in dev and packaged modes.
 ipcMain.handle('list-vars', async () => {
-  if (!repoRoot) return { vars: [], live: null };
+  const cli = resolveCli();
+  if (cli.kind === 'missing') return { vars: [], live: null };
   try {
-    const helper = `
-      import { readState } from './src/state.js';
-      import { readAggregate, findLiveSessions } from './src/scanner.js';
-      import { buildVars, applyIdle } from './src/format.js';
-      const { readFileSync, existsSync } = await import('node:fs');
-      const { CONFIG_PATH } = await import('./src/paths.js');
-      let state = readState();
-      state.liveSessions = findLiveSessions({ thresholdMs: 90_000 });
-      let cfg = {};
-      try { cfg = JSON.parse(readFileSync(CONFIG_PATH, 'utf8')); } catch {}
-      state = applyIdle(state, cfg);
-      const agg = readAggregate() || {};
-      const v = buildVars(state, cfg, agg);
-      process.stdout.write(JSON.stringify({ vars: Object.keys(v).sort(), live: v }));
-    `;
-    const result = spawnSync(process.platform === 'win32' ? 'node.exe' : 'node',
-      ['--input-type=module', '-e', helper],
-      { cwd: repoRoot, encoding: 'utf8', timeout: 4000 });
+    const result = spawnSync(cli.path, (cli.args || []).concat(['vars']), {
+      cwd: cli.cwd || process.cwd(),
+      encoding: 'utf8',
+      timeout: 4000,
+      windowsHide: true,
+    });
     if (result.status !== 0) return { vars: [], live: null };
     return JSON.parse(result.stdout.trim());
   } catch {
@@ -197,11 +365,11 @@ ipcMain.handle('list-vars', async () => {
 
 // ── Local server ─────────────────────────────────────────────────────────────
 ipcMain.handle('start-serve', async () => {
-  if (!repoRoot) return { ok: false };
   if (serveChild) return { ok: true };
-  const cli = path.join(repoRoot, 'src', 'cli.js');
-  serveChild = spawn(process.platform === 'win32' ? 'node.exe' : 'node', [cli, 'serve'], {
-    cwd: repoRoot,
+  const cli = resolveCli();
+  if (cli.kind === 'missing') return { ok: false };
+  serveChild = spawn(cli.path, (cli.args || []).concat(['serve']), {
+    cwd: cli.cwd || process.cwd(),
     stdio: 'ignore',
     detached: true,
     windowsHide: true,
@@ -217,7 +385,20 @@ ipcMain.handle('open-external', async (_, url) => {
   return { ok: true };
 });
 
+ipcMain.handle('check-for-updates', async () => {
+  if (!app.isPackaged) return { ok: false, output: 'dev mode — auto-update disabled' };
+  const autoUpdater = loadAutoUpdater();
+  if (!autoUpdater) return { ok: false, output: 'electron-updater unavailable' };
+  try {
+    const result = await autoUpdater.checkForUpdates();
+    return { ok: true, version: result?.updateInfo?.version || null };
+  } catch (e) {
+    return { ok: false, output: e?.message || String(e) };
+  }
+});
+
 app.on('window-all-closed', () => {
   try { if (serveChild) process.kill(-serveChild.pid); } catch {}
+  if (updateCheckTimer) clearInterval(updateCheckTimer);
   app.quit();
 });

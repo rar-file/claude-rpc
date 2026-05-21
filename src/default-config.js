@@ -10,7 +10,16 @@ export const DEFAULT_CONFIG = {
   rotationIntervalMs: 12000,
   rescanIntervalSec: 300,
   idleThresholdSec: 60,
-  staleSessionMin: 720,
+  // Time (minutes) of no hook activity AND no live transcripts on disk before
+  // the daemon treats Claude Code as "not running". Kept short on purpose:
+  // when Claude isn't open, the Discord presence should disappear quickly,
+  // not linger as "idle" all day. Bump this if you want a longer grace
+  // period (the previous default was 720 = 12h).
+  staleSessionMin: 5,
+  // When true, the daemon CLEARS Discord activity entirely once the state
+  // goes stale — your profile shows nothing instead of an "Away" frame.
+  // Set false to keep showing the stale frame (old behavior).
+  hideWhenStale: true,
   notificationWindowSec: 8,
   showElapsed: true,
   activityType: 0,

@@ -1,6 +1,6 @@
 {
   "name": "claude-rpc",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Discord Rich Presence for Claude Code — live model, project, tokens, and lifetime stats driven by Claude Code's hook system.",
   "type": "module",
   "license": "MIT",
@@ -19,8 +19,10 @@
     "insights": "node ./src/cli.js insights",
     "badge": "node ./src/cli.js badge",
     "dashboard": "npm --prefix dashboard start",
-    "dashboard:build": "npm --prefix dashboard run build",
-    "build:exe": "node ./scripts/build-exe.js"
+    "build:exe": "node ./scripts/build-exe.js",
+    "prep:dashboard": "node ./scripts/prep-dashboard.js",
+    "dist:mac": "npm run build:exe && npm run prep:dashboard && npm --prefix dashboard run dist:mac",
+    "dist:win": "npm run build:exe && npm run prep:dashboard && npm --prefix dashboard run dist:win"
   },
   "dependencies": {
     "@xhayper/discord-rpc": "^1.2.1"

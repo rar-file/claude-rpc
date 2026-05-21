@@ -504,7 +504,7 @@ export function applyIdle(state, cfg = {}) {
   const now = Date.now();
   const ageMs = now - last;
   const idleMs = (cfg.idleThresholdSec || 60) * 1000;
-  const staleMs = Math.max(60_000, (cfg.staleSessionMin || 12 * 60) * 60 * 1000);
+  const staleMs = Math.max(60_000, (cfg.staleSessionMin || 5) * 60 * 1000);
   const notificationMs = (cfg.notificationWindowSec || 8) * 1000;
 
   // Notification is a brief status — hold it for ~8s after the hook fires,

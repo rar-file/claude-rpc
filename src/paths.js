@@ -11,10 +11,23 @@ export const IS_PACKAGED = typeof process.pkg !== 'undefined'
 
 export const ROOT = resolve(__dirname, '..');
 
-// In packaged mode, persist user config in %APPDATA%\claude-rpc\.
+// In packaged mode, persist user config in the per-OS app-data directory.
 // In dev mode, keep config.json next to the source tree for easy iteration.
-const APPDATA = process.env.APPDATA || join(homedir(), 'AppData', 'Roaming');
-export const USER_CONFIG_DIR = join(APPDATA, 'claude-rpc');
+//   Windows: %APPDATA%\claude-rpc\
+//   macOS:   ~/Library/Application Support/claude-rpc/
+//   Linux:   $XDG_CONFIG_HOME/claude-rpc/  (default ~/.config/claude-rpc/)
+function userConfigDir() {
+  if (process.platform === 'win32') {
+    const appdata = process.env.APPDATA || join(homedir(), 'AppData', 'Roaming');
+    return join(appdata, 'claude-rpc');
+  }
+  if (process.platform === 'darwin') {
+    return join(homedir(), 'Library', 'Application Support', 'claude-rpc');
+  }
+  const xdg = process.env.XDG_CONFIG_HOME || join(homedir(), '.config');
+  return join(xdg, 'claude-rpc');
+}
+export const USER_CONFIG_DIR = userConfigDir();
 export const CONFIG_PATH = IS_PACKAGED
   ? join(USER_CONFIG_DIR, 'config.json')
   : join(ROOT, 'config.json');
