@@ -1,5 +1,34 @@
 import { basename } from 'node:path';
 import { dayKey, weekKey, DATE_SUFFIX_RE, cleanProjectName } from './scanner.js';
+import { fmtCost } from './pricing.js';
+
+const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+function fmtLinesNet(n) {
+  if (!n) return '0';
+  const sign = n > 0 ? '+' : '−';
+  return `${sign}${fmtNum(Math.abs(n))}`;
+}
+
+function topEntry(map) {
+  if (!map) return null;
+  let best = null;
+  for (const [k, v] of Object.entries(map)) {
+    if (!best || v > best.v) best = { k, v };
+  }
+  return best;
+}
+
+function topN(map, n = 3) {
+  if (!map) return [];
+  return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, n);
+}
+
+function fmtHourLocal(ms) {
+  if (!ms) return '';
+  const d = new Date(ms);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
 
 function fmtNum(n) {
   if (!n) return '0';
@@ -182,6 +211,48 @@ export function buildVars(state, config, aggregate) {
   const projectKey = cleanProjectName(cwdLeaf);
   const projectStats = projectKey ? (agg.projects?.[projectKey] || null) : null;
 
+  // Phase 1 enrichments — code churn, languages, bash, web, subagents, cost.
+  const todayLinesAdded = today.linesAdded || 0;
+  const todayLinesRemoved = today.linesRemoved || 0;
+  const todayLinesNet = todayLinesAdded - todayLinesRemoved;
+  const weekLinesAdded = thisWeek.linesAdded || 0;
+  const weekLinesRemoved = thisWeek.linesRemoved || 0;
+  const weekLinesNet = weekLinesAdded - weekLinesRemoved;
+  const allLinesAdded = agg.linesAdded || 0;
+  const allLinesRemoved = agg.linesRemoved || 0;
+  const allLinesNet = (agg.linesNet ?? (allLinesAdded - allLinesRemoved));
+
+  // Top language overall (by edits).
+  const langSorted = Object.entries(agg.languages || {})
+    .sort((x, y) => (y[1].edits || 0) - (x[1].edits || 0));
+  const topLang = langSorted[0] || null;
+  const languagesLabel = langSorted.slice(0, 3).map(([n]) => n).join(' · ');
+
+  const topBash = topEntry(agg.bashCommands);
+  const topDomain = topEntry(agg.webDomains);
+  const topSubagent = topEntry(agg.subagents);
+
+  // MCP vs built-in.
+  const mcpCalls = agg.mcpToolCalls || 0;
+  const builtinCalls = agg.builtinToolCalls || 0;
+  const totalToolCalls = mcpCalls + builtinCalls;
+  const mcpPct = totalToolCalls > 0 ? Math.round((mcpCalls / totalToolCalls) * 100) : 0;
+
+  // Cost.
+  const todayCost = today.cost || 0;
+  const weekCost = thisWeek.cost || 0;
+  const allCost = agg.estimatedCost || 0;
+  // Per-project cost for the current cwd's project.
+  const projectCost = projectStats?.cost || 0;
+
+  // Weekday name from today's date.
+  const weekdayLabel = WEEKDAY_NAMES[new Date().getDay()];
+
+  // Earliest activity timestamp today → "started 09:14".
+  const todayStartLabel = today.firstTs ? `started ${fmtHourLocal(today.firstTs)}` : '';
+
+  const notificationCount = agg.notifications || 0;
+
   // Streak milestones: every multiple of 7, plus 30/60/100/365.
   const streak = agg.streak || 0;
   const streakIsMilestone = streak > 0
@@ -341,6 +412,77 @@ export function buildVars(state, config, aggregate) {
 
     // Streak milestone gate (for special rotation frame)
     streakIsMilestone,
+
+    // ── Code churn ───────────────────────────────────────────────
+    linesAdded: allLinesAdded,
+    linesAddedFmt: fmtNum(allLinesAdded),
+    linesRemoved: allLinesRemoved,
+    linesRemovedFmt: fmtNum(allLinesRemoved),
+    linesNet: allLinesNet,
+    linesNetFmt: fmtLinesNet(allLinesNet),
+    todayLinesAdded,
+    todayLinesAddedFmt: fmtNum(todayLinesAdded),
+    todayLinesRemoved,
+    todayLinesRemovedFmt: fmtNum(todayLinesRemoved),
+    todayLinesNet,
+    todayLinesNetFmt: fmtLinesNet(todayLinesNet),
+    weekLinesAdded,
+    weekLinesAddedFmt: fmtNum(weekLinesAdded),
+    weekLinesNet,
+    weekLinesNetFmt: fmtLinesNet(weekLinesNet),
+    allLinesAdded,
+    allLinesAddedFmt: fmtNum(allLinesAdded),
+    allLinesNet,
+    allLinesNetFmt: fmtLinesNet(allLinesNet),
+
+    // ── Languages ────────────────────────────────────────────────
+    topLanguage: topLang ? topLang[0] : '',
+    topLanguageEdits: topLang ? (topLang[1].edits || 0) : 0,
+    topLanguageEditsFmt: topLang ? fmtNum(topLang[1].edits || 0) : '0',
+    languagesLabel,
+
+    // ── Bash commands ────────────────────────────────────────────
+    topBashCmd: topBash ? topBash.k : '',
+    topBashCmdCount: topBash ? topBash.v : 0,
+    topBashCmdLabel: topBash ? `${topBash.k} × ${fmtNum(topBash.v)}` : '',
+
+    // ── WebFetch domains ────────────────────────────────────────
+    topDomain: topDomain ? topDomain.k : '',
+    topDomainCount: topDomain ? topDomain.v : 0,
+    topDomainLabel: topDomain ? `${topDomain.k} × ${fmtNum(topDomain.v)}` : '',
+
+    // ── Subagents ───────────────────────────────────────────────
+    topSubagent: topSubagent ? topSubagent.k : '',
+    topSubagentCount: topSubagent ? topSubagent.v : 0,
+    subagentLabel: topSubagent ? `${topSubagent.k} × ${fmtNum(topSubagent.v)}` : '',
+
+    // ── Tool surface split ──────────────────────────────────────
+    mcpToolCalls: mcpCalls,
+    mcpToolCallsFmt: fmtNum(mcpCalls),
+    builtinToolCalls: builtinCalls,
+    builtinToolCallsFmt: fmtNum(builtinCalls),
+    mcpToolPercent: mcpPct,
+    mcpToolPercentLabel: totalToolCalls ? `${mcpPct}% MCP` : '',
+
+    // ── Cost ────────────────────────────────────────────────────
+    todayCost,
+    todayCostFmt: fmtCost(todayCost),
+    weekCost,
+    weekCostFmt: fmtCost(weekCost),
+    allCost,
+    allCostFmt: fmtCost(allCost),
+    costEstimate: allCost,
+    costEstimateFmt: fmtCost(allCost),
+    projectCost,
+    projectCostFmt: fmtCost(projectCost),
+
+    // ── Time-of-day / weekday ───────────────────────────────────
+    weekdayLabel,
+    startTimeLabel: todayStartLabel,
+
+    // ── Notifications ───────────────────────────────────────────
+    notificationCount,
+    notificationLabel: notificationCount ? plural(notificationCount, 'notification') : '',
   };
 }
 

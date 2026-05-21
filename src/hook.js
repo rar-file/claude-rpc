@@ -1,6 +1,23 @@
 #!/usr/bin/env node
-import { readFileSync } from 'node:fs';
+import { readFileSync, appendFileSync, existsSync, mkdirSync, statSync, renameSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { updateState, resetState, pushUnique, shortFile } from './state.js';
+import { EVENTS_LOG_PATH } from './paths.js';
+
+const EVENTS_LOG_ROTATE_BYTES = 5 * 1024 * 1024;
+
+function appendEvent(entry) {
+  try {
+    mkdirSync(dirname(EVENTS_LOG_PATH), { recursive: true });
+    if (existsSync(EVENTS_LOG_PATH)) {
+      const st = statSync(EVENTS_LOG_PATH);
+      if (st.size > EVENTS_LOG_ROTATE_BYTES) {
+        renameSync(EVENTS_LOG_PATH, EVENTS_LOG_PATH + '.1');
+      }
+    }
+    appendFileSync(EVENTS_LOG_PATH, JSON.stringify(entry) + '\n');
+  } catch {}
+}
 
 function readStdin() {
   try {
@@ -104,6 +121,7 @@ export function processHookEvent(event, input = {}) {
         if (!s.sessionStart) s.sessionStart = now;
         return s;
       });
+      appendEvent({ type: 'notification', ts: now, cwd: input.cwd || null });
       break;
     }
     case 'Stop':

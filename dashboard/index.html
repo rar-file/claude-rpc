@@ -2,32 +2,156 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https:; script-src 'self'" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https:; script-src 'self'; frame-src http://127.0.0.1:*" />
 <title>Claude RPC</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+
+<!-- ── Top bar ──────────────────────────────────── -->
 <header>
-  <h1>Claude RPC</h1>
-  <span id="daemonBadge" class="daemon-badge">checking</span>
+  <div class="header-left">
+    <h1>Claude RPC</h1>
+    <span class="header-sub" id="configPath">—</span>
+  </div>
+  <div class="header-right">
+    <span id="daemonBadge" class="daemon-badge">checking</span>
+  </div>
 </header>
 
-<main>
-  <div id="frames"></div>
-  <button class="add" id="addFrameBtn">+ Add a card</button>
-
-  <div class="divider"></div>
-
-  <div class="timing">
-    <div class="row" data-key="updateIntervalMs"      data-mul="1000"><span class="label">Updates</span>      <input type="number" min="1" step="1" /><span class="unit">sec</span></div>
-    <div class="row" data-key="rotationIntervalMs"    data-mul="1000"><span class="label">Rotation</span>     <input type="number" min="5" step="1" /><span class="unit">sec</span></div>
-    <div class="row" data-key="idleThresholdSec"      data-mul="1"   ><span class="label">Idle after</span>   <input type="number" min="10" step="5" /><span class="unit">sec</span></div>
-    <div class="row" data-key="staleSessionMin"       data-mul="60"  ><span class="label">Stale after</span>  <input type="number" min="1" step="1" /><span class="unit">hr</span></div>
-    <div class="row" data-key="notificationWindowSec" data-mul="1"   ><span class="label">Notification</span> <input type="number" min="2" step="1" /><span class="unit">sec</span></div>
+<!-- ── Live preview rail ───────────────────────── -->
+<section class="live-rail" id="liveRail">
+  <div class="avatar" id="liveAvatar"></div>
+  <div class="content">
+    <div class="appname">Claude Code</div>
+    <div class="details-render" id="liveDetails">—</div>
+    <div class="state-render" id="liveState">—</div>
   </div>
+  <div class="right">
+    <div class="frame-num" id="liveFrameNum">—</div>
+    <div class="status-pill"><span class="dot" id="liveDot"></span><span id="liveStatus">—</span></div>
+  </div>
+</section>
+
+<!-- ── Tabs ───────────────────────────────────── -->
+<nav class="tabs" id="tabs">
+  <button class="tab active" data-tab="presence">Presence</button>
+  <button class="tab" data-tab="discord">Discord</button>
+  <button class="tab" data-tab="assets">Assets</button>
+  <button class="tab" data-tab="timing">Timing</button>
+  <button class="tab" data-tab="daemon">Daemon</button>
+  <button class="tab" data-tab="stats">Stats</button>
+</nav>
+
+<!-- ── Tab panels ─────────────────────────────── -->
+<main>
+
+  <section class="panel" data-panel="presence">
+    <div id="frames"></div>
+    <div class="frame-actions">
+      <button class="add" id="addFrameBtn">+ Add a frame</button>
+      <div class="presets">
+        <span class="presets-label">presets:</span>
+        <button class="preset" data-preset="tokens">Tokens</button>
+        <button class="preset" data-preset="streak">Streak</button>
+        <button class="preset" data-preset="cost">Cost</button>
+        <button class="preset" data-preset="lines">Lines</button>
+        <button class="preset" data-preset="hotspot">Hotspot</button>
+      </div>
+    </div>
+    <datalist id="varlist"></datalist>
+  </section>
+
+  <section class="panel" data-panel="discord" hidden>
+    <div class="form-grid">
+      <label class="form-row">
+        <span class="form-label">Discord client ID
+          <a href="https://discord.com/developers/applications" target="_blank" class="hint">↗ Developer Portal</a>
+        </span>
+        <input type="text" id="clientId" placeholder="1234567890123456789" />
+      </label>
+      <label class="form-row">
+        <span class="form-label">App name <span class="hint">shown as "Playing &lt;name&gt;"</span></span>
+        <input type="text" id="appName" placeholder="Claude Code" />
+      </label>
+      <label class="form-row">
+        <span class="form-label">Activity type</span>
+        <select id="activityType">
+          <option value="0">Playing</option>
+          <option value="2">Listening</option>
+          <option value="3">Watching</option>
+          <option value="5">Competing</option>
+        </select>
+      </label>
+      <div class="form-row">
+        <span class="form-label">Buttons <span class="hint">up to 2 — Discord limit</span></span>
+        <div id="buttons"></div>
+        <button class="add-row" id="addButtonBtn">+ Add button</button>
+      </div>
+      <label class="form-row inline">
+        <span class="form-label">Show elapsed timer</span>
+        <input type="checkbox" id="showElapsed" />
+      </label>
+    </div>
+  </section>
+
+  <section class="panel" data-panel="assets" hidden>
+    <div class="form-grid">
+      <p class="hint-block">Each status can have its own image. Drop a Discord asset key (e.g. <code>working</code>) or a direct URL.</p>
+      <div id="assetRows"></div>
+      <div class="form-row">
+        <span class="form-label">Status icon mappings <span class="hint">small badge corner image</span></span>
+        <div id="iconRows"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel" data-panel="timing" hidden>
+    <div class="timing">
+      <div class="row" data-key="updateIntervalMs"        data-mul="1000"><span class="label">Updates</span>        <input type="number" min="1" step="1" /><span class="unit">sec</span></div>
+      <div class="row" data-key="rotationIntervalMs"      data-mul="1000"><span class="label">Rotation</span>       <input type="number" min="5" step="1" /><span class="unit">sec</span></div>
+      <div class="row" data-key="idleThresholdSec"        data-mul="1"   ><span class="label">Idle after</span>     <input type="number" min="10" step="5" /><span class="unit">sec</span></div>
+      <div class="row" data-key="staleSessionMin"         data-mul="60"  ><span class="label">Stale after</span>    <input type="number" min="1" step="1" /><span class="unit">hr</span></div>
+      <div class="row" data-key="notificationWindowSec"   data-mul="1"   ><span class="label">Notification hold</span><input type="number" min="2" step="1" /><span class="unit">sec</span></div>
+      <div class="row" data-key="rescanIntervalSec"       data-mul="1"   ><span class="label">Transcript rescan</span><input type="number" min="60" step="30" /><span class="unit">sec</span></div>
+      <div class="row" data-key="liveSessionThresholdSec" data-mul="1"   ><span class="label">Live session window</span><input type="number" min="30" step="10" /><span class="unit">sec</span></div>
+    </div>
+  </section>
+
+  <section class="panel" data-panel="daemon" hidden>
+    <div class="daemon-control">
+      <div class="status-card">
+        <span class="big-dot" id="daemonBigDot"></span>
+        <div>
+          <div class="big-status" id="daemonBigStatus">checking…</div>
+          <div class="big-meta" id="daemonBigMeta">—</div>
+        </div>
+      </div>
+      <div class="daemon-buttons">
+        <button id="daemonStartBtn" class="primary">Start</button>
+        <button id="daemonStopBtn">Stop</button>
+        <button id="daemonRestartBtn">Restart</button>
+      </div>
+      <div class="log-viewer">
+        <div class="log-header">daemon.log <span id="logPath" class="hint">—</span></div>
+        <pre id="logBody">loading…</pre>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel" data-panel="stats" hidden>
+    <div class="stats-frame">
+      <div class="stats-frame-header">
+        <span id="statsUrl">starting local server…</span>
+        <button id="statsOpenExternal">↗ Open in browser</button>
+      </div>
+      <iframe id="statsIframe" src="about:blank" allow=""></iframe>
+    </div>
+  </section>
+
 </main>
 
 <footer>
@@ -35,6 +159,6 @@
   <button class="primary" id="saveBtn">Save</button>
 </footer>
 
-<script src="renderer.js"></script>
+<script src="renderer.js" type="module"></script>
 </body>
 </html>

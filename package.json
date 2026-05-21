@@ -16,6 +16,8 @@
     "hook": "node ./src/hook.js",
     "serve": "node ./src/cli.js serve",
     "scan": "node ./src/cli.js scan",
+    "insights": "node ./src/cli.js insights",
+    "badge": "node ./src/cli.js badge",
     "dashboard": "npm --prefix dashboard start",
     "dashboard:build": "npm --prefix dashboard run build",
     "build:exe": "node ./scripts/build-exe.js"

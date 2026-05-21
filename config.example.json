@@ -33,8 +33,14 @@
       { "details": "{daysSinceFirstLabel} on Claude",       "state": "{streakLabel} · {allSessionsLabel}",          "requires": ["daysSinceFirst"] },
       { "details": "Most active at {peakHour}",             "state": "{peakHourActiveLabel}",                       "requires": ["peakHourHours"] },
       { "details": "Hotspot · {topEditedFile}",             "state": "{topEditedCountLabel} all-time",              "requires": ["topEditedCount"] },
+      { "details": "Wrote {todayLinesAddedFmt} lines today", "state": "{todayLinesNetFmt} net · {topLanguage}",      "requires": ["todayLinesAdded"] },
+      { "details": "Top language · {topLanguage}",          "state": "{languagesLabel}",                            "requires": ["topLanguage"] },
+      { "details": "Cost · {todayCostFmt} today",           "state": "{weekCostFmt} this week · {allCostFmt} all-time", "requires": ["todayCost"] },
+      { "details": "{topBashCmdLabel}",                     "state": "Top shell command",                           "requires": ["topBashCmd"] },
+      { "details": "{statusVerbose} in {project}",          "state": "{weekdayLabel} · {startTimeLabel}",           "requires": ["startTimeLabel"] },
       { "details": "{allHours} on Claude all-time",         "state": "{allSessionsLabel} · {allMessagesFmt} prompts", "requires": ["allSessions"] },
-      { "details": "Lifetime · {allTokensFmt} tokens",      "state": "{allToolsFmt} tool calls · {allFilesFmt} files", "requires": ["allTools"] }
+      { "details": "Lifetime · {allTokensFmt} tokens",      "state": "{allToolsFmt} tool calls · {allFilesFmt} files", "requires": ["allTools"] },
+      { "details": "Lifetime · {linesAddedFmt} lines",      "state": "{linesNetFmt} net · {allCostFmt}",            "requires": ["allLinesAdded"] }
     ],
     "buttons": [
       { "label": "Claude Code", "url": "https://claude.com/claude-code" }

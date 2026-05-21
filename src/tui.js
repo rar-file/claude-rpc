@@ -10,6 +10,8 @@ import { readState } from './state.js';
 import { readAggregate, findLiveSessions, dayKey, weekKey } from './scanner.js';
 import { buildVars, applyIdle, humanProject } from './format.js';
 import { CONFIG_PATH, PID_PATH } from './paths.js';
+import { fmtCost } from './pricing.js';
+import { generateInsights } from './insights.js';
 
 // ── ANSI ────────────────────────────────────────────────────────────────────
 const ESC = '\x1b[';
@@ -39,6 +41,8 @@ const TABS = [
   { key: 'week',     label: 'Week' },
   { key: 'streak',   label: 'Streak' },
   { key: 'lifetime', label: 'Lifetime' },
+  { key: 'cost',     label: 'Cost' },
+  { key: 'code',     label: 'Code' },
 ];
 let currentTab = 0;
 let refreshTimer = null;
@@ -113,7 +117,7 @@ function drawHeader(w) {
 }
 
 function drawFooter(w) {
-  const keys = `${C.dim}1-5 jump${C.reset}  ${C.gray}·${C.reset}  ${C.dim}←→ move${C.reset}  ${C.gray}·${C.reset}  ${C.dim}r refresh${C.reset}  ${C.gray}·${C.reset}  ${C.dim}q quit${C.reset}`;
+  const keys = `${C.dim}1-7 jump${C.reset}  ${C.gray}·${C.reset}  ${C.dim}←→ h l${C.reset}  ${C.gray}·${C.reset}  ${C.dim}r refresh${C.reset}  ${C.gray}·${C.reset}  ${C.dim}q quit${C.reset}`;
   return ['  ' + rule(w), '  ' + keys];
 }
 
@@ -270,7 +274,79 @@ function tabLifetime(_, data) {
   return out;
 }
 
-const TAB_RENDERERS = [tabNow, tabToday, tabWeek, tabStreak, tabLifetime];
+function tabCost(_, data) {
+  const v = data.vars;
+  const agg = data.aggregate;
+  const out = [];
+  out.push('');
+  out.push(`${C.bold}Estimated cost${C.reset}    ${C.green}${v.allCostFmt}${C.reset} ${C.dim}all-time · approximate${C.reset}`);
+  out.push('');
+  out.push(`${C.dim}today${C.reset}       ${C.cyan}${v.todayCostFmt.padStart(10)}${C.reset}`);
+  out.push(`${C.dim}this week${C.reset}   ${C.cyan}${v.weekCostFmt.padStart(10)}${C.reset}`);
+  out.push(`${C.dim}this project${C.reset} ${C.cyan}${v.projectCostFmt.padStart(10)}${C.reset}`);
+
+  const byModel = Object.entries(agg.costByModel || {}).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  if (byModel.length) {
+    out.push('');
+    out.push(`${C.dim}by model${C.reset}`);
+    const max = byModel[0][1];
+    for (const [m, val] of byModel) {
+      const pretty = String(m).padEnd(20);
+      out.push(`${pretty} ${C.magenta}${bar(val, max, 18)}${C.reset} ${C.cyan}${fmtCost(val).padStart(8)}${C.reset}`);
+    }
+  }
+
+  // Month-to-date forecast.
+  const now = new Date();
+  const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  let mtd = 0;
+  for (const [k, day] of Object.entries(agg.byDay || {})) {
+    if (k.startsWith(ym)) mtd += day.cost || 0;
+  }
+  if (mtd > 0) {
+    const daysIn = now.getDate();
+    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const forecast = (mtd / daysIn) * daysInMonth;
+    out.push('');
+    out.push(`${C.dim}month-to-date${C.reset} ${C.cyan}${fmtCost(mtd).padStart(8)}${C.reset}`);
+    out.push(`${C.dim}forecast${C.reset}      ${C.bold}${fmtCost(forecast).padStart(8)}${C.reset}`);
+  }
+  return out;
+}
+
+function tabCode(_, data) {
+  const v = data.vars;
+  const agg = data.aggregate;
+  const out = [];
+  out.push('');
+  out.push(`${C.bold}Code churn${C.reset}    ${C.green}+${v.linesAddedFmt}${C.reset} / ${C.red}−${v.linesRemovedFmt}${C.reset}  ${C.dim}net ${v.linesNetFmt}${C.reset}`);
+  out.push('');
+  out.push(`${C.dim}today${C.reset}    ${C.green}+${v.todayLinesAddedFmt}${C.reset}  ${C.dim}(${v.todayLinesNetFmt} net)${C.reset}`);
+  out.push(`${C.dim}this week${C.reset} ${C.green}+${v.weekLinesAddedFmt}${C.reset}  ${C.dim}(${v.weekLinesNetFmt} net)${C.reset}`);
+
+  const langs = Object.entries(agg.languages || {}).sort((a, b) => (b[1].edits || 0) - (a[1].edits || 0)).slice(0, 6);
+  if (langs.length) {
+    out.push('');
+    out.push(`${C.dim}languages · by edits${C.reset}`);
+    const max = langs[0][1].edits || 1;
+    for (const [name, l] of langs) {
+      const pretty = name.slice(0, 18).padEnd(20);
+      out.push(`${pretty} ${C.magenta}${bar(l.edits, max, 18)}${C.reset} ${C.cyan}${String(l.edits).padStart(6)}${C.reset}`);
+    }
+  }
+
+  const bash = Object.entries(agg.bashCommands || {}).sort((a, b) => b[1] - a[1]).slice(0, 4);
+  if (bash.length) {
+    out.push('');
+    out.push(`${C.dim}top bash${C.reset}`);
+    for (const [k, n] of bash) {
+      out.push(`${k.padEnd(20)} ${C.cyan}${String(n).padStart(6)}${C.reset}`);
+    }
+  }
+  return out;
+}
+
+const TAB_RENDERERS = [tabNow, tabToday, tabWeek, tabStreak, tabLifetime, tabCost, tabCode];
 
 // ── Render ──────────────────────────────────────────────────────────────────
 function render() {
@@ -309,11 +385,11 @@ function handleKey(buf) {
     currentTab = Number(key) - 1;
     return render();
   }
-  if (key === '\x1b[C' || key === '\x1b[B' || key === '\t') {
+  if (key === '\x1b[C' || key === '\x1b[B' || key === '\t' || key === 'l' || key === 'j') {
     currentTab = (currentTab + 1) % TABS.length;
     return render();
   }
-  if (key === '\x1b[D' || key === '\x1b[A') {
+  if (key === '\x1b[D' || key === '\x1b[A' || key === 'h' || key === 'k') {
     currentTab = (currentTab - 1 + TABS.length) % TABS.length;
     return render();
   }

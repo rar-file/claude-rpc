@@ -33,10 +33,13 @@ Driven entirely by Claude Code's hook system. Zero polling, zero overhead betwee
 | 🎞️ **Status art** | Large image swaps between *working*, *thinking*, *idle*, *stale*, *notification* |
 | 🔁 **Rotation frames** | Cycle through today's stats, streak, top file, lifetime totals, anything you template |
 | 🐙 **Auto GitHub button** | When your cwd is a git repo with a github origin, a *View on GitHub* button appears |
-| 📊 **All-time aggregates** | Incremental scanner over `~/.claude/projects/*.jsonl` for hours, prompts, tokens, streaks, hotspots |
-| 🖥️ **CLI dashboard** | `claude-rpc status` prints a 13-week heatmap, hour histogram, top tools / files / projects |
-| 🌐 **Web dashboard** | `claude-rpc serve` opens the same view in a local browser tab |
-| ⚙️ **Config GUI** | Electron app in `dashboard/` for visually editing rotation frames. Builds to a portable `.exe` |
+| 📊 **All-time aggregates** | Incremental scanner over `~/.claude/projects/*.jsonl` for hours, prompts, tokens, streaks, hotspots, **lines changed, languages, cost, bash usage, web domains, subagent runs** |
+| 💰 **Cost estimate** | Per-model spend (Opus/Sonnet/Haiku) using public list prices — editable in `src/pricing.js` |
+| 🧠 **Insights** | `claude-rpc insights` (and the web dashboard) generate 3–5 contextual lines: weekly trend, peak weekday, hotspot file, cost pace, streak progress |
+| 🖥️ **CLI dashboard** | `claude-rpc status` prints heatmap, hour histogram, top tools / files / projects / languages / bash commands / cost |
+| 🌐 **Web dashboard** | `claude-rpc serve` — range selector (7d / 30d / 90d / 1y / All), live SSE updates, project drilldown drawer, day-detail modal, achievements, theme toggle, keyboard shortcuts |
+| 🪪 **README badges** | `claude-rpc badge --metric hours --range 7d --out h.svg` (or live at `/api/badge.svg?metric=…`) |
+| ⚙️ **Config GUI** | Electron app in `dashboard/` — full settings cockpit across tabs: Presence (drag-reorder, variable autocomplete, presets), Discord (clientId, app name, buttons, activity type), Assets (image preview), Timing, Daemon (start/stop/restart, tail log), Stats (embedded web dashboard) |
 
 ## Install
 
@@ -85,6 +88,8 @@ If you `npm link` (or install the packaged exe), every command above becomes `cl
 | `preview`     | Show how each rotation frame renders right now           |
 | `scan`        | Incrementally rescan `~/.claude/projects` for aggregates |
 | `rescan`      | Force re-parse every transcript                          |
+| `insights`    | Print 3–5 auto-generated insight lines                   |
+| `badge`       | Render a Shields-style SVG (`--metric hours\|streak\|cost\|lines`, `--range 7d\|30d\|all`, `--out file.svg`) |
 | `tail`        | Tail the daemon log                                      |
 | `daemon`      | Run the daemon in the foreground (for debugging)         |
 
@@ -207,10 +212,42 @@ Both `details` and `state` (and button labels and URLs) support `{name}` substit
 | `{allTokensFmt}`        | `2.82B`            |
 | `{peakHour}`            | `22:00`            |
 | `{topEditedFile}`       | `index.html`       |
+| `{linesAddedFmt}`       | `24k`              |
+| `{todayLinesAddedFmt}`  | `320`              |
+| `{linesNetFmt}`         | `+18k`             |
+| `{topLanguage}`         | `TypeScript`       |
+| `{languagesLabel}`      | `TypeScript · Python · Rust` |
+| `{topBashCmdLabel}`     | `git × 820`        |
+| `{topDomainLabel}`      | `docs.anthropic.com × 28` |
+| `{subagentLabel}`       | `Explore × 18`     |
+| `{mcpToolPercentLabel}` | `12% MCP`          |
+| `{todayCostFmt}`        | `$1.23`            |
+| `{allCostFmt}`          | `$89.42`           |
+| `{weekdayLabel}`        | `Thursday`         |
+| `{startTimeLabel}`      | `started 09:14`    |
 
 Run `node ./src/cli.js preview` to see every frame rendered with your real data, including which ones would be hidden by their `requires`.
 
 </details>
+
+## Badges
+
+Generate a Shields-style SVG you can drop into a README:
+
+```sh
+claude-rpc badge --metric hours  --range 7d --out claude-hours.svg
+claude-rpc badge --metric streak              --out claude-streak.svg
+claude-rpc badge --metric cost   --range 30d  --out claude-cost.svg
+claude-rpc badge --metric lines  --range all  --out claude-lines.svg
+```
+
+While the daemon's `serve` command is running, the same data is also available live at:
+
+```
+http://127.0.0.1:47474/api/badge.svg?metric=hours&range=7d
+```
+
+Cost numbers come from `src/pricing.js`, seeded with **approximate** public list prices for Anthropic models. Edit that file to override — your actual Claude Code subscription bill is unrelated.
 
 ## Troubleshooting
 

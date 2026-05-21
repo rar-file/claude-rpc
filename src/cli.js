@@ -18,6 +18,9 @@ import { scan, readAggregate, findLiveSessions, dayKey, weekKey } from './scanne
 import { runHookCli } from './hook.js';
 import { install as runInstall, uninstall as runUninstall, isInstalled } from './install.js';
 import { startTui } from './tui.js';
+import { generateInsights } from './insights.js';
+import { badgeSvg } from './badge.js';
+import { fmtCost } from './pricing.js';
 import { basename } from 'node:path';
 
 const cmd = process.argv[2];
@@ -407,6 +410,58 @@ function showStatus() {
       box('top projects by active time', lines, 72);
       console.log('');
     }
+
+    // Code churn — lines added / removed.
+    if (aggregate.linesAdded || aggregate.linesRemoved) {
+      box('code churn', [
+        pair('added',     `${c.green}+${aggregate.linesAdded.toLocaleString()}${c.reset} lines`, ''),
+        pair('removed',   `${c.red}−${aggregate.linesRemoved.toLocaleString()}${c.reset} lines`, ''),
+        pair('net',       `${c.bold}${vars.linesNetFmt}${c.reset}`, ''),
+        pair('today',     `${c.green}+${aggregate.byDay?.[dayKey(Date.now())]?.linesAdded || 0}${c.reset} added`, ''),
+      ]);
+      console.log('');
+    }
+
+    // Top languages by edits.
+    const langs = Object.entries(aggregate.languages || {})
+      .sort((a, b) => (b[1].edits || 0) - (a[1].edits || 0))
+      .slice(0, 6);
+    if (langs.length) {
+      const max = langs[0][1].edits || 1;
+      const lines = langs.map(([name, l]) => `${name.slice(0, 22).padEnd(24)} ${bar(l.edits, max)} ${c.cyan}${l.edits.toLocaleString().padStart(6)}${c.reset}  ${c.dim}${l.files} files${c.reset}`);
+      box('languages · by edits', lines);
+      console.log('');
+    }
+
+    // Top bash commands.
+    const bashes = Object.entries(aggregate.bashCommands || {})
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8);
+    if (bashes.length) {
+      const max = bashes[0][1];
+      const lines = bashes.map(([name, n]) => `${name.padEnd(20)} ${bar(n, max)} ${c.cyan}${n.toLocaleString()}${c.reset}`);
+      box('top bash commands', lines);
+      console.log('');
+    }
+
+    // Cost.
+    if (aggregate.estimatedCost) {
+      const byModel = Object.entries(aggregate.costByModel || {}).sort((a, b) => b[1] - a[1]);
+      const max = byModel[0] ? byModel[0][1] : 1;
+      const lines = [
+        pair('all-time',  `${c.bold}${c.green}${fmtCost(aggregate.estimatedCost)}${c.reset}  ${c.dim}approximate${c.reset}`, ''),
+        ...byModel.map(([m, v]) => `${m.padEnd(20)} ${bar(v, max)} ${c.cyan}${fmtCost(v).padStart(8)}${c.reset}`),
+      ];
+      box('estimated cost', lines);
+      console.log('');
+    }
+
+    // Insights.
+    const insights = generateInsights(aggregate, { limit: 4 });
+    if (insights.length) {
+      box('insights', insights.map((s) => `${c.dim}→${c.reset} ${s}`));
+      console.log('');
+    }
   } else {
     console.log(`  ${c.dim}No aggregate yet — run ${c.reset}${c.cyan}claude-rpc scan${c.reset}`);
     console.log('');
@@ -557,6 +612,44 @@ function doScan(force = false) {
   console.log(`${c.dim}Aggregate written to ${AGGREGATE_PATH}${c.reset}`);
 }
 
+function showInsights() {
+  const aggregate = readAggregate();
+  const insights = generateInsights(aggregate, { limit: 6 });
+  console.log('');
+  console.log(`  ${c.bold}${c.magenta}◆ Insights${c.reset}`);
+  console.log('');
+  for (const line of insights) console.log(`  ${c.dim}→${c.reset} ${line}`);
+  console.log('');
+}
+
+function parseBadgeArgs(argv) {
+  const out = { metric: 'hours', range: '7d', out: '' };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--metric' || a === '-m') out.metric = argv[++i];
+    else if (a === '--range' || a === '-r') out.range = argv[++i];
+    else if (a === '--out' || a === '-o') out.out = argv[++i];
+    else if (a === '--label' || a === '-l') out.label = argv[++i];
+  }
+  return out;
+}
+
+function doBadge(argv) {
+  const opts = parseBadgeArgs(argv);
+  const aggregate = readAggregate();
+  if (!aggregate) {
+    console.error(`${c.yellow}No aggregate yet. Run ${c.cyan}claude-rpc scan${c.reset} first.`);
+    process.exit(1);
+  }
+  const svg = badgeSvg({ aggregate, metric: opts.metric, range: opts.range, label: opts.label });
+  if (opts.out) {
+    writeFileSync(opts.out, svg);
+    console.log(`${c.green}✓${c.reset} Wrote ${c.cyan}${opts.out}${c.reset} (${svg.length} bytes)`);
+  } else {
+    process.stdout.write(svg);
+  }
+}
+
 function tailLog() {
   if (!existsSync(LOG_PATH)) {
     console.log(`${c.yellow}No log yet at ${LOG_PATH}${c.reset}`);
@@ -596,6 +689,8 @@ function help() {
     ['preview',   'Show how each rotation frame renders right now'],
     ['scan',      'Incrementally scan ~/.claude/projects for all-time totals'],
     ['rescan',    'Force re-parse every transcript (ignores cache)'],
+    ['insights',  'Auto-generated insights from your history'],
+    ['badge',     'Render a Shields-style SVG (--metric --range --out)'],
     ['tail',      'Tail the daemon log file'],
     ['daemon',    'Run daemon in foreground (debug)'],
   ];
@@ -644,6 +739,8 @@ const packagedDefault = IS_PACKAGED && !cmd;
     case 'preview':   showPreview(); break;
     case 'scan':      doScan(false); break;
     case 'rescan':    doScan(true); break;
+    case 'insights':  showInsights(); break;
+    case 'badge':     doBadge(process.argv.slice(3)); break;
     case 'tail':
     case 'logs':
     case 'log':       tailLog(); break;
