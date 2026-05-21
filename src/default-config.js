@@ -5,6 +5,7 @@
 
 export const DEFAULT_CONFIG = {
   clientId: "1506443909406920948",
+  appName: "Claude Code",
   updateIntervalMs: 4000,
   rotationIntervalMs: 12000,
   rescanIntervalSec: 300,

@@ -96,6 +96,10 @@ function buildActivity(opts = {}) {
   const frame = maybeAdvanceRotation(safeFrames, intervalMs) || {};
 
   const activity = {};
+  // Forcing `name` overrides whatever Discord has cached for the app's
+  // display name, so every user sees the same "Playing <appName>" header
+  // regardless of their client's stale application cache.
+  activity.name = config.appName || 'Claude Code';
   if (frame.details) activity.details = fillTemplate(frame.details, vars).slice(0, 128);
   if (frame.state) activity.state = fillTemplate(frame.state, vars).slice(0, 128);
 
