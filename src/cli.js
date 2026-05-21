@@ -1,14 +1,23 @@
 #!/usr/bin/env node
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, watchFile } from 'node:fs';
 import { dirname } from 'node:path';
 import process from 'node:process';
+
+// Force the console code page to UTF-8 (65001) on Windows so Unicode box
+// drawing, block elements, and other chars render correctly. Default cmd.exe
+// code page on Win10 is 437/850, which displays many of our chars as `?`.
+// Hook events (no TTY) skip this — they don't print anything user-visible.
+if (process.platform === 'win32' && process.stdout.isTTY) {
+  try { spawnSync('chcp.com', ['65001'], { stdio: 'ignore', windowsHide: true }); } catch {}
+}
 import { CLAUDE_SETTINGS, HOOK_SCRIPT, DAEMON_SCRIPT, PID_PATH, STATE_PATH, LOG_PATH, AGGREGATE_PATH, CONFIG_PATH, IS_PACKAGED, EXE_PATH } from './paths.js';
 import { readState } from './state.js';
 import { buildVars, fillTemplate, humanProject, humanTool, applyIdle, framePasses } from './format.js';
 import { scan, readAggregate, findLiveSessions, dayKey, weekKey } from './scanner.js';
 import { runHookCli } from './hook.js';
 import { install as runInstall, uninstall as runUninstall, isInstalled } from './install.js';
+import { startTui } from './tui.js';
 import { basename } from 'node:path';
 
 const cmd = process.argv[2];
@@ -132,8 +141,8 @@ function box(title, lines, minWidth = 64) {
   const termWidth = process.stdout.columns || 100;
   const maxAllowed = Math.max(40, termWidth - 2);
   const width = Math.min(maxAllowed, Math.max(minWidth, longest + 4, title.length + 8));
-  const top    = `${c.gray}╭─ ${c.reset}${c.bold}${title}${c.reset} ${c.gray}${'─'.repeat(Math.max(0, width - 4 - title.length))}╮${c.reset}`;
-  const bottom = `${c.gray}╰${'─'.repeat(width - 2)}╯${c.reset}`;
+  const top    = `${c.gray}┌─ ${c.reset}${c.bold}${title}${c.reset} ${c.gray}${'─'.repeat(Math.max(0, width - 4 - title.length))}┐${c.reset}`;
+  const bottom = `${c.gray}└${'─'.repeat(width - 2)}┘${c.reset}`;
   console.log(top);
   for (const raw of lines) {
     const truncated = truncateAnsi(raw, width - 4);
@@ -622,7 +631,13 @@ const packagedDefault = IS_PACKAGED && !cmd;
     case 'start':     startDaemon(); break;
     case 'stop':      stopDaemon(); break;
     case 'restart':   restartDaemon(); break;
-    case 'status':    showStatus(); break;
+    case 'status': {
+      const dumpFlag = process.argv.slice(3).some((a) => a === '--dump' || a === '-d');
+      if (dumpFlag || !process.stdout.isTTY) showStatus();
+      else startTui();
+      break;
+    }
+    case 'dump':      showStatus(); break;
     case 'today':     showToday(); break;
     case 'week':      showWeek(); break;
     case 'serve':     await import('./server.js'); break;
