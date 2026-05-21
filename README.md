@@ -20,7 +20,7 @@ Your model, project, current tool, tokens, and lifetime stats — live in your D
 ---
 
 <div align="center">
-  <img src="docs/demo.svg" width="560" alt="Discord Rich Presence card: Claude Code, working in claude-rpc on Opus 4.7" />
+  <img src="docs/demo.gif" width="560" alt="Discord Rich Presence card: Claude Code, working in claude-rpc on Opus 4.7" />
 </div>
 
 Driven entirely by Claude Code's hook system. Zero polling, zero overhead between sessions.
