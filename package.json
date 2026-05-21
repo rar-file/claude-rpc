@@ -1,6 +1,6 @@
 {
   "name": "claude-rpc",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Discord Rich Presence for Claude Code — live model, project, tokens, and lifetime stats driven by Claude Code's hook system.",
   "type": "module",
   "license": "MIT",

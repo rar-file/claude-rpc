@@ -568,7 +568,20 @@ export function applyIdle(state, cfg = {}) {
     // Hook channel is quiet, but a live transcript was modified recently?
     // Keep "working" instead of dropping to "idle".
     if (liveAgeMs <= idleMs) return state;
-    return { ...state, status: 'idle', currentTool: null };
+    // Going idle — wipe "current activity" indicators so rotation frames
+    // gated on filesEdited / currentFile / currentTool stop showing stale
+    // active-session data. Keep the session counters (messages/tools/tokens)
+    // since those still make sense as "this session so far". The cwd stays
+    // so frames can still say "Idle in <project>".
+    return {
+      ...state,
+      status: 'idle',
+      currentTool: null,
+      currentFile: null,
+      filesOpened: [],
+      filesEdited: [],
+      filesRead: [],
+    };
   }
   return state;
 }
