@@ -579,7 +579,53 @@ function doScan(force = false) {
   });
   process.stdout.write('\n');
   console.log(`${c.green}✓${c.reset} Done in ${Date.now() - t0}ms — ${c.cyan}${result.scanned}${c.reset} parsed · ${result.skipped} cached · ${result.removed} removed (${result.total} total)`);
+  if (result.dirs && result.dirs.length > 1) {
+    console.log(`${c.dim}Scanned roots:${c.reset} ${result.dirs.join(', ')}`);
+  }
   console.log(`${c.dim}Aggregate written to ${AGGREGATE_PATH}${c.reset}`);
+}
+
+// Backfill from any folder that has .jsonl transcripts. Useful for:
+//   • restoring from a backup of ~/.claude
+//   • merging transcripts from another machine
+//   • importing data from an older Claude Code install with a non-default path
+//
+// Walks the given path recursively, adds every .jsonl to the existing cache,
+// and rebuilds the aggregate. Does NOT remove anything from the existing
+// aggregate — adds only.
+function doBackfill(argv) {
+  const path = argv[0];
+  if (!path) {
+    console.log(`${c.red}✗${c.reset} usage: claude-rpc backfill <path>`);
+    console.log(`${c.dim}  scans the given directory recursively for .jsonl transcripts and${c.reset}`);
+    console.log(`${c.dim}  merges them into your aggregate.${c.reset}`);
+    process.exit(1);
+  }
+  if (!existsSync(path)) {
+    console.log(`${c.red}✗${c.reset} path doesn't exist: ${path}`);
+    process.exit(1);
+  }
+  console.log(`${c.dim}Backfilling from${c.reset} ${c.cyan}${path}${c.reset}…`);
+  const t0 = Date.now();
+  let lastReport = 0;
+  // Pass `extraDirs` rather than `projectsDirs` — this way the default
+  // ~/.claude/projects (+ any auto-discovered alt paths) ALSO gets scanned
+  // and the user's existing cache for those isn't pruned.
+  const result = scan({
+    force: false,
+    extraDirs: [path],
+    onProgress: ({ scanned, total }) => {
+      if (Date.now() - lastReport > 500) {
+        process.stdout.write(`\r  parsed ${scanned}/${total}…`);
+        lastReport = Date.now();
+      }
+    },
+  });
+  process.stdout.write('\n');
+  console.log(`${c.green}✓${c.reset} Done in ${Date.now() - t0}ms — ${c.cyan}${result.scanned}${c.reset} new/changed · ${result.skipped} cached`);
+  console.log(`${c.dim}Scanned roots:${c.reset} ${result.dirs.join(', ')}`);
+  const hours = ((result.aggregate.activeMs || 0) / 3_600_000).toFixed(1);
+  console.log(`${c.dim}Aggregate now:${c.reset} ${result.aggregate.sessions} sessions · ${hours}h · ${result.aggregate.userMessages} prompts`);
 }
 
 function showInsights() {
@@ -659,6 +705,7 @@ function help() {
     ['preview',   'Show how each rotation frame renders right now'],
     ['scan',      'Incrementally scan ~/.claude/projects for all-time totals'],
     ['rescan',    'Force re-parse every transcript (ignores cache)'],
+    ['backfill',  'Import transcripts from any folder (e.g. a backup)'],
     ['insights',  'Auto-generated insights from your history'],
     ['badge',     'Render a Shields-style SVG (--metric --range --out)'],
     ['doctor',    'Run a diagnostic checklist — common-failure triage'],
@@ -712,6 +759,7 @@ const packagedDefault = IS_PACKAGED && !cmd;
     case 'vars':      dumpVars(); break;
     case 'scan':      doScan(false); break;
     case 'rescan':    doScan(true); break;
+    case 'backfill':  doBackfill(process.argv.slice(3)); break;
     case 'insights':  showInsights(); break;
     case 'badge':     doBadge(process.argv.slice(3)); break;
     case 'doctor': {

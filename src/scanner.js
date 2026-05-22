@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync, statSync, existsSync, writeFileSync, mkdirSync, renameSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
+import { homedir } from 'node:os';
 import { CLAUDE_PROJECTS, SCAN_CACHE_PATH, AGGREGATE_PATH, DATA_DIR, EVENTS_LOG_PATH } from './paths.js';
 import { languageOf } from './languages.js';
 import { costFor, pricingKeyFor } from './pricing.js';
@@ -325,6 +326,18 @@ function listTranscripts(projectsDir) {
   };
   walk(projectsDir);
   return results;
+}
+
+// Walk multiple project roots in one pass. Used by scan() to support
+// `additionalProjectsDirs` config + the `claude-rpc backfill <path>` command
+// for ad-hoc imports. Deduplicates by absolute path so overlapping roots
+// don't double-count.
+function listAllTranscripts(dirs) {
+  const all = new Set();
+  for (const d of dirs) {
+    for (const fp of listTranscripts(d)) all.add(fp);
+  }
+  return Array.from(all);
 }
 
 function isSubagentPath(p) {
@@ -722,12 +735,45 @@ function aggregateFrom(cache) {
   return agg;
 }
 
+// Known alternate locations Claude Code transcripts could live in besides
+// ~/.claude/projects. Returned filtered to those that actually exist. Most
+// installs only use the default; this is for older Claude Code versions,
+// XDG-strict setups, or restored backups.
+export function discoverAltProjectDirs() {
+  const home = homedir();
+  const candidates = [
+    join(home, '.config', 'claude', 'projects'),
+    join(home, '.local', 'share', 'claude', 'projects'),
+    join(home, 'AppData', 'Roaming', 'claude', 'projects'),
+    join(home, 'AppData', 'Local', 'claude', 'projects'),
+    join(home, 'Library', 'Application Support', 'claude', 'projects'),
+  ];
+  return candidates.filter((p) => existsSync(p) && p !== CLAUDE_PROJECTS);
+}
+
 // Incremental scan: re-parse only changed files. Returns {aggregate, scanned, skipped, removed}.
-export function scan({ projectsDir = CLAUDE_PROJECTS, onProgress, force = false } = {}) {
+//
+// Accepts either:
+//   { projectsDir: '/path' }       — single root (legacy)
+//   { projectsDirs: ['a', 'b'] }   — multi-root (backfill/import)
+// When neither is set, defaults to [CLAUDE_PROJECTS, ...discoverAltProjectDirs()].
+// Auto-discovery is cheap (existsSync per known location) so it runs every
+// scan — a freshly-restored backup at one of the alt paths gets picked up
+// without any user action.
+export function scan({ projectsDir, projectsDirs, onProgress, force = false, extraDirs = [] } = {}) {
+  const dirs = [];
+  if (projectsDirs && projectsDirs.length) dirs.push(...projectsDirs);
+  else if (projectsDir) dirs.push(projectsDir);
+  else {
+    dirs.push(CLAUDE_PROJECTS);
+    dirs.push(...discoverAltProjectDirs());
+  }
+  for (const d of extraDirs) if (!dirs.includes(d)) dirs.push(d);
+
   const cache = readCache();
   cache.files = cache.files || {};
   const seen = new Set();
-  const transcripts = listTranscripts(projectsDir);
+  const transcripts = listAllTranscripts(dirs);
   let scanned = 0;
   let skipped = 0;
   for (const fp of transcripts) {
@@ -750,13 +796,22 @@ export function scan({ projectsDir = CLAUDE_PROJECTS, onProgress, force = false 
       // skip corrupt file but keep prior cache entry
     }
   }
-  // Remove cache entries for deleted transcripts
+  // Remove cache entries for transcripts that disappeared from disk. Only
+  // wipe entries whose root is one of the dirs we just scanned — otherwise
+  // a one-off backfill against a subset of dirs would nuke cache for
+  // unrelated paths.
   let removed = 0;
+  const sep = process.platform === 'win32' ? '\\' : '/';
+  const dirPrefixes = dirs.map((d) => d.replace(/[/\\]+$/, '') + sep);
   for (const key of Object.keys(cache.files)) {
-    if (!seen.has(key)) { delete cache.files[key]; removed += 1; }
+    if (seen.has(key)) continue;
+    if (dirPrefixes.some((p) => key.startsWith(p))) {
+      delete cache.files[key];
+      removed += 1;
+    }
   }
   writeCache(cache);
   const aggregate = aggregateFrom(cache);
   writeAggregate(aggregate);
-  return { aggregate, scanned, skipped, removed, total: transcripts.length };
+  return { aggregate, scanned, skipped, removed, total: transcripts.length, dirs };
 }
