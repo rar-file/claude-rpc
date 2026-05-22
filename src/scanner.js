@@ -247,16 +247,18 @@ export function parseTranscript(filePath) {
               summary.fileEdits[f] = (summary.fileEdits[f] || 0) + 1;
             }
           }
-          // Code churn — lines added/removed.
+          // Code churn — lines added/removed. For Edit, we count
+          // new_string / old_string lines once; `replace_all` would technically
+          // multiply by the number of occurrences in the target file, but we
+          // can't see file contents here, so we under-count those uniformly.
           if (b.name === 'Edit') {
             const adds = countLines(input.new_string);
             const rems = countLines(input.old_string);
-            const mult = input.replace_all ? 1 : 1;
-            summary.linesAdded += adds * mult;
-            summary.linesRemoved += rems * mult;
+            summary.linesAdded += adds;
+            summary.linesRemoved += rems;
             for (const bucket of allBuckets) {
-              bucket.linesAdded += adds * mult;
-              bucket.linesRemoved += rems * mult;
+              bucket.linesAdded += adds;
+              bucket.linesRemoved += rems;
             }
           } else if (b.name === 'Write') {
             const adds = countLines(input.content);

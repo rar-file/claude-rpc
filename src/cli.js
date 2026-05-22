@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, existsSync, mkdirSync, watchFile } from 'node:fs';
-import { dirname } from 'node:path';
+import { readFileSync, writeFileSync, existsSync, watchFile } from 'node:fs';
 import process from 'node:process';
 
 // Force the console code page to UTF-8 (65001) on Windows so Unicode box
@@ -11,7 +10,7 @@ import process from 'node:process';
 if (process.platform === 'win32' && process.stdout.isTTY) {
   try { spawnSync('chcp.com', ['65001'], { stdio: 'ignore', windowsHide: true }); } catch {}
 }
-import { CLAUDE_SETTINGS, HOOK_SCRIPT, DAEMON_SCRIPT, PID_PATH, STATE_PATH, LOG_PATH, AGGREGATE_PATH, CONFIG_PATH, IS_PACKAGED, EXE_PATH } from './paths.js';
+import { DAEMON_SCRIPT, PID_PATH, STATE_PATH, LOG_PATH, AGGREGATE_PATH, CONFIG_PATH, IS_PACKAGED, EXE_PATH, CANONICAL_EXE } from './paths.js';
 import { readState } from './state.js';
 import { buildVars, fillTemplate, humanProject, humanTool, applyIdle, framePasses } from './format.js';
 import { scan, readAggregate, findLiveSessions, dayKey, weekKey } from './scanner.js';
@@ -47,50 +46,6 @@ function readJson(path, fallback) {
   try { return JSON.parse(readFileSync(path, 'utf8')); } catch { return fallback; }
 }
 
-function writeJson(path, data) {
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(data, null, 2));
-}
-
-function hookCmd(event) {
-  const script = HOOK_SCRIPT.replace(/\\/g, '/');
-  return `node "${script}" ${event}`;
-}
-
-const EVENTS = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop', 'SubagentStop', 'Notification', 'SessionEnd'];
-
-function installHooks() {
-  const settings = readJson(CLAUDE_SETTINGS, {});
-  settings.hooks = settings.hooks || {};
-  for (const event of EVENTS) {
-    const wanted = hookCmd(event);
-    const bucket = settings.hooks[event] = settings.hooks[event] || [];
-    let entry = bucket.find((b) => Array.isArray(b.hooks) && b.hooks.some((h) => h.command?.includes('claude-rpc') || h.command?.includes('CLAUDE/src/hook.js') || h.command?.includes(HOOK_SCRIPT.replace(/\\/g, '/'))));
-    if (entry) {
-      entry.hooks = entry.hooks.map((h) => (h.command?.includes('hook.js') ? { ...h, command: wanted } : h));
-    } else {
-      bucket.push({ matcher: '', hooks: [{ type: 'command', command: wanted }] });
-    }
-  }
-  writeJson(CLAUDE_SETTINGS, settings);
-  console.log(`${c.green}✓${c.reset} Installed Claude RPC hooks into ${c.cyan}${CLAUDE_SETTINGS}${c.reset}`);
-}
-
-function uninstallHooks() {
-  const settings = readJson(CLAUDE_SETTINGS, {});
-  if (!settings.hooks) { console.log('No hooks to remove.'); return; }
-  for (const event of EVENTS) {
-    const bucket = settings.hooks[event];
-    if (!Array.isArray(bucket)) continue;
-    settings.hooks[event] = bucket
-      .map((entry) => ({ ...entry, hooks: (entry.hooks || []).filter((h) => !h.command?.includes('hook.js')) }))
-      .filter((entry) => (entry.hooks || []).length > 0);
-    if (settings.hooks[event].length === 0) delete settings.hooks[event];
-  }
-  writeJson(CLAUDE_SETTINGS, settings);
-  console.log(`${c.green}✓${c.reset} Removed Claude RPC hooks from ${CLAUDE_SETTINGS}`);
-}
-
 function isAlive(pid) {
   try { process.kill(pid, 0); return true; } catch { return false; }
 }
@@ -108,9 +63,12 @@ function startDaemon({ quiet = false } = {}) {
     return false;
   }
   // In packaged mode the "daemon script" is the exe itself with a subcommand;
-  // in dev mode it's the src/daemon.js path passed to node.
+  // in dev mode it's the src/daemon.js path passed to node. Prefer the
+  // canonical exe when it exists so we don't keep the user's Downloads copy
+  // locked open — the canonical install is the long-lived path.
+  const exe = (IS_PACKAGED && existsSync(CANONICAL_EXE)) ? CANONICAL_EXE : process.execPath;
   const args = IS_PACKAGED ? ['daemon'] : [DAEMON_SCRIPT];
-  const child = spawn(process.execPath, args, { detached: true, stdio: 'ignore', windowsHide: true });
+  const child = spawn(exe, args, { detached: true, stdio: 'ignore', windowsHide: true });
   child.unref();
   if (!quiet) console.log(`${c.green}✓${c.reset} Daemon launched (pid ${c.cyan}${child.pid}${c.reset})  ${c.dim}logs: ${LOG_PATH}${c.reset}`);
   return true;
@@ -729,7 +687,8 @@ function help() {
 const packagedDefault = IS_PACKAGED && !cmd;
 
 // Wrapped in an async IIFE so the same source compiles cleanly under both
-// ESM (dev) and CommonJS (esbuild → pkg) — CJS doesn't allow top-level await.
+// ESM (dev) and CommonJS (esbuild → SEA bundle) — CJS doesn't allow
+// top-level await.
 (async () => {
   switch (cmd) {
     case 'setup':     await runInstall({ exePath: EXE_PATH || process.execPath, withStartup: false }); break;

@@ -32,8 +32,13 @@ export const CONFIG_PATH = IS_PACKAGED
   ? join(USER_CONFIG_DIR, 'config.json')
   : join(ROOT, 'config.json');
 
-// Template seeded into USER_CONFIG_DIR on first install.
-export const BUNDLED_CONFIG_EXAMPLE = join(ROOT, 'config.example.json');
+// Canonical home for the packaged exe. `setup` copies the running binary here
+// (from wherever the user launched it — Downloads, Desktop, etc.) so the path
+// baked into Claude Code's hooks survives manual updates that drop the new exe
+// at a different filesystem location.
+export const CANONICAL_EXE_NAME = process.platform === 'win32' ? 'claude-rpc.exe' : 'claude-rpc';
+export const CANONICAL_INSTALL_DIR = join(USER_CONFIG_DIR, 'bin');
+export const CANONICAL_EXE = join(CANONICAL_INSTALL_DIR, CANONICAL_EXE_NAME);
 
 // In packaged mode the "scripts" are sub-commands of the exe itself; in dev
 // they're the source .js files.

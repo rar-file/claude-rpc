@@ -187,7 +187,7 @@ Persistent state lives in a few well-known places:
 | `rotationIntervalMs`      | `12000` | How fast rotation frames cycle                                      |
 | `rescanIntervalSec`       | `300`   | How often transcripts are re-aggregated                             |
 | `idleThresholdSec`        | `60`    | No activity for this long → status `idle`                           |
-| `staleSessionMin`         | `720`   | No activity for this long → status `stale`                          |
+| `staleSessionMin`         | `5`     | No activity for this long (minutes) → status `stale`; presence is cleared |
 | `notificationWindowSec`   | `8`     | How long the `notification` status sticks                           |
 | `showElapsed`             | `true`  | Include the elapsed timer                                           |
 | `activityType`            | `0`     | `0` Playing, `2` Listening, `3` Watching, `5` Competing             |

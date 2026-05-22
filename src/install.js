@@ -2,12 +2,17 @@
 // Seeds %APPDATA%\claude-rpc\config.json, points Claude Code's hooks at the
 // exe, and registers a Windows startup entry so the daemon comes up on login.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import {
+  existsSync, mkdirSync, readFileSync, writeFileSync,
+  copyFileSync, chmodSync, renameSync, statSync,
+  readdirSync, unlinkSync,
+} from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import {
   CLAUDE_SETTINGS, CONFIG_PATH, USER_CONFIG_DIR,
   HOOK_SCRIPT, IS_PACKAGED,
+  CANONICAL_EXE, CANONICAL_INSTALL_DIR, CANONICAL_EXE_NAME,
 } from './paths.js';
 import { DEFAULT_CONFIG } from './default-config.js';
 
@@ -105,6 +110,76 @@ export async function removeStartupEntry() {
   }
 }
 
+function samePath(a, b) {
+  if (!a || !b) return false;
+  try {
+    const ra = resolve(a);
+    const rb = resolve(b);
+    return process.platform === 'win32'
+      ? ra.toLowerCase() === rb.toLowerCase()
+      : ra === rb;
+  } catch { return false; }
+}
+
+// Best-effort sweep of stale `.old-<ts>` siblings left behind by a prior
+// rename-out-of-the-way during an in-place exe replacement.
+function sweepStaleCanonicalBackups() {
+  try {
+    if (!existsSync(CANONICAL_INSTALL_DIR)) return;
+    const prefix = CANONICAL_EXE_NAME + '.old-';
+    for (const name of readdirSync(CANONICAL_INSTALL_DIR)) {
+      if (name.startsWith(prefix)) {
+        try { unlinkSync(join(CANONICAL_INSTALL_DIR, name)); } catch {}
+      }
+    }
+  } catch {}
+}
+
+// Copy the running binary into CANONICAL_EXE if it's not already there.
+// Returns the path that hook entries should point at — canonical on success,
+// the original path as a fallback. Only meaningful in packaged mode.
+export function ensureCanonicalExe(currentExe) {
+  if (!IS_PACKAGED) return currentExe;
+  if (samePath(currentExe, CANONICAL_EXE)) return CANONICAL_EXE;
+  mkdirSync(CANONICAL_INSTALL_DIR, { recursive: true });
+
+  // Skip the copy when canonical already exists AND matches the source —
+  // avoids a needless overwrite (and the Windows running-file gymnastics it
+  // can trigger) on repeated `setup` runs from the same launch point.
+  if (existsSync(CANONICAL_EXE)) {
+    try {
+      const src = statSync(currentExe);
+      const dst = statSync(CANONICAL_EXE);
+      if (src.size === dst.size && Math.abs(src.mtimeMs - dst.mtimeMs) < 2000) {
+        console.log(`  exe already installed → ${CANONICAL_EXE}`);
+        return CANONICAL_EXE;
+      }
+    } catch {}
+  }
+
+  try {
+    // Windows won't let you overwrite a currently-executing file. If
+    // canonical is the running daemon, move it aside first — that succeeds
+    // even while the file handle is open, and Windows will delete the
+    // renamed copy when the process exits.
+    if (process.platform === 'win32' && existsSync(CANONICAL_EXE)) {
+      try { renameSync(CANONICAL_EXE, CANONICAL_EXE + '.old-' + Date.now()); }
+      catch {}
+    }
+    copyFileSync(currentExe, CANONICAL_EXE);
+    if (process.platform !== 'win32') chmodSync(CANONICAL_EXE, 0o755);
+    console.log(`  exe installed → ${CANONICAL_EXE}`);
+    console.log(`  (the copy at ${currentExe} can be safely deleted)`);
+    sweepStaleCanonicalBackups();
+    return CANONICAL_EXE;
+  } catch (e) {
+    console.warn(`  ! failed to copy exe to ${CANONICAL_EXE}: ${e.message}`);
+    console.warn(`    falling back to ${currentExe} — manual updates that change`);
+    console.warn(`    the exe path may require running 'setup' again.`);
+    return currentExe;
+  }
+}
+
 export function seedConfig() {
   if (existsSync(CONFIG_PATH)) {
     console.log(`  config exists → ${CONFIG_PATH}`);
@@ -117,10 +192,13 @@ export function seedConfig() {
 }
 
 export async function install({ exePath, withStartup = true } = {}) {
-  if (process.platform !== 'win32') {
+  if (process.platform !== 'win32' && withStartup) {
     console.warn('Note: startup registration only works on Windows; other steps still run.');
   }
-  const target = exePath || process.execPath;
+  const incoming = exePath || process.execPath;
+  // Canonicalize first so hook + startup entries point at a stable location,
+  // not at the temp/Downloads path the user happened to launch from.
+  const target = ensureCanonicalExe(incoming);
   console.log('Installing Claude RPC…');
   seedConfig();
   installHooks(target);
