@@ -1,0 +1,579 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>claude-rpc — Discord Rich Presence for Claude Code</title>
+<meta name="description" content="Live model, project, current tool, tokens, and lifetime stats from Claude Code — straight to your Discord profile. Driven by Claude Code's hook system." />
+
+<meta property="og:title" content="claude-rpc — Discord Rich Presence for Claude Code" />
+<meta property="og:description" content="Live model, project, tokens and lifetime stats from Claude Code, in your Discord profile." />
+<meta property="og:type" content="website" />
+<meta property="og:url" content="https://github.com/rar-file/claude-rpc" />
+<meta property="og:image" content="https://cdn.qualit.ly/clawd-working-building.gif" />
+<meta name="twitter:card" content="summary_large_image" />
+
+<link rel="icon" href="https://cdn.qualit.ly/clawd-working-building.gif" />
+
+<style>
+  :root {
+    --bg:        #0e0e10;
+    --bg-card:   #17171b;
+    --bg-card-2: #1d1d22;
+    --fg:        #ececf1;
+    --fg-dim:    #9aa0a6;
+    --fg-mute:   #6b7280;
+    --border:    #26262c;
+    --accent:    #d97757;
+    --accent-2:  #b9603f;
+    --discord:   #5865f2;
+    --green:     #43853d;
+    --radius:    14px;
+    --max:       1080px;
+    --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: radial-gradient(ellipse at 50% -10%, #2a1a14 0%, var(--bg) 50%) no-repeat;
+    color: var(--fg);
+    font-family: var(--font);
+    font-size: 16px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code { font-family: var(--mono); font-size: 0.9em; background: var(--bg-card); padding: 2px 6px; border-radius: 4px; color: var(--fg); }
+
+  .wrap { max-width: var(--max); margin: 0 auto; padding: 28px 24px 80px; }
+
+  /* ── Nav ──────────────────────────────────────────── */
+  nav { display: flex; align-items: center; justify-content: space-between; padding: 8px 0 36px; }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand img { width: 32px; height: 32px; border-radius: 6px; }
+  .brand .name { font-weight: 600; font-size: 1.05rem; letter-spacing: -0.01em; }
+  nav .links a { color: var(--fg-dim); margin-left: 22px; font-size: 0.93rem; }
+  nav .links a:hover { color: var(--fg); text-decoration: none; }
+
+  /* ── Hero ─────────────────────────────────────────── */
+  .hero { display: grid; grid-template-columns: 1.2fr 1fr; gap: 56px; align-items: center; padding: 24px 0 56px; }
+  .hero h1 {
+    font-size: clamp(2.2rem, 4.5vw, 3.4rem);
+    line-height: 1.05;
+    letter-spacing: -0.025em;
+    margin: 0 0 18px;
+    font-weight: 700;
+  }
+  .hero h1 .accent { color: var(--accent); }
+  .hero p.lead { color: var(--fg-dim); font-size: 1.13rem; margin: 0 0 28px; max-width: 540px; }
+  .badges { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 28px; }
+  .badge { font-size: 0.78rem; padding: 4px 10px; border-radius: 999px; background: var(--bg-card); color: var(--fg-dim); border: 1px solid var(--border); }
+  .badge strong { color: var(--fg); }
+
+  .cta-row { display: flex; gap: 12px; flex-wrap: wrap; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 12px 22px;
+    background: var(--accent); color: #fff;
+    border-radius: 10px; font-weight: 600; font-size: 0.98rem;
+    border: 1px solid var(--accent);
+    transition: transform 0.08s ease, background 0.2s ease;
+  }
+  .btn:hover { background: var(--accent-2); border-color: var(--accent-2); text-decoration: none; transform: translateY(-1px); }
+  .btn.ghost { background: transparent; color: var(--fg); border-color: var(--border); }
+  .btn.ghost:hover { background: var(--bg-card); }
+  .btn .sub { font-size: 0.78rem; opacity: 0.75; font-weight: 500; }
+
+  .hero-art { position: relative; }
+  .hero-art img { width: 100%; border-radius: var(--radius); border: 1px solid var(--border); display: block; }
+
+  /* ── Section heads ───────────────────────────────── */
+  section { padding: 56px 0; border-top: 1px solid var(--border); }
+  h2 { font-size: 1.7rem; letter-spacing: -0.02em; margin: 0 0 6px; font-weight: 700; }
+  .kicker { color: var(--fg-mute); font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px; }
+  .section-lead { color: var(--fg-dim); max-width: 620px; margin: 0 0 32px; font-size: 1rem; }
+
+  /* ── Download cards ──────────────────────────────── */
+  .downloads { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .dl-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 22px 20px;
+    display: flex; flex-direction: column; gap: 8px;
+    transition: border-color 0.2s ease, transform 0.08s ease;
+  }
+  .dl-card.active { border-color: var(--accent); background: linear-gradient(180deg, rgba(217,119,87,0.07) 0%, var(--bg-card) 60%); }
+  .dl-card .os { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 1.02rem; }
+  .dl-card .os .tag { font-size: 0.7rem; padding: 2px 8px; background: var(--accent); color: #fff; border-radius: 999px; letter-spacing: 0.04em; }
+  .dl-card .detail { color: var(--fg-dim); font-size: 0.9rem; margin-bottom: 8px; }
+  .dl-card a.btn { margin-top: auto; padding: 10px 16px; font-size: 0.92rem; }
+  .dl-card a.alt { color: var(--fg-dim); font-size: 0.85rem; }
+  .dl-card a.alt:hover { color: var(--fg); }
+  .dl-card.disabled .btn { background: transparent; color: var(--fg-dim); border-color: var(--border); }
+  .dl-card.disabled .btn:hover { background: var(--bg-card-2); }
+
+  /* ── Feature grid ────────────────────────────────── */
+  .features { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  .feature {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 22px 22px 20px;
+  }
+  .feature h3 { margin: 0 0 8px; font-size: 1.05rem; letter-spacing: -0.01em; font-weight: 600; }
+  .feature p { margin: 0; color: var(--fg-dim); font-size: 0.93rem; line-height: 1.55; }
+
+  /* ── Discord card preview ────────────────────────── */
+  .preview-wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 36px; align-items: center; }
+  .dc-card {
+    background: #2b2d31;
+    border-radius: 12px;
+    padding: 16px;
+    color: #fff;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+    border: 1px solid #1f2024;
+    font-family: var(--font);
+    transition: opacity 0.3s ease;
+  }
+  .dc-header { color: #b5bac1; font-size: 0.7rem; letter-spacing: 0.1em; font-weight: 700; margin-bottom: 10px; text-transform: uppercase; }
+  .dc-row { display: flex; gap: 12px; align-items: flex-start; }
+  .dc-img-wrap { position: relative; flex: 0 0 60px; }
+  .dc-img-wrap .big { width: 60px; height: 60px; border-radius: 8px; background-size: cover; background-position: center; background-color: #1e1f22; }
+  .dc-img-wrap .small {
+    position: absolute; right: -4px; bottom: -4px;
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 3px solid #2b2d31;
+  }
+  .dc-text { flex: 1; min-width: 0; }
+  .dc-app { font-weight: 700; font-size: 0.95rem; margin-bottom: 2px; }
+  .dc-details, .dc-state, .dc-time { font-size: 0.85rem; line-height: 1.35; color: #dbdee1; }
+  .dc-details { font-weight: 500; }
+  .dc-state { color: #b5bac1; }
+  .dc-time { color: #b5bac1; margin-top: 2px; }
+  .dc-buttons { display: flex; gap: 8px; margin-top: 12px; }
+  .dc-button { font-size: 0.78rem; padding: 6px 10px; background: #4e5058; color: #fff; border-radius: 4px; }
+
+  .status-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+  .status-tab {
+    background: var(--bg-card); color: var(--fg-dim);
+    padding: 6px 14px; border-radius: 999px; font-size: 0.85rem;
+    border: 1px solid var(--border); cursor: pointer; user-select: none;
+    transition: all 0.15s ease;
+  }
+  .status-tab:hover { color: var(--fg); border-color: #3a3a42; }
+  .status-tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+  /* ── Screenshots ─────────────────────────────────── */
+  .shots { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .shot { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .shot img { width: 100%; display: block; }
+  .shot .caption { padding: 14px 16px; }
+  .shot .caption .title { font-weight: 600; }
+  .shot .caption .sub { color: var(--fg-dim); font-size: 0.88rem; }
+
+  /* ── How it works ────────────────────────────────── */
+  .how { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .step { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px; }
+  .step .num { color: var(--accent); font-family: var(--mono); font-size: 0.85rem; font-weight: 600; margin-bottom: 8px; }
+  .step h3 { margin: 0 0 8px; font-size: 1.02rem; font-weight: 600; }
+  .step p { color: var(--fg-dim); font-size: 0.92rem; margin: 0; }
+
+  /* ── Footer ──────────────────────────────────────── */
+  footer { border-top: 1px solid var(--border); padding: 32px 0 16px; color: var(--fg-mute); font-size: 0.88rem; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+  footer a { color: var(--fg-dim); }
+
+  /* ── Responsive ──────────────────────────────────── */
+  @media (max-width: 820px) {
+    .hero { grid-template-columns: 1fr; gap: 32px; }
+    .downloads { grid-template-columns: 1fr; }
+    .features { grid-template-columns: 1fr; }
+    .preview-wrap { grid-template-columns: 1fr; }
+    .shots { grid-template-columns: 1fr; }
+    .how { grid-template-columns: 1fr; }
+    nav .links { display: none; }
+  }
+</style>
+</head>
+
+<body>
+<div class="wrap">
+
+<nav>
+  <div class="brand">
+    <img src="https://cdn.qualit.ly/clawd-working-building.gif" alt="" />
+    <span class="name">claude-rpc</span>
+  </div>
+  <div class="links">
+    <a href="#download">Download</a>
+    <a href="#features">Features</a>
+    <a href="#how">How it works</a>
+    <a href="https://github.com/rar-file/claude-rpc">GitHub</a>
+  </div>
+</nav>
+
+<!-- ─────────────────────────────────────────────────── HERO -->
+<header class="hero">
+  <div>
+    <div class="badges">
+      <span class="badge"><strong id="latest-tag">v0.3.6</strong></span>
+      <span class="badge">MIT license</span>
+      <span class="badge">Node 18+</span>
+      <span class="badge">macOS &middot; Windows &middot; Linux</span>
+    </div>
+    <h1>Your <span class="accent">Claude Code</span> sessions, live on Discord.</h1>
+    <p class="lead">
+      Live model, project, current tool, token count and lifetime stats
+      &mdash; in your Discord profile. Driven entirely by Claude Code's
+      hook system. Zero polling, zero overhead between sessions.
+    </p>
+    <div class="cta-row">
+      <a class="btn" id="primary-cta" href="https://github.com/rar-file/claude-rpc/releases/latest">
+        <span>Download for your OS</span>
+        <span class="sub" id="primary-cta-sub">detecting&hellip;</span>
+      </a>
+      <a class="btn ghost" href="https://github.com/rar-file/claude-rpc">View on GitHub</a>
+    </div>
+  </div>
+  <div class="hero-art">
+    <img src="img/demo.gif" alt="Discord Rich Presence card showing Claude Code working in claude-rpc on Opus 4.7" />
+  </div>
+</header>
+
+<!-- ─────────────────────────────────────────────────── DOWNLOAD -->
+<section id="download">
+  <div class="kicker">Get it</div>
+  <h2>One file. Drop it anywhere on PATH.</h2>
+  <p class="section-lead">
+    The CLI binary is built with Node SEA &mdash; no Node install required.
+    The desktop app bundles the same CLI plus a config GUI with live
+    presence preview and one-click daemon controls.
+  </p>
+
+  <div class="downloads">
+    <div class="dl-card" data-os="win" id="dl-win">
+      <div class="os">Windows<span class="tag" id="tag-win" hidden>Detected</span></div>
+      <div class="detail">x64 &middot; NSIS installer or portable .exe</div>
+      <a class="btn" id="dl-win-primary" href="https://github.com/rar-file/claude-rpc/releases/latest">Installer (.exe)</a>
+      <a class="alt" id="dl-win-portable" href="https://github.com/rar-file/claude-rpc/releases/latest">or grab the portable build</a>
+    </div>
+
+    <div class="dl-card" data-os="mac" id="dl-mac">
+      <div class="os">macOS<span class="tag" id="tag-mac" hidden>Detected</span></div>
+      <div class="detail">Apple Silicon &middot; .dmg drag-to-Applications</div>
+      <a class="btn" id="dl-mac-primary" href="https://github.com/rar-file/claude-rpc/releases/latest">Download (.dmg)</a>
+      <a class="alt" href="https://github.com/rar-file/claude-rpc/releases/latest">Intel/x86_64? build from source &rarr;</a>
+    </div>
+
+    <div class="dl-card" data-os="src" id="dl-src">
+      <div class="os">From source<span class="tag" id="tag-src" hidden>Detected</span></div>
+      <div class="detail">Any OS, Node 18+ &middot; <code>git clone</code> &amp; go</div>
+      <a class="btn" href="https://github.com/rar-file/claude-rpc#install">Read the install guide</a>
+      <a class="alt" href="https://github.com/rar-file/claude-rpc">github.com/rar-file/claude-rpc</a>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────────────── PREVIEW -->
+<section id="preview">
+  <div class="kicker">What it looks like</div>
+  <h2>A different card for every state Claude is in.</h2>
+  <p class="section-lead">
+    v0.3.6 introduced <code>presence.byStatus</code> &mdash; the card text follows
+    whatever Claude is doing right now. Lifetime stats cycle while you're idle.
+  </p>
+
+  <div class="preview-wrap">
+    <div>
+      <div class="status-tabs" id="status-tabs">
+        <span class="status-tab active" data-status="working">Working</span>
+        <span class="status-tab" data-status="thinking">Thinking</span>
+        <span class="status-tab" data-status="notification">Notification</span>
+        <span class="status-tab" data-status="idle">Idle</span>
+      </div>
+      <div id="preview-explain" style="color: var(--fg-dim); font-size: 0.94rem;">
+        While a tool is running, the card shows the project, the tool name, the file Claude
+        just touched, and the live token count for the session.
+      </div>
+    </div>
+
+    <div class="dc-card" id="dc-card">
+      <div class="dc-header">Playing a game</div>
+      <div class="dc-row">
+        <div class="dc-img-wrap">
+          <div class="big" id="dc-big" style="background-image: url('https://cdn.qualit.ly/clawd-working-building.gif')"></div>
+          <div class="small" id="dc-small"></div>
+        </div>
+        <div class="dc-text">
+          <div class="dc-app">Claude Code</div>
+          <div class="dc-details" id="dc-details">Working in claude-rpc</div>
+          <div class="dc-state" id="dc-state">Edit &middot; src/scanner.js &middot; 2.3k tokens</div>
+          <div class="dc-time" id="dc-time">00:14:32 elapsed</div>
+        </div>
+      </div>
+      <div class="dc-buttons">
+        <span class="dc-button">View on GitHub &rarr;</span>
+        <span class="dc-button">Claude Code</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────────────── FEATURES -->
+<section id="features">
+  <div class="kicker">Beyond the card</div>
+  <h2>It's also a personal dashboard for your Claude history.</h2>
+  <p class="section-lead">
+    Everything below is generated locally by walking your
+    <code>~/.claude/projects</code> transcripts. Incremental, cached, no network.
+  </p>
+
+  <div class="features">
+    <div class="feature">
+      <h3>All-time aggregates</h3>
+      <p>Hours, prompts, tokens, sessions, streaks, top files, top projects,
+      lines added/removed, languages, bash usage, web domains, subagent runs.</p>
+    </div>
+    <div class="feature">
+      <h3>Cost estimate</h3>
+      <p>Per-model spend (Opus / Sonnet / Haiku) using public list prices.
+      Editable in <code>src/pricing.js</code>.</p>
+    </div>
+    <div class="feature">
+      <h3>CLI &amp; web dashboards</h3>
+      <p><code>claude-rpc status</code> for a TUI with heatmap and hour
+      histogram. <code>claude-rpc serve</code> for a local web dashboard
+      with SSE live updates and a day-detail modal.</p>
+    </div>
+    <div class="feature">
+      <h3>README badges</h3>
+      <p><code>claude-rpc badge --metric hours --range 7d --out h.svg</code>
+      &mdash; or pull a live one from
+      <code>/api/badge.svg?metric=hours&amp;range=7d</code> when the daemon's
+      running.</p>
+    </div>
+    <div class="feature">
+      <h3>Config GUI</h3>
+      <p>Six-tab Electron app: Presence (drag-reorder, variable autocomplete,
+      presets), Discord, Assets, Timing, Daemon (start/stop/restart, tail log),
+      Stats.</p>
+    </div>
+    <div class="feature">
+      <h3>Insights</h3>
+      <p><code>claude-rpc insights</code> generates 3&ndash;5 contextual lines:
+      weekly trend, peak weekday, hotspot file, cost pace, streak progress.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────────────── SHOTS -->
+<section id="shots">
+  <div class="kicker">Screens</div>
+  <h2>Browse the rest from a real desktop UI.</h2>
+
+  <div class="shots">
+    <div class="shot">
+      <img src="img/dashboard.png" alt="Web dashboard" />
+      <div class="caption">
+        <div class="title">Web dashboard</div>
+        <div class="sub"><code>claude-rpc serve</code> &mdash; range selector, heatmap, languages stack, leaderboards.</div>
+      </div>
+    </div>
+    <div class="shot">
+      <img src="img/electron.png" alt="Settings GUI" />
+      <div class="caption">
+        <div class="title">Settings GUI</div>
+        <div class="sub">Electron config editor &mdash; six tabs, live preview, daemon controls.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────────────── HOW -->
+<section id="how">
+  <div class="kicker">How it works</div>
+  <h2>Three small pieces, glued by JSON files on disk.</h2>
+  <p class="section-lead">
+    No database, no message bus, no background polling between sessions.
+    Hooks fire on Claude lifecycle events, the daemon listens, Discord
+    updates within a second.
+  </p>
+
+  <div class="how">
+    <div class="step">
+      <div class="num">01 &middot; hook</div>
+      <h3>Claude fires hooks</h3>
+      <p>SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, Notification,
+      Stop, SessionEnd. Each one updates a shared <code>state.json</code>.</p>
+    </div>
+    <div class="step">
+      <div class="num">02 &middot; daemon</div>
+      <h3>Daemon pushes to Discord</h3>
+      <p>Long-running. Connects to Discord's local IPC. Watches the state file,
+      builds the card, and pushes a frame.</p>
+    </div>
+    <div class="step">
+      <div class="num">03 &middot; scanner</div>
+      <h3>Scanner builds aggregates</h3>
+      <p>Walks <code>~/.claude/projects/**/*.jsonl</code> incrementally. Cached at
+      <code>~/.claude-rpc/aggregate.json</code>. Feeds the dashboards and the
+      rotation frames.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────────────── CTA -->
+<section style="text-align:center;">
+  <h2>Get it on your profile in two minutes.</h2>
+  <p class="section-lead" style="margin-left:auto;margin-right:auto;">
+    Download, run <code>claude-rpc setup</code>, paste your Discord application ID
+    into the config, and start the daemon. That's it.
+  </p>
+  <div class="cta-row" style="justify-content:center;">
+    <a class="btn" href="https://github.com/rar-file/claude-rpc/releases/latest">Download latest release</a>
+    <a class="btn ghost" href="https://github.com/rar-file/claude-rpc#quick-start">Quick start docs</a>
+  </div>
+</section>
+
+<footer>
+  <div>MIT &middot; by <a href="https://github.com/rar-file">Archer Simmons</a></div>
+  <div>
+    <a href="https://github.com/rar-file/claude-rpc">github.com/rar-file/claude-rpc</a>
+  </div>
+</footer>
+
+</div>
+
+<script>
+  // ── OS detection ─────────────────────────────────────────────────────────
+  const ua = (navigator.userAgent || '').toLowerCase();
+  const plat = (navigator.platform || '').toLowerCase();
+  let os = 'src';
+  if (/windows|win64|win32/.test(ua) || /win/.test(plat)) os = 'win';
+  else if (/mac|darwin/.test(ua) || /mac/.test(plat)) os = 'mac';
+
+  document.getElementById('dl-' + os)?.classList.add('active');
+  document.getElementById('tag-' + os)?.removeAttribute('hidden');
+
+  const primaryLabels = {
+    win: { label: 'Download for Windows', sub: '.exe installer' },
+    mac: { label: 'Download for macOS',   sub: '.dmg (Apple Silicon)' },
+    src: { label: 'View install guide',    sub: 'any OS, Node 18+' },
+  };
+  const cta = document.getElementById('primary-cta');
+  const ctaSub = document.getElementById('primary-cta-sub');
+  cta.querySelector('span').textContent = primaryLabels[os].label;
+  ctaSub.textContent = primaryLabels[os].sub;
+
+  // ── Fetch latest release for direct asset URLs ───────────────────────────
+  // Failure (rate limit, offline, fork) falls back to the /releases/latest
+  // page link that's already in the href — no broken buttons.
+  async function loadLatest() {
+    try {
+      const r = await fetch('https://api.github.com/repos/rar-file/claude-rpc/releases/latest', {
+        headers: { 'Accept': 'application/vnd.github+json' },
+      });
+      if (!r.ok) return;
+      const data = await r.json();
+      const assets = data.assets || [];
+      const pick = (re) => (assets.find(a => re.test(a.name)) || {}).browser_download_url;
+
+      const winSetup    = pick(/-setup\.exe$/i);
+      const winPortable = pick(/-portable\.exe$/i);
+      const macDmg      = pick(/\.dmg$/i);
+
+      if (data.tag_name) document.getElementById('latest-tag').textContent = data.tag_name;
+
+      if (winSetup)    document.getElementById('dl-win-primary').href = winSetup;
+      if (winPortable) document.getElementById('dl-win-portable').href = winPortable;
+      if (macDmg)      document.getElementById('dl-mac-primary').href = macDmg;
+
+      // Wire the hero CTA to the OS-specific direct download.
+      if (os === 'win' && winSetup) cta.href = winSetup;
+      else if (os === 'mac' && macDmg) cta.href = macDmg;
+    } catch (_) { /* fall back to /releases/latest links — already set */ }
+  }
+  loadLatest();
+
+  // ── Discord card preview cycler ──────────────────────────────────────────
+  const STATES = {
+    working: {
+      details: 'Working in claude-rpc',
+      state:   'Edit · src/scanner.js · 2.3k tokens',
+      img:     'https://cdn.qualit.ly/clawd-working-building.gif',
+      small:   '#43853d',
+      explain: "While a tool is running, the card shows the project, the tool name, the file Claude just touched, and the live token count for the session.",
+    },
+    thinking: {
+      details: 'Thinking in claude-rpc',
+      state:   'Opus 4.7 · 8 prompts · 24k tokens',
+      img:     'https://cdn.qualit.ly/clawd-working-typing.gif',
+      small:   '#d97757',
+      explain: "Between a user prompt and the first tool call. Surfaces the model and how many prompts this session has cost so far.",
+    },
+    notification: {
+      details: 'Waiting on you · claude-rpc',
+      state:   'Opus 4.7 · 8 prompts',
+      img:     'https://cdn.qualit.ly/clawd-notification.gif',
+      small:   '#fe7d37',
+      explain: "Claude is paused for permission or input. The card makes it instantly obvious from another window or from a phone.",
+    },
+    idle: {
+      details: '23-day streak',
+      state:   'Day 53 · 47 sessions',
+      img:     'https://cdn.qualit.ly/clawd-sleeping.gif',
+      small:   '#5865f2',
+      explain: "When nothing is running, the card cycles through lifetime stats — today, this week, streak, hotspot file, lines added, all-time tokens, cost.",
+    },
+  };
+
+  const dcDetails = document.getElementById('dc-details');
+  const dcState = document.getElementById('dc-state');
+  const dcBig = document.getElementById('dc-big');
+  const dcSmall = document.getElementById('dc-small');
+  const dcCard = document.getElementById('dc-card');
+  const explain = document.getElementById('preview-explain');
+  const tabs = document.querySelectorAll('#status-tabs .status-tab');
+
+  let currentStatus = 'working';
+  let autoTimer = null;
+  let userPicked = false;
+
+  function renderStatus(name) {
+    const s = STATES[name];
+    if (!s) return;
+    currentStatus = name;
+    dcCard.style.opacity = '0';
+    setTimeout(() => {
+      dcDetails.textContent = s.details;
+      dcState.textContent = s.state;
+      dcBig.style.backgroundImage = `url('${s.img}')`;
+      dcSmall.style.background = s.small;
+      explain.textContent = s.explain;
+      tabs.forEach(t => t.classList.toggle('active', t.dataset.status === name));
+      dcCard.style.opacity = '1';
+    }, 180);
+  }
+
+  tabs.forEach(t => t.addEventListener('click', () => {
+    userPicked = true;
+    if (autoTimer) clearInterval(autoTimer);
+    renderStatus(t.dataset.status);
+  }));
+
+  // Auto-cycle until the user clicks a tab.
+  const order = ['working', 'thinking', 'notification', 'idle'];
+  let i = 0;
+  autoTimer = setInterval(() => {
+    if (userPicked) return;
+    i = (i + 1) % order.length;
+    renderStatus(order[i]);
+  }, 3500);
+</script>
+</body>
+</html>
