@@ -1,6 +1,6 @@
 {
   "name": "claude-rpc-dashboard",
-  "version": "0.3.9",
+  "version": "0.3.10",
   "private": true,
   "description": "Desktop control panel for claude-rpc — daemon control, config editor, presence preview",
   "license": "MIT",

@@ -1,10 +1,18 @@
 {
   "name": "claude-rpc",
-  "version": "0.3.9",
+  "version": "0.3.10",
   "description": "Discord Rich Presence for Claude Code — live model, project, tokens, and lifetime stats driven by Claude Code's hook system.",
   "type": "module",
   "license": "MIT",
   "author": "Archer Simmons",
+  "homepage": "https://github.com/rar-file/claude-rpc#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rar-file/claude-rpc.git"
+  },
+  "bugs": {
+    "url": "https://github.com/rar-file/claude-rpc/issues"
+  },
   "bin": {
     "claude-rpc": "./bin/claude-rpc.js"
   },
