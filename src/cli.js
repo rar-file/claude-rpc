@@ -15,7 +15,7 @@ import { readState } from './state.js';
 import { buildVars, fillTemplate, humanProject, humanTool, applyIdle, framePasses } from './format.js';
 import { scan, readAggregate, findLiveSessions, dayKey, weekKey } from './scanner.js';
 import { runHookCli } from './hook.js';
-import { install as runInstall, uninstall as runUninstall, isInstalled } from './install.js';
+import { install as runInstall, uninstall as runUninstall, isInstalled, migrateConfig } from './install.js';
 import { startTui } from './tui.js';
 import { generateInsights } from './insights.js';
 import { badgeSvg } from './badge.js';
@@ -723,6 +723,11 @@ const packagedDefault = IS_PACKAGED && !cmd;
         if (!isInstalled()) {
           await runInstall({ exePath: EXE_PATH || process.execPath });
         } else {
+          // Existing install — migrate any new config blocks the upgraded
+          // exe expects (e.g. v0.3.6's presence.byStatus). No-op when the
+          // user's config is already current.
+          try { migrateConfig(); }
+          catch (e) { console.warn(`config migration skipped: ${e.message}`); }
           console.log('Claude RPC is installed. Starting daemon…');
         }
         startDaemon();

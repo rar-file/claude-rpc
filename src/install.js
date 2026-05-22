@@ -191,6 +191,60 @@ export function seedConfig() {
   return true;
 }
 
+// Non-destructive merge of any new top-level keys / presence blocks the
+// shipped DEFAULT_CONFIG has but the user's existing file doesn't.
+//
+// Runs every time install/setup or the packaged default launcher fires,
+// so an upgraded exe pulls in new shape (e.g. v0.3.6's presence.byStatus)
+// without clobbering the user's customizations. Anything the user already
+// has — including a pre-existing byStatus, custom rotation array, custom
+// appName etc. — is left untouched.
+export function migrateConfig() {
+  if (!existsSync(CONFIG_PATH)) return false;
+  let cfg;
+  try { cfg = JSON.parse(readFileSync(CONFIG_PATH, 'utf8')); }
+  catch (e) {
+    console.warn(`  ! could not read config for migration: ${e.message}`);
+    return false;
+  }
+  if (!cfg || typeof cfg !== 'object') return false;
+
+  const added = [];
+
+  // appName (introduced as a template var in v0.3.5).
+  if (!cfg.appName && DEFAULT_CONFIG.appName) {
+    cfg.appName = DEFAULT_CONFIG.appName;
+    added.push('appName');
+  }
+
+  // presence.byStatus (introduced in v0.3.6) — the headline upgrade.
+  // We only seed it when entirely absent. If a user has already started
+  // editing their own byStatus, we leave it alone.
+  cfg.presence = cfg.presence || {};
+  if (!cfg.presence.byStatus && DEFAULT_CONFIG.presence?.byStatus) {
+    cfg.presence.byStatus = JSON.parse(JSON.stringify(DEFAULT_CONFIG.presence.byStatus));
+    added.push('presence.byStatus');
+  }
+
+  // Refresh the lifetime tooltip when the user is on the very old default
+  // ("…{daysSinceFirstLabel}") so they pick up the new streak-aware copy
+  // without us touching anything they've customized.
+  const OLD_LIT = '{modelPretty} · {allHours} on Claude · {daysSinceFirstLabel}';
+  if (cfg.presence.largeImageText === OLD_LIT && DEFAULT_CONFIG.presence?.largeImageText) {
+    cfg.presence.largeImageText = DEFAULT_CONFIG.presence.largeImageText;
+    added.push('presence.largeImageText');
+  }
+
+  if (added.length === 0) {
+    console.log(`  config up to date → ${CONFIG_PATH}`);
+    return false;
+  }
+  writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2));
+  console.log(`  config migrated  → ${CONFIG_PATH}`);
+  console.log(`    added: ${added.join(', ')}`);
+  return true;
+}
+
 export async function install({ exePath, withStartup = true } = {}) {
   if (process.platform !== 'win32' && withStartup) {
     console.warn('Note: startup registration only works on Windows; other steps still run.');
@@ -200,7 +254,10 @@ export async function install({ exePath, withStartup = true } = {}) {
   // not at the temp/Downloads path the user happened to launch from.
   const target = ensureCanonicalExe(incoming);
   console.log('Installing Claude RPC…');
+  // Order matters: seed creates the file if missing, then migrate fills in
+  // any blocks new exe versions added (e.g. presence.byStatus from v0.3.6).
   seedConfig();
+  migrateConfig();
   installHooks(target);
   if (withStartup && process.platform === 'win32') {
     try { await addStartupEntry(target); }
