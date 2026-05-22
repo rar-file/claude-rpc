@@ -661,6 +661,7 @@ function help() {
     ['rescan',    'Force re-parse every transcript (ignores cache)'],
     ['insights',  'Auto-generated insights from your history'],
     ['badge',     'Render a Shields-style SVG (--metric --range --out)'],
+    ['doctor',    'Run a diagnostic checklist — common-failure triage'],
     ['tail',      'Tail the daemon log file'],
     ['daemon',    'Run daemon in foreground (debug)'],
   ];
@@ -713,6 +714,11 @@ const packagedDefault = IS_PACKAGED && !cmd;
     case 'rescan':    doScan(true); break;
     case 'insights':  showInsights(); break;
     case 'badge':     doBadge(process.argv.slice(3)); break;
+    case 'doctor': {
+      const { runDoctor } = await import('./doctor.js');
+      process.exit(runDoctor());
+      break;
+    }
     case 'tail':
     case 'logs':
     case 'log':       tailLog(); break;
