@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, existsSync, watchFile } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, watchFile, unlinkSync } from 'node:fs';
 import process from 'node:process';
 
 // Force the console code page to UTF-8 (65001) on Windows so Unicode box
@@ -15,7 +15,7 @@ import { readState } from './state.js';
 import { buildVars, fillTemplate, humanProject, humanTool, applyIdle, framePasses } from './format.js';
 import { scan, readAggregate, findLiveSessions, dayKey, weekKey } from './scanner.js';
 import { runHookCli } from './hook.js';
-import { install as runInstall, uninstall as runUninstall, isInstalled, migrateConfig } from './install.js';
+import { install as runInstall, uninstall as runUninstall, isInstalled, migrateConfig, installHooks, ensureCanonicalExe } from './install.js';
 import { startTui } from './tui.js';
 import { generateInsights } from './insights.js';
 import { badgeSvg } from './badge.js';
@@ -722,15 +722,41 @@ const packagedDefault = IS_PACKAGED && !cmd;
       if (packagedDefault) {
         if (!isInstalled()) {
           await runInstall({ exePath: EXE_PATH || process.execPath });
+          startDaemon();
         } else {
-          // Existing install — migrate any new config blocks the upgraded
-          // exe expects (e.g. v0.3.6's presence.byStatus). No-op when the
-          // user's config is already current.
-          try { migrateConfig(); }
-          catch (e) { console.warn(`config migration skipped: ${e.message}`); }
-          console.log('Claude RPC is installed. Starting daemon…');
+          // Self-heal an existing install. Two real failure modes this fixes:
+          //
+          //  1. Hook entries in ~/.claude/settings.json can still point at
+          //     the user's original launch directory (e.g. ~/Downloads).
+          //     If that exe is gone or out-of-date, SessionEnd never reaches
+          //     the *current* daemon — close detection silently breaks.
+          //
+          //  2. state.json can be pinned at status='idle' from a long-ago
+          //     session. applyIdle treats idle as the resting state and
+          //     won't transition out of it until the next hook fires; with
+          //     hooks broken (see #1) the daemon happily renders idle-with-
+          //     real-aggregate-data forever.
+          //
+          // Refresh hooks against the canonical exe, migrate config blocks,
+          // wipe state, restart daemon. Anything the user has customized in
+          // config.json is preserved (migrateConfig is non-destructive).
+          console.log('Claude RPC is installed. Refreshing…');
+          try {
+            const target = ensureCanonicalExe(process.execPath);
+            migrateConfig();
+            installHooks(target);
+          } catch (e) {
+            console.warn(`refresh skipped: ${e.message}`);
+          }
+          const wasRunning = stopDaemon({ quiet: true });
+          try { if (existsSync(STATE_PATH)) unlinkSync(STATE_PATH); } catch {}
+          if (wasRunning) {
+            // Brief wait for the OS to release the pid file before we spawn.
+            setTimeout(() => startDaemon(), 700);
+          } else {
+            startDaemon();
+          }
         }
-        startDaemon();
       } else {
         help();
       }
