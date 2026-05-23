@@ -1,17 +1,22 @@
 // All browser-side assets for the local web dashboard, packaged as JS
-// string constants so the bundler picks them up cleanly. Three blocks:
+// string constants so the bundler picks them up cleanly. Single export
+// is `buildHtml({ port })`.
 //
-//   CSS                     — full stylesheet, dark + light themes
-//   LANG_PALETTE            — per-language color JSON consumed by the
-//                             client-side language stack chart
-//   HTML                    — the full HTML scaffold, interpolating
-//                             both of the above plus the browser-side
-//                             JS produced by HTML_SCRIPT_PLACEHOLDER()
-//   HTML_SCRIPT_PLACEHOLDER — the client-side runtime (SSE wiring,
-//                             range selector, drilldowns, theme toggle,
-//                             charts, keyboard shortcuts)
+// ┌─ TABLE OF CONTENTS ─────────────────────────────────────┐
+// │  §1  CSS                — stylesheet (light + dark)     │ ~line 26
+// │  §2  LANG_PALETTE       — language → swatch hex         │ ~line 400
+// │  §3  buildHtml          — HTML scaffold + interpolation │ ~line 420
+// │  §4  HTML_SCRIPT_BODY   — client runtime (SSE, charts,  │ ~line 700
+// │                            range selector, drilldowns,  │
+// │                            theme toggle, keyboard)      │
+// └─────────────────────────────────────────────────────────┘
 //
-// Only HTML is exported. Edit the three blocks below in isolation.
+// Each section is just a string constant — no runtime dependencies
+// between them. Edit one without re-reading the others.
+
+// ─────────────────────────────────────────────────────────────────────
+// §1  CSS
+// ─────────────────────────────────────────────────────────────────────
 
 const CSS = `
 :root {
@@ -389,7 +394,13 @@ footer a:hover { color: var(--text-2); }
 }
 `;
 
-// Color palette for languages, by name. Stable across renders.
+// ─────────────────────────────────────────────────────────────────────
+// §2  LANG_PALETTE — language → swatch hex
+// ─────────────────────────────────────────────────────────────────────
+//
+// Stable across renders. Embedded as a JS object literal inside the
+// client script template; the client parses it once at startup.
+
 const LANG_PALETTE = `{
   'JavaScript': '#f7df1e', 'TypeScript': '#3178c6', 'Python': '#3776ab', 'Rust': '#dea584',
   'Go': '#00add8', 'Ruby': '#cc342d', 'Java': '#b07219', 'Kotlin': '#a97bff',
@@ -409,6 +420,14 @@ const LANG_PALETTE = `{
   'Scala': '#c22d40', 'Groovy': '#4298b8', 'Interface Builder': '#888', 'Env': '#888',
   'Config': '#888', 'Git': '#f1502f',
 }`;
+
+// ─────────────────────────────────────────────────────────────────────
+// §3  buildHtml — HTML scaffold + interpolation
+// ─────────────────────────────────────────────────────────────────────
+//
+// Returns the full HTML string. The only dynamic value is the port,
+// which is fixed at server startup, so this is composed once and reused
+// for every request (see src/server/index.js).
 
 function buildHtml({ port }) {
   const PORT = port;
@@ -685,6 +704,25 @@ ${HTML_SCRIPT_PLACEHOLDER()}
 </body>
 </html>`;
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// §4  HTML_SCRIPT_BODY — client runtime
+// ─────────────────────────────────────────────────────────────────────
+//
+// Returned as a string and inlined into the HTML at the bottom of the
+// document. Vanilla browser JS — no bundler, no framework, no npm. The
+// IIFE keeps all locals out of window.
+//
+// Sub-structure within the IIFE:
+//   • $              — DOM accessor
+//   • LANGS          — parsed language palette
+//   • Utilities      — fmtH / fmtN / fmtCost / escape / etc.
+//   • State buckets  — liveData / aggData / allFrames / rotationTimer
+//   • Range pills    — active selector + delta vs previous range
+//   • Charts         — area chart, sparkline, heatmap, lang stack
+//   • Drilldowns     — project drawer + day-detail modal
+//   • SSE wiring     — EventSource('/events') → refresh handlers
+//   • Keyboard       — 1..5 range, t theme, esc close, ? help
 
 function HTML_SCRIPT_PLACEHOLDER() {
   return `(() => {

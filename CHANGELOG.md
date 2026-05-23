@@ -4,6 +4,7 @@ All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachang
 
 ## Unreleased
 
+- `src/server/page.js` (1,277 LOC, four sibling string blocks) gained a TOC at the top and §1–§4 section markers so the CSS / lang palette / HTML / client-runtime blocks are findable without scrolling-by-hope. No code change.
 - README rewritten. Drift-prone "What's new in v0.2.0" callout removed. One install path leads (Windows portable exe, 4 lines to working presence); other platforms and the "use your own Discord app" path moved to `<details>` blocks. The "Discord app setup" section is gone — a working public clientId ships in the default config. Command table reconciled against actual CLI exports (added `doctor`, `card`, `backfill`, `private`/`public`/`privacy`, `upgrade-config`, etc.). Troubleshooting section leads with `claude-rpc doctor`.
 - `pricingKeyFor` now anchors on the explicit `opus`/`sonnet`/`haiku` token between dashes instead of `String.includes`. A hypothetical `claude-sonneteer-x` model id no longer silently routes to sonnet pricing via a substring match. Dated suffixes like `-20251101` are ignored. Three new regression tests pin the resolution table.
 - Discord reconnect now uses exponential backoff (5s → 10s → 20s → … cap 5min) with ±30% jitter, and resets to the base on a successful connect. Old fixed 10s loop burnt cycles against a closed Discord client forever.
