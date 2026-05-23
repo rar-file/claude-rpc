@@ -48,12 +48,12 @@ export const DEFAULT_CONFIG = {
     byStatus: {
       working: {
         details: "Working in {project}",
-        state:   "{currentToolPretty} · {currentFilePretty} · {tokensFmt} tokens",
+        state:   "{currentToolPretty} · {currentFilePretty} · {tokensLabel}",
         largeImageText: "Working on a {fileLang} file",
       },
       thinking: {
         details: "Thinking in {project}",
-        state:   "{modelPretty} · {messagesLabel} · {tokensFmt} tokens",
+        state:   "{modelPretty} · {messagesLabel} · {tokensLabel}",
         largeImageText: "Reasoning with {modelPretty}",
       },
       notification: {

@@ -237,6 +237,39 @@ test('fillTemplate: passes non-string through', () => {
   assert.equal(fillTemplate(42, {}), 42);
 });
 
+test('fillTemplate: collapses orphan separators from empty vars', () => {
+  // Bash has no file_path → currentFilePretty empty. tokensLabel empty
+  // before any tokens accrue. The naive substitution would yield
+  // "Bash ·  · " — the collapse turns that into just "Bash".
+  const tpl = '{tool} · {file} · {tokens}';
+  assert.equal(fillTemplate(tpl, { tool: 'Bash', file: '', tokens: '' }), 'Bash');
+  assert.equal(fillTemplate(tpl, { tool: 'Bash', file: '', tokens: '2.3k tokens' }),
+    'Bash · 2.3k tokens');
+  assert.equal(fillTemplate(tpl, { tool: 'Edit', file: 'src/foo.js', tokens: '2.3k tokens' }),
+    'Edit · src/foo.js · 2.3k tokens');
+});
+
+test('fillTemplate: template with no `·` is unchanged', () => {
+  // The collapse only runs on `·`-separated templates so non-separator
+  // templates pass through untouched (no accidental whitespace munging).
+  assert.equal(fillTemplate('Hello {name}', { name: 'world' }), 'Hello world');
+  assert.equal(fillTemplate('  spaces  preserved  ', {}), '  spaces  preserved  ');
+});
+
+test('buildVars: tokensLabel is empty when sessionTokens=0', () => {
+  // The reason "Bash · · 0 tokens" used to render. tokensLabel now hides
+  // the metric until it's meaningful.
+  const s = baseState({ tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } });
+  const v = buildVars(s, {}, {});
+  assert.equal(v.tokensLabel, '');
+});
+
+test('buildVars: tokensLabel renders "X tokens" when present', () => {
+  const s = baseState({ tokens: { input: 1000, output: 500, cacheRead: 0, cacheWrite: 0 } });
+  const v = buildVars(s, {}, {});
+  assert.match(v.tokensLabel, /1\.5k tokens$/);
+});
+
 // ── framePasses ────────────────────────────────────────────────────────
 
 test('framePasses: no requires → always true', () => {

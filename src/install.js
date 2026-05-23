@@ -260,6 +260,25 @@ export function migrateConfig() {
     added.push('presence.largeImageText');
   }
 
+  // v0.6.3: byStatus.working.state and .thinking.state used `{tokensFmt} tokens`
+  // which renders "0 tokens" before any session activity has accrued — combined
+  // with empty `{currentFilePretty}` for tools like Bash, that surfaced as
+  // "Bash · · 0 tokens" on the card. New default uses `{tokensLabel}` which is
+  // empty until tokens > 0, and fillTemplate now collapses adjacent separators.
+  // Migrate only the verbatim old template — leave anything the user customized.
+  const OLD_WORKING = '{currentToolPretty} · {currentFilePretty} · {tokensFmt} tokens';
+  const OLD_THINKING = '{modelPretty} · {messagesLabel} · {tokensFmt} tokens';
+  if (cfg.presence.byStatus?.working?.state === OLD_WORKING &&
+      DEFAULT_CONFIG.presence?.byStatus?.working?.state) {
+    cfg.presence.byStatus.working.state = DEFAULT_CONFIG.presence.byStatus.working.state;
+    added.push('presence.byStatus.working.state');
+  }
+  if (cfg.presence.byStatus?.thinking?.state === OLD_THINKING &&
+      DEFAULT_CONFIG.presence?.byStatus?.thinking?.state) {
+    cfg.presence.byStatus.thinking.state = DEFAULT_CONFIG.presence.byStatus.thinking.state;
+    added.push('presence.byStatus.thinking.state');
+  }
+
   if (added.length === 0) {
     console.log(`  config up to date → ${CONFIG_PATH}`);
     return false;

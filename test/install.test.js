@@ -87,6 +87,52 @@ test('migrate: idempotent — repeated runs add nothing', () => {
   assert.deepEqual(cfg, after1, 'second run is a no-op');
 });
 
+// migrateInPlace below is the locally re-implemented merge logic — it
+// covers the byStatus.working/thinking.state literal swap added in v0.6.3.
+function migrateWithLabel(cfg) {
+  cfg.presence = cfg.presence || {};
+  if (!cfg.presence.byStatus && DEFAULT_CONFIG.presence?.byStatus) {
+    cfg.presence.byStatus = JSON.parse(JSON.stringify(DEFAULT_CONFIG.presence.byStatus));
+    return;
+  }
+  const OLD_WORKING = '{currentToolPretty} · {currentFilePretty} · {tokensFmt} tokens';
+  const OLD_THINKING = '{modelPretty} · {messagesLabel} · {tokensFmt} tokens';
+  if (cfg.presence.byStatus?.working?.state === OLD_WORKING) {
+    cfg.presence.byStatus.working.state = DEFAULT_CONFIG.presence.byStatus.working.state;
+  }
+  if (cfg.presence.byStatus?.thinking?.state === OLD_THINKING) {
+    cfg.presence.byStatus.thinking.state = DEFAULT_CONFIG.presence.byStatus.thinking.state;
+  }
+}
+
+test('migrate: literal old working/thinking templates get swapped to {tokensLabel}', () => {
+  const cfg = {
+    presence: {
+      byStatus: {
+        working: { details: 'D', state: '{currentToolPretty} · {currentFilePretty} · {tokensFmt} tokens' },
+        thinking: { details: 'T', state: '{modelPretty} · {messagesLabel} · {tokensFmt} tokens' },
+      },
+    },
+  };
+  migrateWithLabel(cfg);
+  assert.match(cfg.presence.byStatus.working.state, /\{tokensLabel\}/);
+  assert.match(cfg.presence.byStatus.thinking.state, /\{tokensLabel\}/);
+});
+
+test('migrate: customized working state is left alone', () => {
+  const cfg = {
+    presence: {
+      byStatus: {
+        working: { details: 'D', state: 'My custom · {currentToolPretty}' },
+        thinking: { details: 'T', state: '{modelPretty}' },
+      },
+    },
+  };
+  migrateWithLabel(cfg);
+  assert.equal(cfg.presence.byStatus.working.state, 'My custom · {currentToolPretty}');
+  assert.equal(cfg.presence.byStatus.thinking.state, '{modelPretty}');
+});
+
 // ── ensureCanonicalExe ────────────────────────────────────────────────
 
 test('ensureCanonicalExe: dev mode returns input unchanged', () => {

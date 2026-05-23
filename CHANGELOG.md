@@ -6,6 +6,15 @@ All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachang
 
 _No changes yet._
 
+## [0.6.3] - 2026-05-23
+
+**Fixed**
+
+- Working-state card no longer renders `Bash · · 0 tokens`. Two contributing bugs:
+  - `{currentFilePretty}` is empty for tools without a `file_path` (Bash, WebFetch, Task) — that left orphan ` · ` separators. `fillTemplate` now collapses empty separator runs: split on `·`, trim, drop empties, rejoin. Templates without `·` pass through untouched.
+  - `{tokensFmt}` rendered `0` before any session tokens had accrued. New `{tokensLabel}` var returns `'2.3k tokens'` when tokens > 0 and an empty string otherwise. Combined with the collapse, the working frame degrades gracefully: `Bash` alone before tokens, then `Bash · 2.3k tokens`, then `Edit · src/foo.js · 2.3k tokens` once a file is being edited.
+- `migrateConfig` migrates the verbatim old `working` / `thinking` state templates to the new `{tokensLabel}` form. Customized templates are left untouched.
+
 ## [0.6.2] - 2026-05-23
 
 **Security / privacy**

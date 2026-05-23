@@ -379,7 +379,10 @@ export function buildVars(state, config, aggregate) {
     // Literal single space — handy for blanking a line without `requires`.
     empty: ' ',
 
-    // pluralized session labels
+    // Pluralized session labels. tokensLabel is empty when zero so the
+    // `· {tokensLabel}` suffix in default templates collapses away —
+    // "Bash · · 0 tokens" is not a useful frame.
+    tokensLabel: sessionTokens > 0 ? `${fmtNum(sessionTokens)} tokens` : '',
     messagesLabel: plural(messages, 'prompt'),
     toolsLabel: plural(tools, 'tool call'),
     filesEditedLabel: plural(filesEdited, 'edit'),
@@ -562,7 +565,19 @@ export function buildVars(state, config, aggregate) {
 
 export function fillTemplate(tpl, vars) {
   if (typeof tpl !== 'string') return tpl;
-  return tpl.replace(/\{(\w+)\}/g, (_, key) => (key in vars ? String(vars[key]) : `{${key}}`));
+  const filled = tpl.replace(/\{(\w+)\}/g, (_, key) => (key in vars ? String(vars[key]) : `{${key}}`));
+  return collapseSeparators(filled);
+}
+
+// After substitution, a template like "{currentToolPretty} · {currentFilePretty} · {tokensFmt} tokens"
+// can resolve to "Bash ·  · 0 tokens" when the tool doesn't have a file path
+// and no tokens have accumulated yet. Split on `·`, trim each segment, drop
+// empty segments, rejoin — so empty middle vars don't leave orphan separators
+// and trailing/leading separators disappear entirely. Templates without `·`
+// pass through untouched.
+function collapseSeparators(s) {
+  if (!s.includes('·')) return s;
+  return s.split('·').map((p) => p.trim()).filter(Boolean).join(' · ');
 }
 
 // Helper used by every "go stale" branch in applyIdle. Wipes the current-
