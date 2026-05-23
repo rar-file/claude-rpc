@@ -83,7 +83,7 @@ function readPrivateList() {
   try {
     const v = JSON.parse(readFileSync(PRIVATE_LIST_PATH, 'utf8'));
     if (Array.isArray(v?.paths)) return v;
-  } catch {}
+  } catch { /* broken JSON ≡ no list (treat as empty rather than crash) */ }
   return { paths: [] };
 }
 

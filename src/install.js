@@ -135,10 +135,10 @@ function sweepStaleCanonicalBackups() {
     const prefix = CANONICAL_EXE_NAME + '.old-';
     for (const name of readdirSync(CANONICAL_INSTALL_DIR)) {
       if (name.startsWith(prefix)) {
-        try { unlinkSync(join(CANONICAL_INSTALL_DIR, name)); } catch {}
+        try { unlinkSync(join(CANONICAL_INSTALL_DIR, name)); } catch { /* file locked or vanished — sweep is best-effort */ }
       }
     }
-  } catch {}
+  } catch { /* install dir unreadable — nothing to sweep */ }
 }
 
 // Copy the running binary into CANONICAL_EXE if it's not already there.
@@ -160,7 +160,7 @@ export function ensureCanonicalExe(currentExe) {
         console.log(`  exe already installed → ${CANONICAL_EXE}`);
         return CANONICAL_EXE;
       }
-    } catch {}
+    } catch { /* stat failed — fall through to copy attempt */ }
   }
 
   try {
@@ -170,7 +170,7 @@ export function ensureCanonicalExe(currentExe) {
     // renamed copy when the process exits.
     if (process.platform === 'win32' && existsSync(CANONICAL_EXE)) {
       try { renameSync(CANONICAL_EXE, CANONICAL_EXE + '.old-' + Date.now()); }
-      catch {}
+      catch { /* not running, no rename needed — copyFileSync below will just overwrite */ }
     }
     copyFileSync(currentExe, CANONICAL_EXE);
     if (process.platform !== 'win32') chmodSync(CANONICAL_EXE, 0o755);

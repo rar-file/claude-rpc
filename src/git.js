@@ -48,14 +48,14 @@ function readGitInfo(cwd) {
         if (leaf) out.repo = leaf;
       }
     }
-  } catch {}
+  } catch { /* missing/unreadable .git/config — out.repo stays at cwd basename */ }
 
   // HEAD → branch (or empty when detached).
   try {
     const head = readFileSync(join(gitDir, 'HEAD'), 'utf8').trim();
     const ref = head.match(/^ref:\s+refs\/heads\/(.+)$/);
     if (ref) out.branch = ref[1].trim();
-  } catch {}
+  } catch { /* missing/unreadable HEAD — leave branch blank, template will hide */ }
 
   return out;
 }

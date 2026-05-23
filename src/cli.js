@@ -8,7 +8,7 @@ import process from 'node:process';
 // code page on Win10 is 437/850, which displays many of our chars as `?`.
 // Hook events (no TTY) skip this — they don't print anything user-visible.
 if (process.platform === 'win32' && process.stdout.isTTY) {
-  try { spawnSync('chcp.com', ['65001'], { stdio: 'ignore', windowsHide: true }); } catch {}
+  try { spawnSync('chcp.com', ['65001'], { stdio: 'ignore', windowsHide: true }); } catch { /* chcp absent (Wine, custom shell) — accept whatever code page is set */ }
 }
 import { DAEMON_SCRIPT, PID_PATH, STATE_PATH, LOG_PATH, AGGREGATE_PATH, CONFIG_PATH, IS_PACKAGED, EXE_PATH, CANONICAL_EXE } from './paths.js';
 import { readState } from './state.js';
@@ -766,7 +766,7 @@ function tailLog() {
         // file rotated
         lastSize = buf.length;
       }
-    } catch {}
+    } catch { /* read race vs rotation — next watchFile tick recovers */ }
   });
 }
 
@@ -970,7 +970,7 @@ const packagedDefault = IS_PACKAGED && !cmd;
             console.warn(`refresh skipped: ${e.message}`);
           }
           const wasRunning = stopDaemon({ quiet: true });
-          try { if (existsSync(STATE_PATH)) unlinkSync(STATE_PATH); } catch {}
+          try { if (existsSync(STATE_PATH)) unlinkSync(STATE_PATH); } catch { /* state.json locked or already gone — next hook will recreate it */ }
           if (wasRunning) {
             // Brief wait for the OS to release the pid file before we spawn.
             setTimeout(() => startDaemon(), 700);

@@ -22,11 +22,11 @@ export function watchSources() {
       clearTimeout(stTimer);
       stTimer = setTimeout(() => broadcast({ type: 'state' }), 200);
     });
-  } catch {}
+  } catch { /* state file not on disk yet — dashboard still works, just no SSE state events until daemon writes one */ }
   try {
     watch(AGGREGATE_PATH, () => {
       clearTimeout(agTimer);
       agTimer = setTimeout(() => broadcast({ type: 'aggregate' }), 200);
     });
-  } catch {}
+  } catch { /* aggregate not on disk yet — dashboard renders empty stats until first scan completes */ }
 }

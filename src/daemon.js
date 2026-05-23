@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { writeFileSync, existsSync, unlinkSync, watch, appendFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, existsSync, unlinkSync, watch, appendFileSync, mkdirSync, statSync, renameSync } from 'node:fs';
 import { Client } from '@xhayper/discord-rpc';
 import { readState } from './state.js';
 import { buildVars, fillTemplate, framePasses, applyIdle } from './format.js';
@@ -11,9 +11,35 @@ import { CONFIG_PATH, STATE_PATH, PID_PATH, LOG_PATH, STATE_DIR, AGGREGATE_PATH 
 
 if (!existsSync(STATE_DIR)) mkdirSync(STATE_DIR, { recursive: true });
 
+// Daemon log capped at 5MB. Same policy events.jsonl uses (see hook.js).
+// On rotation we move the existing log aside as `daemon.log.1` so the
+// last rotation's content is still available for `claude-rpc tail`.
+// One file's worth of history is enough — older logs have never been
+// useful in practice, and the daemon runs for weeks.
+const LOG_ROTATE_BYTES = 5 * 1024 * 1024;
+
+function maybeRotateLog() {
+  try {
+    const st = statSync(LOG_PATH);
+    if (st.size <= LOG_ROTATE_BYTES) return;
+    renameSync(LOG_PATH, LOG_PATH + '.1');
+  } catch {
+    // No log file yet, or rename failed (another daemon is rotating
+    // simultaneously). Either case is safe to ignore — we'll just keep
+    // appending and try rotation again on the next write.
+  }
+}
+
 function log(...args) {
   const line = `[${new Date().toISOString()}] ${args.map((a) => typeof a === 'string' ? a : JSON.stringify(a)).join(' ')}\n`;
-  try { appendFileSync(LOG_PATH, line); } catch {}
+  maybeRotateLog();
+  try {
+    appendFileSync(LOG_PATH, line);
+  } catch {
+    // Disk full, permission denied, or LOG_PATH became invalid mid-run.
+    // The daemon must keep running regardless — Discord presence is more
+    // important than file logging.
+  }
   process.stdout.write(line);
 }
 
@@ -32,6 +58,14 @@ let client = null;
 let connected = false;
 let lastPayloadHash = '';
 let reconnectTimer = null;
+// Exponential backoff for Discord reconnect: 5s → 10s → 20s → … → 300s cap.
+// Reset to RECONNECT_BASE_MS on a successful connect so the next outage
+// also starts gentle. Jitter (±30%) keeps multiple daemons (e.g. a user
+// running both packaged and dev simultaneously) from synchronizing
+// reconnect storms against Discord's IPC socket.
+const RECONNECT_BASE_MS = 5_000;
+const RECONNECT_CAP_MS  = 300_000;
+let reconnectDelayMs    = RECONNECT_BASE_MS;
 let rotationIndex = 0;
 let lastRotationAt = 0;
 // Stabilizes Discord's elapsed timer: applyIdle can synthesize a sessionStart
@@ -253,26 +287,34 @@ async function connect() {
 
   client.on('ready', () => {
     connected = true;
+    // Reset backoff so the next outage also starts at RECONNECT_BASE_MS.
+    reconnectDelayMs = RECONNECT_BASE_MS;
     log('Discord RPC connected as', client.user?.username);
     lastPayloadHash = '';
     pushPresence();
   });
   client.on('disconnected', () => {
     connected = false;
-    log('Discord disconnected — retrying in 10s');
-    scheduleReconnect();
+    scheduleReconnect('Discord disconnected');
   });
   try { await client.login(); }
   catch (e) {
-    log('Discord login failed:', e.message, '— retrying in 10s. Is Discord desktop running?');
-    scheduleReconnect();
+    scheduleReconnect(`Discord login failed: ${e.message}`);
   }
 }
 
-function scheduleReconnect() {
+function scheduleReconnect(reason = 'reconnect') {
   connected = false;
   if (reconnectTimer) return;
-  reconnectTimer = setTimeout(() => { reconnectTimer = null; connect(); }, 10000);
+  // ±30% jitter on the current step. Cheap protection against
+  // synchronized reconnect storms from sibling daemons.
+  const jitter = 0.7 + Math.random() * 0.6;
+  const wait = Math.round(reconnectDelayMs * jitter);
+  log(`${reason} — retry in ${Math.round(wait / 1000)}s. Is Discord desktop running?`);
+  reconnectTimer = setTimeout(() => { reconnectTimer = null; connect(); }, wait);
+  // Step the base for the *next* failure. Cap at 5min so a long Discord
+  // outage doesn't push us into multi-hour silences.
+  reconnectDelayMs = Math.min(RECONNECT_CAP_MS, reconnectDelayMs * 2);
 }
 
 function watchFiles() {
@@ -300,6 +342,44 @@ function watchFiles() {
       }, 250);
     });
   }
+
+  // Mtime-poll fallback. fs.watch on Windows occasionally drops events
+  // when the writer uses an atomic-rename pattern (which `state.js` does
+  // and the scanner does for aggregate.json). A 30s poll comparing
+  // last-seen mtime catches anything the watcher missed without making
+  // the watcher itself the bottleneck. No-op on Linux/macOS most of the
+  // time, but cheap enough to leave on everywhere.
+  let lastStateMtime = 0, lastAggMtime = 0;
+  setInterval(() => {
+    try {
+      if (existsSync(STATE_PATH)) {
+        const m = statSync(STATE_PATH).mtimeMs;
+        if (m > lastStateMtime) {
+          if (lastStateMtime !== 0) {
+            // The first observation is just the starting value; only
+            // log + push when we actually missed a watcher event.
+            log('state.json mtime advanced without a watcher event (poll fallback)');
+            pushPresence();
+          }
+          lastStateMtime = m;
+        }
+      }
+      if (existsSync(AGGREGATE_PATH)) {
+        const m = statSync(AGGREGATE_PATH).mtimeMs;
+        if (m > lastAggMtime) {
+          if (lastAggMtime !== 0) {
+            aggregate = readAggregate() || aggregate;
+            lastPayloadHash = '';
+            pushPresence();
+          }
+          lastAggMtime = m;
+        }
+      }
+    } catch {
+      // Stat fail mid-rotate of the watched file. The next tick will
+      // pick up the new mtime. Silent on purpose.
+    }
+  }, 30_000);
 }
 
 async function runBackgroundScan({ force = false } = {}) {
@@ -317,8 +397,11 @@ async function runBackgroundScan({ force = false } = {}) {
 
 function shutdown() {
   log('Shutting down…');
-  try { client?.destroy(); } catch {}
-  try { if (existsSync(PID_PATH)) unlinkSync(PID_PATH); } catch {}
+  // Both calls below are best-effort cleanup on the way out the door.
+  // If the IPC client is already half-dead or the PID file was removed
+  // by something else, we don't care — we're exiting anyway.
+  try { client?.destroy(); } catch { /* IPC already gone */ }
+  try { if (existsSync(PID_PATH)) unlinkSync(PID_PATH); } catch { /* race vs another shutdown */ }
   process.exit(0);
 }
 

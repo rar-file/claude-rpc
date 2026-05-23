@@ -16,7 +16,7 @@ function appendEvent(entry) {
       }
     }
     appendFileSync(EVENTS_LOG_PATH, JSON.stringify(entry) + '\n');
-  } catch {}
+  } catch { /* best-effort log: hooks must never fail because of an unwritable events.jsonl */ }
 }
 
 function readStdin() {

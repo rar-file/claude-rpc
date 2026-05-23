@@ -123,7 +123,7 @@ function checkClaudeProjects() {
         if (f.endsWith('.jsonl')) count++;
       }
     }
-  } catch {}
+  } catch { /* unreadable subdir — just report whatever we counted so far */ }
   check('claude transcripts visible', count > 0 ? 'pass' : 'warn',
     `${count} .jsonl ${count === 1 ? 'file' : 'files'}`,
     count === 0 ? 'open claude code and send a prompt — transcripts appear immediately' : '');
@@ -187,7 +187,7 @@ function checkCanonicalExe() {
   }
   if (existsSync(CANONICAL_EXE)) {
     let size = '';
-    try { size = `${(statSync(CANONICAL_EXE).size / 1024 / 1024).toFixed(1)} MB`; } catch {}
+    try { size = `${(statSync(CANONICAL_EXE).size / 1024 / 1024).toFixed(1)} MB`; } catch { /* stat failed, size stays blank */ }
     check('canonical exe installed', 'pass', `${CANONICAL_EXE} (${size})`);
   } else {
     check('canonical exe installed', 'fail', `missing: ${CANONICAL_EXE}`,
@@ -233,7 +233,7 @@ function checkDaemonLog() {
   try {
     const tail = readFileSync(LOG_PATH, 'utf8').split('\n').slice(-50).join('\n');
     connected = /Discord RPC connected/i.test(tail);
-  } catch {}
+  } catch { /* log unreadable — connected stays false, warn check renders */ }
   if (connected) {
     check('discord IPC connection', 'pass',
       `${sizeKB} KB log · last write ${ageMin.toFixed(1)} min ago`);

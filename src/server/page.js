@@ -1239,10 +1239,10 @@ function HTML_SCRIPT_PLACEHOLDER() {
             await fetchAggregate();
             await fetchInsights();
           }
-        } catch {}
+        } catch { /* malformed SSE frame — wait for the next one */ }
       };
       ev.onerror = () => { $('conn-state').textContent = 'reconnecting'; setTimeout(() => { $('conn-state').textContent = 'live'; }, 4000); };
-    } catch {}
+    } catch { /* EventSource constructor failed (very old browser) — dashboard falls back to one-shot fetches */ }
   }
 
   async function refreshState() {

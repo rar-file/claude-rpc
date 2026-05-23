@@ -370,7 +370,7 @@ function cleanup() {
   if (exiting) return;
   exiting = true;
   if (refreshTimer) clearInterval(refreshTimer);
-  try { process.stdin.setRawMode(false); } catch {}
+  try { process.stdin.setRawMode(false); } catch { /* not a tty (CI, pipe) — no-op */ }
   process.stdin.pause();
   process.stdout.write(SHOW_CURSOR + CLEAR + '\n');
   process.exit(0);
@@ -401,7 +401,7 @@ export function startTui() {
   }
   process.stdout.write(HIDE_CURSOR);
 
-  try { process.stdin.setRawMode(true); } catch {}
+  try { process.stdin.setRawMode(true); } catch { /* not a tty — TUI will print once and exit */ }
   process.stdin.resume();
   process.stdin.on('data', handleKey);
 
@@ -409,7 +409,7 @@ export function startTui() {
   process.on('SIGTERM', cleanup);
   process.on('SIGHUP', cleanup);
   process.on('exit', () => {
-    try { process.stdin.setRawMode(false); } catch {}
+    try { process.stdin.setRawMode(false); } catch { /* not a tty (CI, pipe) — no-op */ }
     process.stdout.write(SHOW_CURSOR);
   });
   process.stdout.on('resize', () => render());

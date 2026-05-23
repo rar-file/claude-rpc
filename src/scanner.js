@@ -358,7 +358,7 @@ function readTranscriptCwd(path, mtimeMs) {
       const r = safeJson(line);
       if (r?.cwd) { cwd = r.cwd; break; }
     }
-  } catch {}
+  } catch { /* transcript head unreadable — cwd stays null, project name falls back to slug */ }
   cwdCache.set(path, { mtime: mtimeMs, cwd });
   return cwd;
 }
@@ -464,7 +464,7 @@ function readNotificationsByDay() {
       const k = dayKey(e.ts);
       out[k] = (out[k] || 0) + 1;
     }
-  } catch {}
+  } catch { /* events log unreadable/truncated — return whatever we got, the aggregate will just under-count notifications */ }
   return out;
 }
 
