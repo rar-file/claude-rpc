@@ -128,3 +128,23 @@ test('discoverAltProjectDirs returns an array', () => {
   assert.ok(Array.isArray(dirs), 'returns an array');
   // Cannot assert contents — depends on test machine.
 });
+
+// ── dayKey / weekKey / hourKey ─────────────────────────────────────────
+
+const { dayKey, weekKey, hourKey } = await import('../src/scanner.js');
+
+test('dayKey: YYYY-MM-DD local time', () => {
+  const ts = new Date(2026, 4, 23, 10, 0, 0).getTime(); // 2026-05-23 local
+  assert.equal(dayKey(ts), '2026-05-23');
+});
+
+test('weekKey: ISO week, Monday-anchored', () => {
+  // 2026-05-23 is a Saturday, ISO week 21 of 2026.
+  const ts = new Date(2026, 4, 23).getTime();
+  assert.match(weekKey(ts), /^2026-W\d{2}$/);
+});
+
+test('hourKey: 0..23 from local time', () => {
+  const ts = new Date(2026, 4, 23, 14, 30).getTime();
+  assert.equal(hourKey(ts), 14);
+});

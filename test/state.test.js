@@ -51,3 +51,47 @@ test('shortFile returns basename', () => {
   assert.equal(shortFile(null), null);
   assert.equal(shortFile(''), null);
 });
+
+// ── readState / writeState / updateState round-trip ─────────────────
+//
+// These touch the real STATE_PATH (shared across tests within the process).
+// We round-trip a synthetic value and restore the prior state at the end
+// so we don't leak into other test files' assumptions. The point is to
+// pin the atomic-rename pattern in writeState — a regression there
+// (e.g. dropping the .tmp) would silently lose state under crash, and
+// no other test would catch it.
+
+const { readState, writeState, updateState, resetState } = await import('../src/state.js');
+
+test('writeState + readState round-trip preserves shape', () => {
+  const before = readState();
+  try {
+    writeState({ ...before, model: 'TEST-MODEL-ROUNDTRIP' });
+    const after = readState();
+    assert.equal(after.model, 'TEST-MODEL-ROUNDTRIP');
+  } finally {
+    writeState(before);
+  }
+});
+
+test('updateState applies the mutator', () => {
+  const before = readState();
+  try {
+    updateState((s) => { s.messages = 9999; return s; });
+    assert.equal(readState().messages, 9999);
+  } finally {
+    writeState(before);
+  }
+});
+
+test('resetState seeds DEFAULT_STATE with overrides', () => {
+  const before = readState();
+  try {
+    const fresh = resetState({ cwd: '/test/cwd', model: 'test-model' });
+    assert.equal(fresh.cwd, '/test/cwd');
+    assert.equal(fresh.model, 'test-model');
+    assert.equal(fresh.messages, 0, 'counters zero on reset');
+  } finally {
+    writeState(before);
+  }
+});

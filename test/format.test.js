@@ -153,3 +153,69 @@ test('framePasses: requires array fails on any empty/zero value', () => {
 test('framePasses: em-dash counts as falsy (used for empty fallbacks)', () => {
   assert.equal(framePasses({ requires: 'x' }, { x: '—' }), false);
 });
+
+// ── humanModel / humanTool / humanProject ──────────────────────────────
+
+const { humanModel, humanTool, humanProject, fmtNum, fmtDuration, fmtHours, plural } =
+  await import('../src/format.js');
+
+test('humanModel maps version-tagged ids to friendly names', () => {
+  assert.equal(humanModel('claude-opus-4-7'), 'Opus 4.7');
+  assert.equal(humanModel('claude-sonnet-4-6-20250514'), 'Sonnet 4.6');
+  assert.equal(humanModel('claude-haiku-4-5'), 'Haiku 4.5');
+});
+
+test('humanModel falls back to tier-only when no version', () => {
+  assert.equal(humanModel('claude-opus'), 'Opus');
+  assert.equal(humanModel('unknown-model'), 'Claude');
+  assert.equal(humanModel(''), 'Claude');
+  assert.equal(humanModel(null), 'Claude');
+});
+
+test('humanTool strips MCP prefix and exposes server:action', () => {
+  assert.equal(humanTool('mcp__claude_ai_Vercel__deploy_to_vercel'), 'Vercel:deploy_to_vercel');
+  assert.equal(humanTool('mcp__github__list'), 'github:list');
+  assert.equal(humanTool('Edit'), 'Edit');
+  assert.equal(humanTool(''), '');
+  assert.equal(humanTool(null), '');
+});
+
+test('humanProject strips date suffixes and slug shapes', () => {
+  assert.equal(humanProject('/home/user/projects/my-app'), 'my-app');
+  assert.equal(humanProject('archive-2026-04-25T185311Z'), 'archive');
+  // Claude Code's slugs replace `/` with `-`, so a slug-shaped string
+  // gets last-segment treatment. (Hyphenated project names like `my-app`
+  // become ambiguous in this shape — see scanner.cleanProjectName for
+  // the matching round-trip on the wire.)
+  assert.equal(humanProject('-home-alice-projects-foo'), 'foo');
+  assert.equal(humanProject(''), '');
+});
+
+test('fmtNum scales by suffix', () => {
+  assert.equal(fmtNum(0), '0');
+  assert.equal(fmtNum(999), '999');
+  assert.equal(fmtNum(1500), '1.5k');
+  assert.equal(fmtNum(1_500_000), '1.50M');
+  assert.match(fmtNum(2_500_000_000), /^2\.\d+B$/);
+});
+
+test('fmtDuration uses hours/minutes/seconds', () => {
+  assert.equal(fmtDuration(0), '0s');
+  assert.equal(fmtDuration(45_000), '45s');
+  assert.match(fmtDuration(3 * 60 * 1000), /^3m/);
+  assert.match(fmtDuration(2 * 3600_000), /^2h/);
+});
+
+test('fmtHours: <1h → minutes, <10h → decimal, ≥10h → integer', () => {
+  assert.equal(fmtHours(30 * 60_000), '30m');
+  assert.equal(fmtHours(2.5 * 3600_000), '2.5h');
+  assert.equal(fmtHours(12 * 3600_000), '12h');
+  assert.equal(fmtHours(0), '0h');
+});
+
+test('plural picks singular when n=1', () => {
+  assert.equal(plural(1, 'prompt'), '1 prompt');
+  assert.equal(plural(2, 'prompt'), '2 prompts');
+  assert.equal(plural(0, 'prompt'), '0 prompts');
+  assert.equal(plural(1, 'edit', 'edits'), '1 edit');
+});
