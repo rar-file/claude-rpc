@@ -8,7 +8,7 @@ import {
   readdirSync, unlinkSync,
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import {
   CLAUDE_SETTINGS, CONFIG_PATH, USER_CONFIG_DIR, ROOT,
   HOOK_SCRIPT, IS_PACKAGED, IS_NPM_INSTALL,
@@ -270,6 +270,39 @@ export function migrateConfig() {
   return true;
 }
 
+// Round-trip a synthetic SessionStart event through the same launcher
+// shape that Claude Code itself will use. Proves the hook command actually
+// resolves and runs — without this, `setup` could happily wire a broken
+// command and report success, leaving the user to discover the breakage
+// the next time they open Claude Code. Returns { ok, detail }.
+function verifyHookPipe(exePath) {
+  const cmd  = IS_PACKAGED ? exePath
+              : IS_NPM_INSTALL ? 'claude-rpc'
+              : process.execPath;
+  const args = IS_PACKAGED || IS_NPM_INSTALL
+              ? ['hook', 'SessionStart']
+              : [HOOK_SCRIPT, 'SessionStart'];
+  let result;
+  try {
+    result = spawnSync(cmd, args, {
+      input: '',
+      encoding: 'utf8',
+      timeout: 3000,
+      windowsHide: true,
+    });
+  } catch (e) {
+    return { ok: false, detail: `spawn failed: ${e.message}` };
+  }
+  if (result.error) return { ok: false, detail: `spawn error: ${result.error.message}` };
+  if (result.status !== 0) {
+    return { ok: false, detail: `hook exit ${result.status}: ${(result.stderr || '').trim().slice(0, 120)}` };
+  }
+  if (!result.stdout.includes('"continue"')) {
+    return { ok: false, detail: `unexpected hook output: ${result.stdout.trim().slice(0, 120)}` };
+  }
+  return { ok: true, detail: 'SessionStart round-trip succeeded' };
+}
+
 export async function install({ exePath, withStartup = true } = {}) {
   if (process.platform !== 'win32' && withStartup) {
     console.warn('Note: startup registration only works on Windows; other steps still run.');
@@ -288,6 +321,18 @@ export async function install({ exePath, withStartup = true } = {}) {
     try { await addStartupEntry(target); }
     catch (e) { console.warn(`  startup entry failed: ${e.message}`); }
   }
+
+  // Proof the hook pipe actually fires. A setup that returns success
+  // without verification is a lie — we caught broken-hook-path bugs
+  // twice during v0.3.x because no one ran a real event after install.
+  const probe = verifyHookPipe(target);
+  if (probe.ok) {
+    console.log(`  hook pipe   ✓ ${probe.detail}`);
+  } else {
+    console.warn(`  hook pipe   ✗ ${probe.detail}`);
+    console.warn(`              ↳ run \`claude-rpc doctor\` for a full diagnostic`);
+  }
+
   console.log('\nDone.');
   console.log(`Edit ${CONFIG_PATH} to set your Discord clientId, then run:`);
   // Per-mode "start" instructions — packaged exe takes a daemon subcommand,
@@ -301,6 +346,7 @@ export async function install({ exePath, withStartup = true } = {}) {
     console.log(`  node "${join(ROOT, 'src', 'daemon.js').replace(/\\/g, '/')}"`);
     console.log(`  # or: claude-rpc start  (if you've run \`npm link\`)`);
   }
+  console.log(`\nThen: \`claude-rpc doctor\` to verify everything is wired.`);
 }
 
 export async function uninstall() {

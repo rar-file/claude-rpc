@@ -844,6 +844,7 @@ function help() {
   const cmds = [
     ['setup',     'Install Claude Code hooks (~/.claude/settings.json)'],
     ['uninstall', 'Remove Claude Code hooks'],
+    ['upgrade-config', 'Re-run idempotent migrations on an existing config.json'],
     ['start',     'Start the Discord RPC daemon (detached)'],
     ['stop',      'Stop the daemon'],
     ['restart',   'Stop then start the daemon'],
@@ -903,6 +904,7 @@ const packagedDefault = IS_PACKAGED && !cmd;
     case 'setup':     await runInstall({ exePath: EXE_PATH || process.execPath, withStartup: false }); break;
     case 'install':   await runInstall({ exePath: EXE_PATH || process.execPath }); break;
     case 'uninstall': await runUninstall(); break;
+    case 'upgrade-config': migrateConfig(); break;
     case 'start':     startDaemon(); break;
     case 'stop':      stopDaemon(); break;
     case 'restart':   restartDaemon(); break;

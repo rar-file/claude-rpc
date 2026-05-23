@@ -4,6 +4,9 @@ All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachang
 
 ## Unreleased
 
+- `setup` now test-fires a real `SessionStart` hook through the same launcher Claude Code will use, and prints `hook pipe ✓ …` when it round-trips. A broken hook command no longer hides until the next time the user opens Claude Code.
+- `setup` ends with `Then: \`claude-rpc doctor\` to verify everything is wired.` — User B's 30-second path.
+- `claude-rpc upgrade-config` exposes the idempotent `migrateConfig` migration directly, so existing users can pull in shape changes without re-running full `setup`.
 - Unknown commands now exit 1 with a hint to `--help` instead of silently printing the help dump and exiting 0.
 - Every failure surface points at the next step: backfill/badge/card error paths use a shared `fail(label, hint)` from new `src/ui.js`, defaulting the hint to `run \`claude-rpc doctor\``. Exit codes documented in `--help` (0 ok / 1 user / 2 system / 3 state).
 - `src/ui.js` centralises the SYM_OK/SYM_FAIL/SYM_WARN/SYM_INFO + colour table that `doctor.js` already had; `cli.js` and `doctor.js` now share it. One ANSI table to maintain.
