@@ -2,15 +2,18 @@
 // over the aggregate + state files; no HTTP concerns. Tested separately
 // from the routing layer.
 
-import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { readState } from '../state.js';
 import { buildVars, fillTemplate, applyIdle, framePasses } from '../format.js';
 import { readAggregate, findLiveSessions, dayKey } from '../scanner.js';
-import { CONFIG_PATH } from '../paths.js';
+import { loadConfig as loadSharedConfig } from '../config.js';
 
+// Re-export under the historical name so any external callers (e.g. tests
+// that did `import { loadConfig } from '../api.js'`) still resolve.
+// Internally everything uses the shared loader so a bad config doesn't
+// blank out the dashboard with `{}` — it falls back to defaults.
 export function loadConfig() {
-  try { return JSON.parse(readFileSync(CONFIG_PATH, 'utf8')); } catch { return {}; }
+  return loadSharedConfig();
 }
 
 export function rangeToDays(range) {

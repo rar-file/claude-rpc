@@ -1,11 +1,12 @@
 #!/usr/bin/env node
-import { readFileSync, writeFileSync, existsSync, unlinkSync, watch, appendFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, existsSync, unlinkSync, watch, appendFileSync, mkdirSync } from 'node:fs';
 import { Client } from '@xhayper/discord-rpc';
 import { readState } from './state.js';
 import { buildVars, fillTemplate, framePasses, applyIdle } from './format.js';
 import { scan, readAggregate, findLiveSessions, readSessionTokens } from './scanner.js';
 import { detectGithubUrl } from './git.js';
 import { applyPrivacy } from './privacy.js';
+import { loadConfig } from './config.js';
 import { CONFIG_PATH, STATE_PATH, PID_PATH, LOG_PATH, STATE_DIR, AGGREGATE_PATH } from './paths.js';
 
 if (!existsSync(STATE_DIR)) mkdirSync(STATE_DIR, { recursive: true });
@@ -16,12 +17,15 @@ function log(...args) {
   process.stdout.write(line);
 }
 
-function loadConfig() {
-  try { return JSON.parse(readFileSync(CONFIG_PATH, 'utf8')); }
-  catch (e) { log('Failed to read config.json:', e.message); process.exit(1); }
+// Wrap loadConfig so a parse/IO failure logs once and the daemon keeps
+// running on baked-in defaults. The Electron settings GUI saves the file
+// atomically but mid-edit hand-edits used to brick the daemon — this is
+// the "no, just keep going with what we shipped" failsafe.
+function loadConfigWithLog() {
+  return loadConfig({ onError: (msg) => log(msg) });
 }
 
-let config = loadConfig();
+let config = loadConfigWithLog();
 let aggregate = readAggregate() || null;
 let liveSessions = [];
 let client = null;
@@ -134,9 +138,15 @@ function buildActivity(opts = {}) {
   if (frame.details) activity.details = fillTemplate(frame.details, vars).slice(0, 128);
   if (frame.state) activity.state = fillTemplate(frame.state, vars).slice(0, 128);
 
-  // Image precedence: statusAssets[status] → modelAssets[modelMatch] → presence.largeImageKey.
-  // statusAssets lets the user swap the big image based on what Claude is doing
-  // (working/thinking/idle/stale/notification).
+  // ── Large-image precedence (single source of truth) ────────────────
+  //   1. statusAssets[status]      "working" gif when working, etc.
+  //   2. modelAssets[opus|sonnet|haiku|default]
+  //                                  per-model art (Opus/Sonnet/Haiku),
+  //                                  only consulted when statusAssets
+  //                                  doesn't match AND state isn't stale.
+  //   3. presence.largeImageKey    global fallback.
+  // smallImageKey separately resolves to the `{statusIcon}` template var
+  // (set via config.statusIcons) and is dropped entirely when empty.
   let largeKeyTpl = p.largeImageKey;
   if (config.statusAssets && config.statusAssets[state.status]) {
     largeKeyTpl = config.statusAssets[state.status];
@@ -275,8 +285,9 @@ function watchFiles() {
   }
   watch(CONFIG_PATH, () => {
     log('Config changed — reloading');
-    try { config = loadConfig(); lastPayloadHash = ''; pushPresence(); }
-    catch (e) { log('Reload failed:', e.message); }
+    config = loadConfigWithLog();
+    lastPayloadHash = '';
+    pushPresence();
   });
   if (existsSync(AGGREGATE_PATH)) {
     let aggTimer = null;

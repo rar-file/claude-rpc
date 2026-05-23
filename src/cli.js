@@ -21,6 +21,7 @@ import { generateInsights } from './insights.js';
 import { badgeSvg } from './badge.js';
 import { fmtCost } from './pricing.js';
 import { addPrivateCwd, removePrivateCwd, listPrivateCwds, resolveVisibility } from './privacy.js';
+import { loadConfig, hasUserConfig } from './config.js';
 import { VERSION } from './version.js';
 import { basename } from 'node:path';
 
@@ -247,7 +248,7 @@ function bar(val, max, width = 22) {
 function showStatus() {
   const state = readState();
   const aggregate = readAggregate();
-  const config = readJson(CONFIG_PATH, {});
+  const config = loadConfig();
   const live = findLiveSessions({ thresholdMs: 90_000 });
   state.liveSessions = live;
   const vars = buildVars(state, config, aggregate);
@@ -431,7 +432,7 @@ function showStatus() {
 function showToday() {
   const state = readState();
   const aggregate = readAggregate();
-  const config = readJson(CONFIG_PATH, {});
+  const config = loadConfig();
   state.liveSessions = findLiveSessions({ thresholdMs: 90_000 });
   const vars = buildVars(state, config, aggregate);
 
@@ -459,7 +460,7 @@ function showToday() {
 function showWeek() {
   const state = readState();
   const aggregate = readAggregate();
-  const config = readJson(CONFIG_PATH, {});
+  const config = loadConfig();
   state.liveSessions = findLiveSessions({ thresholdMs: 90_000 });
   const vars = buildVars(state, config, aggregate);
 
@@ -519,7 +520,7 @@ function statusColor(status) {
 function showPreview() {
   let state = readState();
   const aggregate = readAggregate();
-  const config = readJson(CONFIG_PATH, {});
+  const config = loadConfig();
   const live = findLiveSessions({ thresholdMs: 90_000 });
   state.liveSessions = live;
   state = applyIdle(state, config);
@@ -559,7 +560,7 @@ function showPreview() {
 // previous helper exactly: { vars: [sorted keys], live: <full vars object> }.
 function dumpVars() {
   let state = readState();
-  const config = readJson(CONFIG_PATH, {});
+  const config = loadConfig();
   state.liveSessions = findLiveSessions({ thresholdMs: 90_000 });
   state = applyIdle(state, config);
   const live = buildVars(state, config, readAggregate() || {});
@@ -708,10 +709,6 @@ async function doCard(argv) {
 // Per-project overrides live in <project>/.claude-rpc.json and take priority
 // over the runtime list. See src/privacy.js for the full resolution chain.
 
-function loadConfigSafe() {
-  try { return JSON.parse(readFileSync(CONFIG_PATH, 'utf8')); } catch { return {}; }
-}
-
 function doPrivate() {
   const cwd = process.cwd();
   const list = addPrivateCwd(cwd);
@@ -732,7 +729,7 @@ function doPublic() {
 
 function doPrivacy() {
   const cwd = process.cwd();
-  const cfg = loadConfigSafe();
+  const cfg = loadConfig();
   const { visibility, projectName, reason } = resolveVisibility(cwd, cfg);
   const color = visibility === 'hidden' ? c.red : visibility === 'name-only' ? c.yellow : c.green;
   console.log('');
@@ -780,14 +777,15 @@ function tailLog() {
 // args sees in <24 lines what's happening and the four most useful next
 // commands. Full command list lives behind --help.
 function overview() {
-  const cfg = readJson(CONFIG_PATH, null);
+  const setUp = hasUserConfig();
+  const cfg = loadConfig();
   const pid = daemonPid();
 
   console.log('');
   console.log(`  ${c.bold}${c.magenta}◆ claude-rpc${c.reset}  ${c.dim}v${VERSION} — Discord Rich Presence for Claude Code${c.reset}`);
   console.log('');
 
-  if (!cfg) {
+  if (!setUp) {
     console.log(`  ${c.yellow}○${c.reset} not configured yet`);
     console.log('');
     console.log(`  Run ${c.cyan}claude-rpc setup${c.reset} to get started.`);

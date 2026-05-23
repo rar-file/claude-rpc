@@ -9,7 +9,8 @@ import { readFileSync, existsSync } from 'node:fs';
 import { readState } from './state.js';
 import { readAggregate, findLiveSessions, dayKey, weekKey } from './scanner.js';
 import { buildVars, applyIdle, humanProject } from './format.js';
-import { CONFIG_PATH, PID_PATH } from './paths.js';
+import { loadConfig } from './config.js';
+import { PID_PATH } from './paths.js';
 import { fmtCost } from './pricing.js';
 import { generateInsights } from './insights.js';
 
@@ -52,9 +53,7 @@ let exiting = false;
 function loadSnapshot() {
   let state = readState();
   state.liveSessions = findLiveSessions({ thresholdMs: 90_000 });
-  const config = existsSync(CONFIG_PATH)
-    ? (() => { try { return JSON.parse(readFileSync(CONFIG_PATH, 'utf8')); } catch { return {}; } })()
-    : {};
+  const config = loadConfig();
   state = applyIdle(state, config);
   const aggregate = readAggregate() || {};
   const vars = buildVars(state, config, aggregate);
