@@ -79,6 +79,107 @@ test('applyIdle: respects legacy state with no claudeClosed field', () => {
   assert.equal(r.status, 'working', 'undefined flag is falsy, no crash');
 });
 
+// ── fast-path stale detection (v0.6.2) ─────────────────────────────────
+//
+// SessionEnd doesn't fire on force-quit / crash / OS sleep, so the only
+// honest signal that Claude Code isn't running anymore is "no transcripts
+// are being written to disk". When that's true, going stale right away
+// keeps yesterday's cwd off the Discord card. The legacy 5-min staleMs
+// fallback still catches edge cases where transcripts are fresh but
+// hooks are silent.
+
+test('applyIdle: status=idle + no live sessions → stale immediately', () => {
+  const s = baseState({ status: 'idle', lastActivity: now() - 30_000, liveSessions: [] });
+  const r = applyIdle(s, { staleSessionMin: 5, idleThresholdSec: 60 });
+  assert.equal(r.status, 'stale', 'no live sessions ≡ Claude not running');
+  assert.equal(r.cwd, '', 'cwd wiped so {project} stops leaking');
+});
+
+test('applyIdle: status=idle WITH live sessions stays idle', () => {
+  const recent = now() - 30_000;
+  const s = baseState({ status: 'idle', lastActivity: now() - 30_000,
+    liveSessions: [{ cwd: '/p', mtime: recent }] });
+  const r = applyIdle(s, { staleSessionMin: 5, idleThresholdSec: 60 });
+  assert.equal(r.status, 'idle', 'paused-but-open Claude stays idle');
+});
+
+test('applyIdle: working past idleMs + no live sessions → stale, skipping idle', () => {
+  const past = now() - 90_000; // 90s ago, past idleMs=60s but well under staleMs=5min
+  const s = baseState({ status: 'working', lastActivity: past, liveSessions: [] });
+  const r = applyIdle(s, { staleSessionMin: 5, idleThresholdSec: 60 });
+  assert.equal(r.status, 'stale', 'no live sessions overrides 5-min staleMs wait');
+  assert.equal(r.cwd, '');
+});
+
+test('applyIdle: working past idleMs + live sessions present → idle (not stale)', () => {
+  const past = now() - 90_000;
+  const recent = now() - 30_000;
+  const s = baseState({ status: 'working', lastActivity: past,
+    liveSessions: [{ cwd: '/p', mtime: recent }] });
+  const r = applyIdle(s, { staleSessionMin: 5, idleThresholdSec: 60 });
+  // liveAgeMs (30s) <= idleMs (60s) → keep working, transcript is hot.
+  assert.equal(r.status, 'working');
+});
+
+// ── username-leak suppression (v0.6.2) ─────────────────────────────────
+
+test('buildVars: cwd === home dir suppresses the username', () => {
+  const origHome = process.env.HOME;
+  const origUser = process.env.USER;
+  process.env.HOME = '/home/lucas';
+  process.env.USER = 'lucas';
+  try {
+    const s = baseState({ cwd: '/home/lucas' });
+    const v = buildVars(s, { appName: 'Claude Code' }, {});
+    assert.equal(v.project, 'Claude Code', 'home-dir cwd renders as appName');
+    assert.notEqual(v.project, 'lucas', 'username never appears');
+    assert.equal(v.cwd, '', 'raw cwd also suppressed (custom templates use {cwd})');
+  } finally {
+    process.env.HOME = origHome;
+    process.env.USER = origUser;
+  }
+});
+
+test('buildVars: basename(cwd) matching $USER also triggers suppression', () => {
+  const origUser = process.env.USER;
+  process.env.USER = 'lucas';
+  try {
+    const s = baseState({ cwd: '/anywhere/else/lucas' });
+    const v = buildVars(s, { appName: 'Claude Code' }, {});
+    assert.equal(v.project, 'Claude Code');
+  } finally {
+    process.env.USER = origUser;
+  }
+});
+
+test('buildVars: real project name unaffected by the leak check', () => {
+  const origUser = process.env.USER;
+  process.env.USER = 'lucas';
+  try {
+    const s = baseState({ cwd: '/home/lucas/my-project' });
+    const v = buildVars(s, {}, {});
+    assert.equal(v.project, 'my-project');
+    assert.equal(v.cwd, '/home/lucas/my-project');
+  } finally {
+    process.env.USER = origUser;
+  }
+});
+
+test('buildVars: Windows-style USERPROFILE triggers suppression', () => {
+  const origProfile = process.env.USERPROFILE;
+  const origUsername = process.env.USERNAME;
+  process.env.USERPROFILE = 'C:\\Users\\lucas';
+  process.env.USERNAME = 'lucas';
+  try {
+    const s = baseState({ cwd: 'C:\\Users\\lucas' });
+    const v = buildVars(s, {}, {});
+    assert.equal(v.project, 'Claude Code', 'Windows home dir suppressed');
+  } finally {
+    process.env.USERPROFILE = origProfile;
+    process.env.USERNAME = origUsername;
+  }
+});
+
 // ── buildVars ──────────────────────────────────────────────────────────
 
 test('buildVars: produces core session vars', () => {

@@ -6,6 +6,18 @@ All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachang
 
 _No changes yet._
 
+## [0.6.2] - 2026-05-23
+
+**Security / privacy**
+
+- **Username no longer leaks to Discord when `cwd` is the home directory.** A user running Claude Code from `C:\Users\lucas` or `/home/lucas` would see the card render as "Idle in lucas" — exposing their OS account name to anyone with friends-list visibility. The buildVars now detects when `cwd` equals `$HOME` / `$USERPROFILE` or when `basename(cwd)` matches `$USER` / `$USERNAME`, and falls back to `appName` ("Idle in Claude Code"). Both the displayed `{project}` and the raw `{cwd}` template var are sanitised. Path separators normalised so the check works cross-platform.
+
+**Resilience**
+
+- **Stale-detection fast path.** `applyIdle` now goes straight to `stale` (clearing the card via `hideWhenStale`) when no transcripts have been written anywhere on disk in the last 90s, instead of waiting the full `staleSessionMin` (default 5min). Catches force-quit / OS-sleep / crash cases where `SessionEnd` doesn't fire — the card clears in ~90–120s of close instead of 5min. Paused-but-open Claude (transcripts still being written) is unaffected. The `staleSessionMin` 5-min fallback is still in place for the edge case where transcript mtime is fresh but the hook channel is silent.
+
+Combined effect: Lucas's friends never see "Idle in lucas" again, and the card disappears within ~2min of him closing Claude even if SessionEnd didn't fire.
+
 ## [0.6.1] - 2026-05-23
 
 **Fixed**

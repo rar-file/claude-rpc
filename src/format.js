@@ -140,6 +140,37 @@ function fmtHour(h) {
   return `${hh}:00`;
 }
 
+// Detect a cwd that would leak the user's OS username if rendered on
+// Discord. Examples:
+//   /home/lucas              → basename matches $USER → leak
+//   C:\Users\lucas           → equals $USERPROFILE → leak
+//   /Users/lucas/projects/x  → basename "x" ≠ user → fine
+// On a real privacy-sensitive cwd (the home dir itself, with no project
+// scoping), buildVars falls back to `appName` so the card reads
+// "Idle in Claude Code" instead of "Idle in lucas".
+function looksLikeUsernameLeak(cwd) {
+  if (!cwd) return false;
+  // Check both POSIX and Windows env vars unconditionally — a test or
+  // edge case might have one without the other, and over-suppressing
+  // the leak side is the safe direction.
+  const homes = [process.env.HOME, process.env.USERPROFILE].filter(Boolean);
+  const users = [process.env.USER, process.env.USERNAME].filter(Boolean);
+  // Normalize path separators so Windows-style cwds work on POSIX
+  // basename (which doesn't split on '\').
+  const norm = (p) => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+  const cwdN = norm(cwd);
+  for (const home of homes) {
+    if (cwdN === norm(home)) return true;
+  }
+  if (users.length) {
+    const base = cwdN.split('/').pop() || '';
+    for (const u of users) {
+      if (base === u.toLowerCase()) return true;
+    }
+  }
+  return false;
+}
+
 // Trim "C:\repo\src\app\page.tsx" → "src/app/page.tsx" (3 trailing segments).
 function prettyFilePath(p) {
   if (!p) return '';
@@ -156,7 +187,14 @@ export function buildVars(state, config, aggregate) {
   // {tokens} / {tokensFmt} now means the grand total (in + out + cache).
   const sessionTokens = sessionReal + sessionCacheRead + sessionCacheWrite;
   const duration = state.sessionStart ? Date.now() - state.sessionStart : 0;
-  const projectPretty = humanProject(state.cwd) || 'Claude Code';
+  // Privacy: when cwd is the user's home dir (or its basename matches the
+  // OS username), don't render it. "Idle in lucas" on Discord is a username
+  // leak to anyone viewing the card. Fall back to the configured app name.
+  const cwdIsLeaky = looksLikeUsernameLeak(state.cwd);
+  const safeCwd = cwdIsLeaky ? '' : (state.cwd || '');
+  const projectPretty = cwdIsLeaky
+    ? (config?.appName || 'Claude Code')
+    : (humanProject(state.cwd) || 'Claude Code');
   const currentToolPretty = humanTool(state.currentTool);
   const modelPretty = humanModel(state.model);
 
@@ -298,7 +336,7 @@ export function buildVars(state, config, aggregate) {
     statusIcon: config?.statusIcons?.[state.status] || state.status || 'idle',
     project: projectPretty,
     projectPretty,
-    cwd: state.cwd || '',
+    cwd: safeCwd,
     model: state.model || 'claude',
     modelPretty,
     messages,
@@ -527,6 +565,27 @@ export function fillTemplate(tpl, vars) {
   return tpl.replace(/\{(\w+)\}/g, (_, key) => (key in vars ? String(vars[key]) : `{${key}}`));
 }
 
+// Helper used by every "go stale" branch in applyIdle. Wipes the current-
+// activity slots so rotation frames can't render yesterday's project /
+// file / tool names, and zeroes the session counters that are tied to
+// the now-dead session.
+function staleWipe(state) {
+  return {
+    ...state,
+    status: 'stale',
+    currentTool: null,
+    currentFile: null,
+    sessionStart: null,
+    cwd: '',
+    messages: 0,
+    tools: 0,
+    filesOpened: [],
+    filesEdited: [],
+    filesRead: [],
+    tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  };
+}
+
 // Apply idle/stale transitions based on lastActivity age. Used by both daemon
 // and the `preview` CLI command so they agree.
 //
@@ -546,22 +605,7 @@ export function applyIdle(state, cfg = {}) {
   // Authoritative close signal from the SessionEnd hook — trust it instead
   // of waiting on staleSessionMin. Any other hook clears the flag, so a
   // sibling session staying alive will reset us out of this branch.
-  if (state.claudeClosed) {
-    return {
-      ...state,
-      status: 'stale',
-      currentTool: null,
-      currentFile: null,
-      sessionStart: null,
-      cwd: '',
-      messages: 0,
-      tools: 0,
-      filesOpened: [],
-      filesEdited: [],
-      filesRead: [],
-      tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    };
-  }
+  if (state.claudeClosed) return staleWipe(state);
 
   // Notification is a brief status — hold it for ~8s after the hook fires,
   // then fall through to normal idle/stale processing.
@@ -578,22 +622,7 @@ export function applyIdle(state, cfg = {}) {
   const liveAgeMs = mostRecentLiveMs ? now - mostRecentLiveMs : Infinity;
 
   // Truly dormant: no live transcripts AND local state is old → stale.
-  if (ageMs > staleMs && liveAgeMs > staleMs) {
-    return {
-      ...state,
-      status: 'stale',
-      currentTool: null,
-      currentFile: null,
-      sessionStart: null,
-      cwd: '',
-      messages: 0,
-      tools: 0,
-      filesOpened: [],
-      filesEdited: [],
-      filesRead: [],
-      tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    };
-  }
+  if (ageMs > staleMs && liveAgeMs > staleMs) return staleWipe(state);
 
   // Local state is stale but a live transcript exists somewhere on disk.
   // Borrow the most-recent live session as our "active" context, since the
@@ -619,11 +648,25 @@ export function applyIdle(state, cfg = {}) {
   }
 
   // Local state is fresh.
-  if (state.status === 'idle') return state;
+  if (state.status === 'idle') {
+    // Fast-path stale: if there are NO transcripts being written anywhere
+    // on disk, Claude Code isn't running. SessionEnd may not have fired
+    // (force-quit, OS sleep, crash). Going stale here clears Discord
+    // within ~90-120s of close instead of waiting the full staleMs (5min)
+    // — keeps the user's cwd off the card when they're away from their
+    // machine. The 5min legacy fallback below still catches the case
+    // where transcript mtime is fresh but the hook channel is silent.
+    if (liveSessions.length === 0) return staleWipe(state);
+    return state;
+  }
   if (ageMs > idleMs) {
     // Hook channel is quiet, but a live transcript was modified recently?
     // Keep "working" instead of dropping to "idle".
     if (liveAgeMs <= idleMs) return state;
+    // Hooks quiet AND no live transcripts → Claude is closed, not paused.
+    // Skip idle, go straight to stale. Same privacy reasoning as the
+    // idle-state fast-path above.
+    if (liveSessions.length === 0) return staleWipe(state);
     // Going idle — wipe "current activity" indicators so rotation frames
     // gated on filesEdited / currentFile / currentTool stop showing stale
     // active-session data. Keep the session counters (messages/tools/tokens)
