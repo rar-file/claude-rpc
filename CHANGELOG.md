@@ -4,6 +4,7 @@ All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachang
 
 ## Unreleased
 
+- `pricingKeyFor` now anchors on the explicit `opus`/`sonnet`/`haiku` token between dashes instead of `String.includes`. A hypothetical `claude-sonneteer-x` model id no longer silently routes to sonnet pricing via a substring match. Dated suffixes like `-20251101` are ignored. Three new regression tests pin the resolution table.
 - Discord reconnect now uses exponential backoff (5s → 10s → 20s → … cap 5min) with ±30% jitter, and resets to the base on a successful connect. Old fixed 10s loop burnt cycles against a closed Discord client forever.
 - `daemon.log` rotates at 5MB to `daemon.log.1` — same policy `events.jsonl` already used.
 - Added a 30s mtime-poll fallback alongside `fs.watch` for `state.json` / `aggregate.json` so the daemon picks up changes even when Windows drops watcher events under the atomic-rename writer pattern.

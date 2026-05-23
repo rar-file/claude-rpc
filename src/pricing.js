@@ -29,16 +29,39 @@ const PRICING = {
 
 const DEFAULT = PRICING.sonnet;
 
+const TIERS = new Set(['opus', 'sonnet', 'haiku']);
+
 // Map a model id like "claude-opus-4-7-20251101" to a pricing key.
+//
+// The old implementation did `s.includes(key)` against the PRICING keys
+// sorted by descending length, which silently mis-routed any future model
+// id whose name contained one of those substrings out of order
+// (e.g. `claude-sonneteer-x` matching `sonnet`). Now: split the id on `-`,
+// find the first explicit tier token, then read the version digits that
+// follow. Falls back from `tier-major-minor` → `tier-major` → tier generic
+// → sonnet, in that order.
 export function pricingKeyFor(modelId) {
   if (!modelId) return 'sonnet';
-  const s = String(modelId).toLowerCase();
-  // Most specific match wins.
-  const candidates = Object.keys(PRICING).sort((a, b) => b.length - a.length);
-  for (const key of candidates) {
-    if (s.includes(key)) return key;
+  const parts = String(modelId).toLowerCase().split('-');
+
+  let tier = null;
+  let tierIdx = -1;
+  for (let i = 0; i < parts.length; i++) {
+    if (TIERS.has(parts[i])) { tier = parts[i]; tierIdx = i; break; }
   }
-  return 'sonnet';
+  if (!tier) return 'sonnet'; // unknown family — sonnet-class fallback
+
+  const major = parts[tierIdx + 1];
+  const minor = parts[tierIdx + 2];
+  if (major && /^\d+$/.test(major)) {
+    if (minor && /^\d+$/.test(minor)) {
+      const k = `${tier}-${major}-${minor}`;
+      if (PRICING[k]) return k;
+    }
+    const km = `${tier}-${major}`;
+    if (PRICING[km]) return km;
+  }
+  return tier; // generic tier rates
 }
 
 export function ratesFor(modelId) {
