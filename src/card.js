@@ -14,6 +14,7 @@
 import { dayKey } from './scanner.js';
 import { fmtCost } from './pricing.js';
 import { rangeToDays, rangeLabel, pickWindow } from './badge.js';
+import { VERSION } from './version.js';
 
 const W = 880;
 const H = 540;
@@ -273,7 +274,7 @@ export function renderCard(aggregate, { range = 'year', generatedAt = new Date()
           font-size="13"
           fill="${PALETTE.inkMute}">${subtitle}</text>
   </g>
-  ${tapeSticker(W - 220, 40, 'claude-rpc · v0.4', { rotate: 3 })}
+  ${tapeSticker(W - 220, 40, `claude-rpc · v${VERSION}`, { rotate: 3 })}
 
   <!-- ── hero hours card ── -->
   <g transform="translate(60 130)">

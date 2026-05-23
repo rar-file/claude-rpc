@@ -26,3 +26,6 @@ desktop.ini
 .env
 .env.local
 config.local.json
+
+# Polish-pass scratchpad (audit findings, not part of the repo)
+NOTES.md

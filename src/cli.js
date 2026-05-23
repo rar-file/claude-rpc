@@ -21,6 +21,7 @@ import { generateInsights } from './insights.js';
 import { badgeSvg } from './badge.js';
 import { fmtCost } from './pricing.js';
 import { addPrivateCwd, removePrivateCwd, listPrivateCwds, resolveVisibility } from './privacy.js';
+import { VERSION } from './version.js';
 import { basename } from 'node:path';
 
 const cmd = process.argv[2];
@@ -775,6 +776,75 @@ function tailLog() {
   });
 }
 
+// One-screen "where am I?" view. Goal: a user typing `claude-rpc` with no
+// args sees in <24 lines what's happening and the four most useful next
+// commands. Full command list lives behind --help.
+function overview() {
+  const cfg = readJson(CONFIG_PATH, null);
+  const pid = daemonPid();
+
+  console.log('');
+  console.log(`  ${c.bold}${c.magenta}◆ claude-rpc${c.reset}  ${c.dim}v${VERSION} — Discord Rich Presence for Claude Code${c.reset}`);
+  console.log('');
+
+  if (!cfg) {
+    console.log(`  ${c.yellow}○${c.reset} not configured yet`);
+    console.log('');
+    console.log(`  Run ${c.cyan}claude-rpc setup${c.reset} to get started.`);
+    console.log('');
+    console.log(`  ${c.dim}--help for the full command list${c.reset}`);
+    console.log('');
+    return;
+  }
+
+  // Status line: daemon up/down + project + model + status verb.
+  const state = readState();
+  const aggregate = readAggregate();
+  state.liveSessions = findLiveSessions({ thresholdMs: 90_000 });
+  const vars = buildVars(state, cfg, aggregate);
+  const dot = pid
+    ? `${c.green}●${c.reset} running ${c.dim}pid ${pid}${c.reset}`
+    : `${c.yellow}○${c.reset} ${c.dim}daemon not running${c.reset}`;
+  if (pid) {
+    console.log(`  ${dot}  ${c.gray}·${c.reset}  ${c.bold}${vars.modelPretty}${c.reset} in ${c.bold}${vars.project}${c.reset}  ${c.gray}·${c.reset}  ${statusColor(vars.status)}${vars.statusVerbose}${c.reset}`);
+  } else {
+    console.log(`  ${dot}`);
+  }
+
+  if (aggregate) {
+    console.log('');
+    console.log(`  ${c.dim}today  ${c.reset}${c.green}${vars.todayHours.padEnd(6)}${c.reset}${c.dim}active  ·  ${vars.todayPromptsLabel}  ·  ${vars.todayCostFmt}${c.reset}`);
+    console.log(`  ${c.dim}streak ${c.reset}${c.magenta}${String(vars.streak).padEnd(6)}${c.reset}${c.dim}${vars.streak === 1 ? 'day' : 'days'}  ·  longest ${vars.longestStreak}  ·  ${vars.allHours} all-time${c.reset}`);
+  } else {
+    console.log('');
+    console.log(`  ${c.dim}no stats yet — run ${c.reset}${c.cyan}claude-rpc scan${c.reset}${c.dim} to build aggregates${c.reset}`);
+  }
+
+  // Four most useful next commands. Doctor leads — it's the answer to
+  // "something looks wrong" without the user having to read anything.
+  console.log('');
+  const next = pid
+    ? [['status', 'full dashboard with heatmap'],
+       ['doctor', 'diagnose problems'],
+       ['serve',  'open the web dashboard'],
+       ['stop',   'stop the daemon']]
+    : (cfg.clientId && cfg.clientId !== '1234567890123456789')
+      ? [['start',  'launch the daemon'],
+         ['doctor', 'diagnose problems'],
+         ['status', 'show current stats'],
+         ['setup',  'register Claude Code hooks']]
+      : [['setup',  'install hooks and seed config'],
+         ['doctor', 'diagnose problems'],
+         ['start',  'launch the daemon'],
+         ['status', 'show current stats']];
+  for (const [name, desc] of next) {
+    console.log(`  ${c.cyan}${name.padEnd(8)}${c.reset}  ${c.dim}→${c.reset}  ${desc}`);
+  }
+  console.log('');
+  console.log(`  ${c.dim}--help for the full command list  ·  --version${c.reset}`);
+  console.log('');
+}
+
 function help() {
   const cmds = [
     ['setup',     'Install Claude Code hooks (~/.claude/settings.json)'],
@@ -827,6 +897,12 @@ const packagedDefault = IS_PACKAGED && !cmd;
 // top-level await.
 (async () => {
   switch (cmd) {
+    case '--version':
+    case '-V':
+    case '-v':        console.log(`claude-rpc ${VERSION}`); break;
+    case '--help':
+    case '-h':
+    case 'help':      help(); break;
     case 'setup':     await runInstall({ exePath: EXE_PATH || process.execPath, withStartup: false }); break;
     case 'install':   await runInstall({ exePath: EXE_PATH || process.execPath }); break;
     case 'uninstall': await runUninstall(); break;
@@ -903,7 +979,15 @@ const packagedDefault = IS_PACKAGED && !cmd;
             startDaemon();
           }
         }
+      } else if (!cmd) {
+        // True no-args invocation in dev/npm mode → one-screen overview.
+        // The packagedDefault branch above handles the SEA exe's "double-
+        // click with no args" install-and-start flow.
+        overview();
       } else {
+        // Unknown command — handled by a later packet that wires shared
+        // error UX. For now, fall back to the help dump so a user typo
+        // doesn't silently no-op.
         help();
       }
     }
