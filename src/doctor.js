@@ -16,37 +16,17 @@ import {
 } from './paths.js';
 import { findLiveSessions } from './scanner.js';
 import { resolveVisibility, listPrivateCwds } from './privacy.js';
-
-const TTY = process.stdout.isTTY && !process.env.NO_COLOR;
-const c = {
-  reset:  TTY ? '\x1b[0m'   : '',
-  dim:    TTY ? '\x1b[2m'   : '',
-  bold:   TTY ? '\x1b[1m'   : '',
-  red:    TTY ? '\x1b[31m'  : '',
-  green:  TTY ? '\x1b[32m'  : '',
-  yellow: TTY ? '\x1b[33m'  : '',
-  cyan:   TTY ? '\x1b[36m'  : '',
-  gray:   TTY ? '\x1b[90m'  : '',
-};
-
-const SYM_OK   = TTY ? `${c.green}✓${c.reset}` : '[ok]  ';
-const SYM_FAIL = TTY ? `${c.red}✗${c.reset}`   : '[fail]';
-const SYM_WARN = TTY ? `${c.yellow}!${c.reset}` : '[warn]';
-const SYM_INFO = TTY ? `${c.cyan}·${c.reset}`  : '[info]';
+import { c, check as uiCheck } from './ui.js';
 
 const counters = { pass: 0, fail: 0, warn: 0 };
 
+// Thin wrapper around the shared ui.check so we can keep counters local
+// to this module without exporting a stateful version from ui.js.
 function check(label, status, detail = '', hint = '') {
-  let sym;
-  if (status === 'pass')      { sym = SYM_OK;   counters.pass++; }
-  else if (status === 'fail') { sym = SYM_FAIL; counters.fail++; }
-  else if (status === 'warn') { sym = SYM_WARN; counters.warn++; }
-  else                          { sym = SYM_INFO; }
-  const tail = detail ? `  ${c.dim}${detail}${c.reset}` : '';
-  console.log(`  ${sym}  ${label}${tail}`);
-  if (hint && status !== 'pass') {
-    console.log(`        ${c.gray}↳ ${hint}${c.reset}`);
-  }
+  if      (status === 'pass') counters.pass++;
+  else if (status === 'fail') counters.fail++;
+  else if (status === 'warn') counters.warn++;
+  uiCheck(label, status, detail, hint);
 }
 
 function section(title) {

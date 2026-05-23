@@ -23,6 +23,7 @@ import { fmtCost } from './pricing.js';
 import { addPrivateCwd, removePrivateCwd, listPrivateCwds, resolveVisibility } from './privacy.js';
 import { loadConfig, hasUserConfig } from './config.js';
 import { VERSION } from './version.js';
+import { fail, EX_USER_ERROR, EX_BAD_STATE } from './ui.js';
 import { basename } from 'node:path';
 
 const cmd = process.argv[2];
@@ -599,14 +600,12 @@ function doScan(force = false) {
 function doBackfill(argv) {
   const path = argv[0];
   if (!path) {
-    console.log(`${c.red}✗${c.reset} usage: claude-rpc backfill <path>`);
-    console.log(`${c.dim}  scans the given directory recursively for .jsonl transcripts and${c.reset}`);
-    console.log(`${c.dim}  merges them into your aggregate.${c.reset}`);
-    process.exit(1);
+    fail('usage: claude-rpc backfill <path>',
+      { hint: 'point at any folder containing .jsonl transcripts (e.g. a backup of ~/.claude/projects)' });
   }
   if (!existsSync(path)) {
-    console.log(`${c.red}✗${c.reset} path doesn't exist: ${path}`);
-    process.exit(1);
+    fail(`path doesn't exist: ${path}`,
+      { hint: 'check the spelling, or run `claude-rpc doctor` to see where transcripts live' });
   }
   console.log(`${c.dim}Backfilling from${c.reset} ${c.cyan}${path}${c.reset}…`);
   const t0 = Date.now();
@@ -657,8 +656,7 @@ function doBadge(argv) {
   const opts = parseBadgeArgs(argv);
   const aggregate = readAggregate();
   if (!aggregate) {
-    console.error(`${c.yellow}No aggregate yet. Run ${c.cyan}claude-rpc scan${c.reset} first.`);
-    process.exit(1);
+    fail('no aggregate yet — nothing to render', { hint: 'run `claude-rpc scan` first', code: EX_BAD_STATE });
   }
   const svg = badgeSvg({ aggregate, metric: opts.metric, range: opts.range, label: opts.label });
   if (opts.out) {
@@ -686,8 +684,7 @@ async function doCard(argv) {
   const opts = parseCardArgs(argv);
   const aggregate = readAggregate();
   if (!aggregate) {
-    console.error(`${c.yellow}No aggregate yet. Run ${c.cyan}claude-rpc scan${c.reset} first.`);
-    process.exit(1);
+    fail('no aggregate yet — nothing to render', { hint: 'run `claude-rpc scan` first', code: EX_BAD_STATE });
   }
   const { renderCard } = await import('./card.js');
   const svg = renderCard(aggregate, { range: opts.range });
@@ -883,6 +880,8 @@ function help() {
   console.log('');
   console.log(`  ${c.dim}Tip: ${c.reset}edit ${c.cyan}config.json${c.reset} to customize rotation frames. Run ${c.cyan}claude-rpc preview${c.reset} to see the result without Discord.`);
   console.log('');
+  console.log(`  ${c.dim}Exit codes:${c.reset} ${c.dim}0 ok · 1 user error · 2 system error · 3 wrong state${c.reset}`);
+  console.log('');
 }
 
 // Packaged exe: `claude-rpc.exe` with no args → first-run install + start.
@@ -983,10 +982,8 @@ const packagedDefault = IS_PACKAGED && !cmd;
         // click with no args" install-and-start flow.
         overview();
       } else {
-        // Unknown command — handled by a later packet that wires shared
-        // error UX. For now, fall back to the help dump so a user typo
-        // doesn't silently no-op.
-        help();
+        fail(`unknown command: ${cmd}`,
+          { hint: 'run `claude-rpc --help` for the full list', code: EX_USER_ERROR });
       }
     }
   }
