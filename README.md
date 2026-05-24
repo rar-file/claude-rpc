@@ -43,6 +43,8 @@ claude-rpc start
 
 That's the whole pitch. Open Claude Code in any project — the daemon picks it up within a second. Something looks wrong? `claude-rpc doctor`.
 
+> `setup` registers a Windows startup entry and wires hooks into Claude Code's `settings.json`, and the daemon reports anonymous totals by default. All of it is reversible (`claude-rpc uninstall`, `community off`) and fully documented in [`SECURITY.md`](SECURITY.md) — read it first if you want to know exactly what runs.
+
 The Discord *desktop* app must be running. The browser client doesn't expose the local IPC bridge that Rich Presence uses.
 
 <details>
@@ -141,6 +143,8 @@ claude-rpc community report       # one-shot manual flush (testing)
 ```
 
 Each report sends only: a `sessionsDelta`, a `tokensDelta`, the claude-rpc version, OS family (`linux`/`darwin`/`win32`), and the anonymous UUID v4. No prompts, paths, models, repos, costs, usernames, or hostnames — the Worker's [`validateReport`](worker/src/index.js) is the schema of record. The full Worker source is in this repo so the privacy claim is auditable.
+
+For a complete account of the sensitive things claude-rpc does — startup persistence, hook injection, every outbound request, and the exact telemetry payload — see [`SECURITY.md`](SECURITY.md). It's also the reference for supply-chain scanner findings (Socket.dev et al.): the flagged persistence and hook-injection behaviors are inherent to the tool and documented there.
 
 ## three pieces, glued by json files
 

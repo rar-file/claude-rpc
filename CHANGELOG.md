@@ -2,7 +2,11 @@
 
 All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## Unreleased
+## [0.7.4] - 2026-05-24
+
+**Docs / transparency**
+
+- **Added [`SECURITY.md`](SECURITY.md) — a full behavior disclosure.** Documents every sensitive thing claude-rpc does and why: the `HKCU` Run-key startup entry, the hook commands wired into Claude Code's `settings.json`, all outbound network (community totals, opt-in gist publishing, Discord-side GIF assets), every local subprocess, and the exact telemetry payload (cross-checked against the Worker's `validateReport`). It exists so supply-chain scanners (Socket.dev et al.) and security-conscious users have a single auditable reference — the flagged persistence and hook-injection behaviors are inherent to the tool, `HKCU`-scoped, and reversible (`claude-rpc uninstall`). README now links it from both the `install` callout and the community-totals section, and it ships in the npm tarball (`files`).
 
 **Fixed**
 
