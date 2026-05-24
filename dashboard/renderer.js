@@ -100,7 +100,54 @@ function switchTab(name) {
   for (const t of document.querySelectorAll('.tab')) t.classList.toggle('active', t.dataset.tab === name);
   for (const p of document.querySelectorAll('.panel')) p.hidden = p.dataset.panel !== name;
   if (name === 'daemon') refreshLog();
+  if (name === 'privacy') loadWorkspaces();
   if (name === 'stats') ensureServeRunning();
+}
+
+// ── Privacy / workspaces tab ───────────────────────────────────────────────────
+const WS_LEVELS = [
+  ['public', 'Public'],
+  ['name-only', 'Name only'],
+  ['hidden', 'Hidden'],
+];
+
+async function loadWorkspaces() {
+  const root = $('workspaceList');
+  root.innerHTML = '<div class="ws-empty">Loading projects…</div>';
+  const { workspaces, visibility } = await window.api.listWorkspaces();
+  if (!workspaces || !workspaces.length) {
+    root.innerHTML = '<div class="ws-empty">No projects discovered yet — open Claude Code in a project first.</div>';
+    return;
+  }
+  root.innerHTML = '';
+  for (const ws of workspaces) {
+    const current = visibility[ws.cwd] || 'public';
+    const row = document.createElement('div');
+    row.className = 'ws-row';
+    const seg = WS_LEVELS.map(([val, label]) =>
+      `<button class="ws-seg${val === current ? ' active' : ''}" data-level="${val}">${label}</button>`
+    ).join('');
+    row.innerHTML =
+      `<div class="ws-meta"><div class="ws-name">${escapeAttr(ws.name)}</div>` +
+      `<div class="ws-path">${escapeAttr(ws.cwd)}</div></div>` +
+      `<div class="ws-toggle" data-cwd="${escapeAttr(ws.cwd)}">${seg}</div>`;
+    root.appendChild(row);
+  }
+  root.querySelectorAll('.ws-toggle').forEach((toggle) => {
+    toggle.querySelectorAll('.ws-seg').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const cwd = toggle.dataset.cwd;
+        const level = btn.dataset.level;
+        const r = await window.api.setWorkspaceVisibility(cwd, level);
+        if (r?.ok) {
+          toggle.querySelectorAll('.ws-seg').forEach((b) => b.classList.toggle('active', b === btn));
+          setStatus(`${level} · ${cwd.split(/[\\/]/).pop()}`, 'success');
+        } else {
+          setStatus(r?.error || 'Failed to update', 'error');
+        }
+      });
+    });
+  });
 }
 
 document.querySelectorAll('.tab').forEach((t) => {
@@ -455,6 +502,16 @@ async function ensureServeRunning() {
 $('statsOpenExternal').addEventListener('click', async () => {
   await window.api.openExternal('http://127.0.0.1:47474');
 });
+
+async function exportData(format) {
+  setStatus('Exporting…');
+  const r = await window.api.exportData(format);
+  if (r?.ok) setStatus('Exported → ' + r.path, 'success');
+  else if (r?.canceled) setStatus('');
+  else setStatus(r?.error || 'Export failed', 'error');
+}
+$('exportJsonBtn').addEventListener('click', () => exportData('json'));
+$('exportCsvBtn').addEventListener('click', () => exportData('csv'));
 
 // ── Live preview rail ────────────────────────────────────────────────────────
 function refreshLiveRail() {

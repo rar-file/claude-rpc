@@ -11,6 +11,9 @@ contextBridge.exposeInMainWorld('api', {
   tailLog:       () => ipcRenderer.invoke('tail-log'),
   listVars:      () => ipcRenderer.invoke('list-vars'),
   startServe:    () => ipcRenderer.invoke('start-serve'),
+  exportData:    (format) => ipcRenderer.invoke('export-data', format),
+  listWorkspaces: () => ipcRenderer.invoke('list-workspaces'),
+  setWorkspaceVisibility: (cwd, level) => ipcRenderer.invoke('set-workspace-visibility', { cwd, level }),
   openExternal:  (url) => ipcRenderer.invoke('open-external', url),
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
   onUpdateEvent:   (handler) => {

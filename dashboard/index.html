@@ -44,6 +44,7 @@
   <button class="tab" data-tab="assets">Assets</button>
   <button class="tab" data-tab="timing">Timing</button>
   <button class="tab" data-tab="daemon">Daemon</button>
+  <button class="tab" data-tab="privacy">Privacy</button>
   <button class="tab" data-tab="stats">Stats</button>
 </nav>
 
@@ -143,10 +144,17 @@
     </div>
   </section>
 
+  <section class="panel" data-panel="privacy" hidden>
+    <p class="hint-block">Control what each project shows on your Discord card. <b>Public</b> shows everything · <b>Name-only</b> hides files &amp; tools but keeps the project name · <b>Hidden</b> shows nothing. Changes apply on the daemon's next update — your local stats are never affected.</p>
+    <div class="workspace-list" id="workspaceList"><div class="ws-empty">Loading projects…</div></div>
+  </section>
+
   <section class="panel" data-panel="stats" hidden>
     <div class="stats-frame">
       <div class="stats-frame-header">
         <span id="statsUrl">starting local server…</span>
+        <button id="exportJsonBtn" title="Download the raw aggregate.json">⬇ JSON</button>
+        <button id="exportCsvBtn" title="Download daily stats as CSV">⬇ CSV</button>
         <button id="statsOpenExternal">↗ Open in browser</button>
       </div>
       <iframe id="statsIframe" src="about:blank" allow=""></iframe>

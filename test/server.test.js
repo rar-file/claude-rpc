@@ -158,3 +158,24 @@ test('buildHtml interpolates port', async () => {
   assert.match(html, /^<!doctype html>/i);
   assert.ok(html.includes('12345'), 'port appears in the footer');
 });
+
+test('aggregateToCsv flattens byDay into sorted daily rows', async () => {
+  const { aggregateToCsv, CSV_COLUMNS } = await import('../src/server/api.js');
+  const csv = aggregateToCsv({
+    byDay: {
+      '2026-01-02': { activeMs: 3_600_000, sessions: 1, userMessages: 5, cost: 0.5 },
+      '2026-01-01': { activeMs: 7_200_000, sessions: 2, linesAdded: 100 },
+    },
+  });
+  const lines = csv.trim().split('\n');
+  assert.equal(lines[0], CSV_COLUMNS.join(','), 'header row matches column list');
+  assert.ok(lines[1].startsWith('2026-01-01,'), 'rows sorted ascending by date');
+  assert.ok(lines[2].startsWith('2026-01-02,'));
+  assert.match(lines[1], /,2\.000,/, '7.2M ms → 2.000 activeHours');
+});
+
+test('aggregateToCsv handles empty / missing byDay', async () => {
+  const { aggregateToCsv, CSV_COLUMNS } = await import('../src/server/api.js');
+  assert.equal(aggregateToCsv({}).trim(), CSV_COLUMNS.join(','), 'header only when empty');
+  assert.equal(aggregateToCsv(null).trim(), CSV_COLUMNS.join(','), 'null-safe');
+});

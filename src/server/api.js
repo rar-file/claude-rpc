@@ -173,3 +173,38 @@ export function dayDetail(dayKeyStr) {
   if (!day) return null;
   return { day: dayKeyStr, ...day };
 }
+
+// Flatten the aggregate's byDay map into a daily-rows CSV for spreadsheet /
+// pandas analysis. One row per day, sorted ascending. Date keys are
+// YYYY-MM-DD and all other columns are numeric, so nothing needs quoting.
+export const CSV_COLUMNS = [
+  'date', 'activeMs', 'activeHours', 'sessions', 'userMessages', 'toolCalls',
+  'linesAdded', 'linesRemoved', 'cost', 'inputTokens', 'outputTokens',
+  'cacheReadTokens', 'cacheWriteTokens', 'notifications',
+];
+
+export function aggregateToCsv(agg) {
+  const byDay = (agg && agg.byDay) || {};
+  const rows = [CSV_COLUMNS.join(',')];
+  for (const date of Object.keys(byDay).sort()) {
+    const d = byDay[date] || {};
+    const activeMs = d.activeMs || 0;
+    rows.push([
+      date,
+      activeMs,
+      (activeMs / 3_600_000).toFixed(3),
+      d.sessions || 0,
+      d.userMessages || 0,
+      d.toolCalls || 0,
+      d.linesAdded || 0,
+      d.linesRemoved || 0,
+      (d.cost || 0).toFixed(4),
+      d.inputTokens || 0,
+      d.outputTokens || 0,
+      d.cacheReadTokens || 0,
+      d.cacheWriteTokens || 0,
+      d.notifications || 0,
+    ].join(','));
+  }
+  return rows.join('\n') + '\n';
+}

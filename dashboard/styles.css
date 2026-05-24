@@ -876,6 +876,35 @@ button.primary:active {
   box-shadow: var(--shadow-sm);
 }
 
+/* ── Privacy / workspaces tab ─────────────────── */
+.workspace-list { display: grid; gap: 12px; }
+.ws-empty {
+  font-family: var(--font-mono); font-size: 13px; font-weight: 700;
+  color: var(--ink-faint); padding: 32px; text-align: center;
+  border: 2px dashed var(--ink-faint);
+}
+.ws-row {
+  display: flex; justify-content: space-between; align-items: center; gap: 16px;
+  background: var(--paper); border: 2px solid var(--ink); box-shadow: var(--shadow);
+  padding: 14px 16px;
+}
+.ws-meta { min-width: 0; }
+.ws-name { font-family: var(--font-disp); font-weight: 700; font-size: 15px; }
+.ws-path {
+  font-family: var(--font-mono); font-size: 11px; color: var(--ink-mute);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ws-toggle { display: inline-flex; flex-shrink: 0; border: 2px solid var(--ink); }
+.ws-seg {
+  font-family: var(--font-mono); font-size: 11px; font-weight: 700;
+  padding: 6px 12px; background: var(--paper); color: var(--ink);
+  border-right: 2px solid var(--ink); text-transform: lowercase;
+  transition: background 0.1s;
+}
+.ws-seg:last-child { border-right: none; }
+.ws-seg:hover { background: var(--paper-2); }
+.ws-seg.active { background: var(--ink); color: var(--paper); }
+
 /* scrollbars — keep them subtle, paper-toned */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }

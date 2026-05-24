@@ -40,7 +40,8 @@
       "preload.js",
       "index.html",
       "styles.css",
-      "renderer.js"
+      "renderer.js",
+      "tray.png"
     ],
     "extraResources": [
       {

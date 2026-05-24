@@ -141,3 +141,56 @@ test('applyPrivacy: skips stale state', () => {
   const r = applyPrivacy(s, {});
   assert.equal(r, s, 'stale states pass through untouched');
 });
+
+// ── Central visibility map (GUI-managed) ────────────────────────────────
+// Exercise setCwdVisibility + the new resolveVisibility layer against a
+// temp private-list via CLAUDE_RPC_PRIVATE_LIST so the real one is untouched.
+// Loaded as a fresh module instance so it picks up the env override.
+
+test('central visibility map: set → resolve → clear', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rpc-vis-'));
+  const listPath = join(dir, 'private-list.json');
+  process.env.CLAUDE_RPC_PRIVATE_LIST = listPath;
+  try {
+    const mod = await import('../src/privacy.js?vis=' + Date.now()); // fresh instance
+    const proj = join(dir, 'work', 'client-x');
+
+    // Default before any override.
+    assert.equal(mod.resolveVisibility(proj, { privacy: { autoDetectGithubPrivate: false } }).visibility, 'public');
+
+    // name-only override resolves and reports its reason.
+    mod.setCwdVisibility(proj, 'name-only');
+    let r = mod.resolveVisibility(proj, { privacy: { autoDetectGithubPrivate: false } });
+    assert.equal(r.visibility, 'name-only');
+    assert.match(r.reason, /private-list/);
+
+    // Explicit 'public' wins over a config glob that would otherwise hide it.
+    mod.setCwdVisibility(proj, 'public');
+    r = mod.resolveVisibility(proj, { privacy: { patterns: ['client-*'], mode: 'hidden', autoDetectGithubPrivate: false } });
+    assert.equal(r.visibility, 'public', 'explicit public overrides config-glob hide');
+
+    // Clearing the override falls back through to the config glob.
+    mod.setCwdVisibility(proj, null);
+    r = mod.resolveVisibility(proj, { privacy: { patterns: ['client-*'], mode: 'hidden', autoDetectGithubPrivate: false } });
+    assert.equal(r.visibility, 'hidden', 'cleared override falls through to config pattern');
+    assert.deepEqual(mod.listVisibility(), {}, 'map empty after clear');
+  } finally {
+    delete process.env.CLAUDE_RPC_PRIVATE_LIST;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('central visibility map: subdirectory inherits a marked parent', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rpc-vis-'));
+  process.env.CLAUDE_RPC_PRIVATE_LIST = join(dir, 'private-list.json');
+  try {
+    const mod = await import('../src/privacy.js?vis=' + Date.now() + 'b');
+    const parent = join(dir, 'repo');
+    mod.setCwdVisibility(parent, 'hidden');
+    const r = mod.resolveVisibility(join(parent, 'packages', 'sub'), { privacy: { autoDetectGithubPrivate: false } });
+    assert.equal(r.visibility, 'hidden', 'subdir inherits parent override');
+  } finally {
+    delete process.env.CLAUDE_RPC_PRIVATE_LIST;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -8,7 +8,7 @@ import { readAggregate } from '../scanner.js';
 import { generateInsights } from '../insights.js';
 import { badgeSvg } from '../badge.js';
 import { renderCard } from '../card.js';
-import { snapshot, windowedAggregate } from './api.js';
+import { snapshot, windowedAggregate, aggregateToCsv } from './api.js';
 
 export const JSON_HEADERS = {
   'content-type': 'application/json',
@@ -49,6 +49,29 @@ ROUTES.set('GET /api/badge.svg', (req, res, { query }) => {
     'cache-control': 'max-age=60, public',
   });
   res.end(svg);
+});
+
+// Data export. content-disposition: attachment makes the browser download
+// rather than render. The JSON is the raw aggregate; the CSV is byDay
+// flattened to daily rows (see aggregateToCsv).
+ROUTES.set('GET /api/export.json', (req, res) => {
+  const agg = readAggregate() || {};
+  res.writeHead(200, {
+    'content-type': 'application/json; charset=utf-8',
+    'content-disposition': 'attachment; filename="claude-rpc-aggregate.json"',
+    'cache-control': 'no-store',
+  });
+  res.end(JSON.stringify(agg, null, 2));
+});
+
+ROUTES.set('GET /api/export.csv', (req, res) => {
+  const agg = readAggregate() || {};
+  res.writeHead(200, {
+    'content-type': 'text/csv; charset=utf-8',
+    'content-disposition': 'attachment; filename="claude-rpc-daily.csv"',
+    'cache-control': 'no-store',
+  });
+  res.end(aggregateToCsv(agg));
 });
 
 // Poster-style card. `?range=year|month|week|all` (default year).

@@ -26,6 +26,8 @@
   let allFrames = [];
   let currentLiveIdx = 0;
   let rotationTimer = null;
+  let chartSeries = [];   // [{ d: Date, ms }]   — for the activity-chart hover tooltip
+  let churnSeries = [];   // [{ d: Date, add, rem }] — for the churn-sparkline tooltip
 
   // ── Utilities ───────────────────────────────────────────
   const fmtH = (ms) => {
@@ -109,6 +111,7 @@
       const ms = (byDay[dayKey(d.getTime())] || {}).activeMs || 0;
       series.push({ d, ms });
     }
+    chartSeries = series;
     const max = Math.max(...series.map((p) => p.ms), 1);
     const h = VIEW_H - PAD_T - PAD_B;
     const xAt = (i) => series.length > 1 ? (i / (series.length - 1)) * VIEW_W : VIEW_W / 2;
@@ -186,8 +189,9 @@
     for (let i = days - 1; i >= 0; i--) {
       const d = new Date(today); d.setDate(d.getDate() - i);
       const day = byDay[dayKey(d.getTime())] || {};
-      series.push({ add: day.linesAdded || 0, rem: day.linesRemoved || 0 });
+      series.push({ d, add: day.linesAdded || 0, rem: day.linesRemoved || 0 });
     }
+    churnSeries = series;
     const maxAdd = Math.max(1, ...series.map((s) => s.add));
     const maxRem = Math.max(1, ...series.map((s) => s.rem));
     const maxBoth = Math.max(maxAdd, maxRem);
@@ -589,6 +593,46 @@
 
   // Rotation cycle
   rotationTimer = setInterval(() => { currentLiveIdx++; renderRotation(); }, 4000);
+
+  // ── Chart hover tooltips ────────────────────────────────────────────────
+  // Native SVG charts, no library. preserveAspectRatio="none" means the
+  // x-axis scales linearly with rendered width, so the cursor's fraction
+  // across the SVG maps straight to a data index. A single cursor-following
+  // tooltip is reused for both the activity chart and the churn sparkline.
+  function setupChartTooltips() {
+    const tip = document.createElement('div');
+    tip.className = 'chart-tip';
+    document.body.appendChild(tip);
+    const hide = () => tip.classList.remove('show');
+    const show = (e, text) => {
+      tip.textContent = text;
+      tip.classList.add('show');
+      tip.style.left = (e.clientX + 12) + 'px';
+      tip.style.top  = (e.clientY - 34) + 'px';
+    };
+    const idxAt = (e, svg, n) => {
+      if (!n) return -1;
+      const r = svg.getBoundingClientRect();
+      if (r.width <= 0) return -1;
+      const frac = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+      return Math.round(frac * (n - 1));
+    };
+    const wire = (svg, getSeries, fmt) => {
+      if (!svg) return;
+      const host = svg.parentElement || svg;
+      host.addEventListener('mousemove', (e) => {
+        const s = getSeries();
+        const i = idxAt(e, svg, s.length);
+        if (i < 0) { hide(); return; }
+        show(e, fmt(s[i]));
+      });
+      host.addEventListener('mouseleave', hide);
+    };
+    const md = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    wire($('chart'),     () => chartSeries, (p) => md(p.d) + ' · ' + fmtH(p.ms));
+    wire($('churn-svg'), () => churnSeries, (s) => md(s.d) + ' · +' + fmtN(s.add) + ' / −' + fmtN(s.rem));
+  }
+  setupChartTooltips();
 
   // Initial load.
   (async () => {

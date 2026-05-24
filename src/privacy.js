@@ -25,7 +25,10 @@ import { execFileSync } from 'node:child_process';
 import { join, basename, dirname, resolve as resolvePath } from 'node:path';
 import { DATA_DIR } from './paths.js';
 
-const PRIVATE_LIST_PATH = join(DATA_DIR, 'private-list.json');
+// CLAUDE_RPC_PRIVATE_LIST lets tests point the runtime store at a temp file
+// instead of the user's real ~/.claude-rpc/private-list.json. Unset in normal
+// operation.
+const PRIVATE_LIST_PATH = process.env.CLAUDE_RPC_PRIVATE_LIST || join(DATA_DIR, 'private-list.json');
 const TTL_MS = 5 * 60 * 1000;
 
 const projectFileCache = new Map();   // cwd → { ts, value | null }
@@ -82,7 +85,14 @@ function readPrivateList() {
   if (!existsSync(PRIVATE_LIST_PATH)) return { paths: [] };
   try {
     const v = JSON.parse(readFileSync(PRIVATE_LIST_PATH, 'utf8'));
-    if (Array.isArray(v?.paths)) return v;
+    if (v && typeof v === 'object') {
+      // `paths` is the legacy binary list (presence ≡ hidden). `visibility`
+      // is the richer GUI-managed map: { "<abs cwd>": "hidden|name-only|public" }.
+      return {
+        paths: Array.isArray(v.paths) ? v.paths : [],
+        visibility: (v.visibility && typeof v.visibility === 'object') ? v.visibility : undefined,
+      };
+    }
   } catch { /* broken JSON ≡ no list (treat as empty rather than crash) */ }
   return { paths: [] };
 }
@@ -122,6 +132,50 @@ function isInPrivateList(cwd) {
   );
 }
 
+// ── Central visibility map (GUI-managed) ────────────────────────────────
+// A richer alternative to the binary `paths` list: maps an absolute cwd to
+// an explicit visibility level. Highest-priority runtime layer — an explicit
+// 'public' here even overrides config-glob / gh auto-detect, because the user
+// deliberately marked it. Subdirectories inherit a marked parent.
+
+const VIS_LEVELS = ['public', 'name-only', 'hidden'];
+function normLevel(v) { return VIS_LEVELS.includes(v) ? v : null; }
+
+function visibilityForCwd(cwd) {
+  if (!cwd) return null;
+  const map = readPrivateList().visibility;
+  if (!map) return null;
+  const abs = resolvePath(cwd);
+  if (map[abs]) return normLevel(map[abs]);
+  for (const [p, v] of Object.entries(map)) {
+    if (abs === p || abs.startsWith(p + '/') || abs.startsWith(p + '\\')) return normLevel(v);
+  }
+  return null;
+}
+
+// Set (or clear) the explicit visibility for a cwd. `level` of null/'default'
+// removes the override so resolution falls back through the lower layers.
+// Returns the updated visibility map.
+export function setCwdVisibility(cwd, level) {
+  const abs = resolvePath(cwd);
+  const list = readPrivateList();
+  const map = (list.visibility && typeof list.visibility === 'object') ? list.visibility : {};
+  const norm = normLevel(level);
+  if (norm) map[abs] = norm;
+  else delete map[abs];
+  // A path managed by the map shouldn't also linger in the legacy binary
+  // list, where it would always read as hidden regardless of the map value.
+  list.paths = (list.paths || []).filter((p) => p !== abs);
+  list.visibility = map;
+  writePrivateList(list);
+  return map;
+}
+
+// Read the current explicit-visibility map (abs cwd → level).
+export function listVisibility() {
+  return readPrivateList().visibility || {};
+}
+
 // ── GitHub-private detection (best-effort, gh CLI) ──────────────────────
 
 function detectGithubPrivate(cwd) {
@@ -150,6 +204,12 @@ export function resolveVisibility(cwd, config = {}) {
   const proj = normalizeProjectConfig(readProjectConfig(cwd));
   if (proj?.visibility) {
     return { visibility: proj.visibility, projectName: proj.projectName, reason: '.claude-rpc.json' };
+  }
+  // Central GUI-managed map (incl. explicit 'public' as an opt-out of
+  // auto-hide). Ranks above the legacy binary list and config/gh layers.
+  const mapped = visibilityForCwd(cwd);
+  if (mapped) {
+    return { visibility: mapped, projectName: proj?.projectName ?? null, reason: 'private-list (visibility)' };
   }
   if (isInPrivateList(cwd)) {
     return { visibility: 'hidden', projectName: proj?.projectName ?? null, reason: 'private-list' };

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu, nativeImage } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const { spawn, spawnSync } = require('node:child_process');
@@ -16,6 +16,10 @@ let configPath = null;
 let cliResolution = null;   // { kind: 'binary'|'node', path, args? }
 let mainWindow = null;
 let serveChild = null;
+let tray = null;
+// Distinguishes a real quit (tray → Quit, or before-quit) from a window
+// close, which we intercept to hide-to-tray instead of exiting.
+app.isQuitting = false;
 
 // ── CLI resolver ─────────────────────────────────────────────────────────────
 // Three runtime modes the dashboard can land in:
@@ -168,11 +172,68 @@ function createWindow() {
     shell.openExternal(url);
     return { action: 'deny' };
   });
+  // Close-to-tray: a window close hides instead of quitting, so the daemon
+  // control stays a click away in the tray. A real quit goes through the
+  // tray's Quit item (or before-quit), which sets app.isQuitting first.
+  mainWindow.on('close', (e) => {
+    if (app.isQuitting || !tray) return;
+    e.preventDefault();
+    mainWindow.hide();
+  });
+}
+
+function showWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) { createWindow(); return; }
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+// Tray icon + right-click menu. The daemon actions reuse the same runCli
+// path the in-window Daemon tab uses; rebuilding the menu after each one
+// keeps the running/stopped label honest.
+async function rebuildTrayMenu() {
+  if (!tray) return;
+  let running = false;
+  try {
+    const pidPath = daemonPidPath();
+    if (fs.existsSync(pidPath)) {
+      const pid = Number(fs.readFileSync(pidPath, 'utf8'));
+      if (pid) { process.kill(pid, 0); running = true; }
+    }
+  } catch { running = false; }
+
+  const menu = Menu.buildFromTemplate([
+    { label: running ? '● Daemon running' : '○ Daemon stopped', enabled: false },
+    { type: 'separator' },
+    { label: 'Open settings', click: () => showWindow() },
+    { label: 'Open web dashboard', click: async () => {
+      await runCli(['serve'], { detached: true });
+      shell.openExternal(`http://127.0.0.1:${process.env.CLAUDE_RPC_PORT || 47474}`);
+    } },
+    { type: 'separator' },
+    { label: 'Start daemon',   enabled: !running, click: async () => { await runCli(['start'], { detached: true }); setTimeout(rebuildTrayMenu, 800); } },
+    { label: 'Stop daemon',    enabled: running,  click: async () => { await runCli(['stop']);    rebuildTrayMenu(); } },
+    { label: 'Restart daemon', enabled: running,  click: async () => { await runCli(['restart']); setTimeout(rebuildTrayMenu, 800); } },
+    { type: 'separator' },
+    { label: 'Quit Claude RPC', click: () => { app.isQuitting = true; app.quit(); } },
+  ]);
+  tray.setContextMenu(menu);
+}
+
+function createTray() {
+  const icon = nativeImage.createFromPath(path.join(__dirname, 'tray.png'));
+  if (icon.isEmpty()) return; // no icon → skip tray rather than show a blank one
+  tray = new Tray(icon);
+  tray.setToolTip('Claude RPC');
+  // Windows/Linux: a left-click on the tray icon shows the window.
+  tray.on('click', () => showWindow());
+  rebuildTrayMenu();
 }
 
 app.whenReady().then(() => {
   configPath = findConfigPath() || seedUserConfigIfMissing();
   createWindow();
+  createTray();
   initAutoUpdater();
 });
 
@@ -325,9 +386,148 @@ function runCli(args, opts = {}) {
   });
 }
 
-ipcMain.handle('daemon-start',   async () => runCli(['start']));
-ipcMain.handle('daemon-stop',    async () => runCli(['stop']));
-ipcMain.handle('daemon-restart', async () => runCli(['restart']));
+// Keep the tray's running/stopped label in sync when the user drives the
+// daemon from the in-window Daemon tab, not just from the tray menu.
+ipcMain.handle('daemon-start',   async () => { const r = await runCli(['start']);   rebuildTrayMenu(); return r; });
+ipcMain.handle('daemon-stop',    async () => { const r = await runCli(['stop']);    rebuildTrayMenu(); return r; });
+ipcMain.handle('daemon-restart', async () => { const r = await runCli(['restart']); rebuildTrayMenu(); return r; });
+
+// ── Data export ──────────────────────────────────────────────────────────────
+// Reads the lifetime aggregate the daemon/scanner maintain at
+// ~/.claude-rpc/aggregate.json and saves it (raw JSON, or byDay flattened to
+// CSV) wherever the user picks. The CSV columns mirror src/server/api.js's
+// aggregateToCsv — kept in sync by hand since the Electron main is CommonJS
+// and can't import the ESM server module.
+function aggregatePath() { return path.join(os.homedir(), '.claude-rpc', 'aggregate.json'); }
+
+function aggToCsv(agg) {
+  const cols = ['date', 'activeMs', 'activeHours', 'sessions', 'userMessages', 'toolCalls',
+    'linesAdded', 'linesRemoved', 'cost', 'inputTokens', 'outputTokens',
+    'cacheReadTokens', 'cacheWriteTokens', 'notifications'];
+  const byDay = (agg && agg.byDay) || {};
+  const rows = [cols.join(',')];
+  for (const date of Object.keys(byDay).sort()) {
+    const d = byDay[date] || {};
+    const activeMs = d.activeMs || 0;
+    rows.push([
+      date, activeMs, (activeMs / 3_600_000).toFixed(3), d.sessions || 0,
+      d.userMessages || 0, d.toolCalls || 0, d.linesAdded || 0, d.linesRemoved || 0,
+      (d.cost || 0).toFixed(4), d.inputTokens || 0, d.outputTokens || 0,
+      d.cacheReadTokens || 0, d.cacheWriteTokens || 0, d.notifications || 0,
+    ].join(','));
+  }
+  return rows.join('\n') + '\n';
+}
+
+ipcMain.handle('export-data', async (_, format) => {
+  const aggPath = aggregatePath();
+  if (!fs.existsSync(aggPath)) {
+    return { error: 'No aggregate data yet — start the daemon or run a scan first.' };
+  }
+  let agg;
+  try { agg = JSON.parse(fs.readFileSync(aggPath, 'utf8')); }
+  catch (e) { return { error: `Couldn't read aggregate: ${e.message}` }; }
+
+  const isCsv = format === 'csv';
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: 'Export claude-rpc data',
+    defaultPath: isCsv ? 'claude-rpc-daily.csv' : 'claude-rpc-aggregate.json',
+    filters: [isCsv ? { name: 'CSV', extensions: ['csv'] } : { name: 'JSON', extensions: ['json'] }],
+  });
+  if (result.canceled || !result.filePath) return { canceled: true };
+  try {
+    fs.writeFileSync(result.filePath, isCsv ? aggToCsv(agg) : JSON.stringify(agg, null, 2));
+    return { ok: true, path: result.filePath };
+  } catch (e) {
+    return { error: e.message };
+  }
+});
+
+// ── Privacy / workspaces ─────────────────────────────────────────────────────
+// The aggregate keys projects by display name, not path, so to manage privacy
+// per-project we recover real cwds from transcript heads under
+// ~/.claude/projects, then read/write the central visibility map at
+// ~/.claude-rpc/private-list.json. That map is the same one src/privacy.js
+// resolves against (keys are path.resolve'd cwds), so a toggle here takes
+// effect on the Discord card without writing into any project directory.
+function claudeProjectsDir() { return path.join(os.homedir(), '.claude', 'projects'); }
+function privateListPath() { return path.join(os.homedir(), '.claude-rpc', 'private-list.json'); }
+const VIS_LEVELS = ['public', 'name-only', 'hidden'];
+
+function readCwdFromTranscript(file) {
+  try {
+    const fd = fs.openSync(file, 'r');
+    const buf = Buffer.alloc(8192);
+    const n = fs.readSync(fd, buf, 0, 8192, 0);
+    fs.closeSync(fd);
+    for (const line of buf.slice(0, n).toString('utf8').split('\n')) {
+      if (!line.trim()) continue;
+      try { const o = JSON.parse(line); if (o && o.cwd) return o.cwd; } catch { /* partial/ non-JSON line */ }
+    }
+  } catch { /* unreadable transcript */ }
+  return null;
+}
+
+function discoverWorkspaces() {
+  const root = claudeProjectsDir();
+  const seen = new Map(); // resolved cwd → { name, cwd, lastMs }
+  let dirs = [];
+  try { dirs = fs.readdirSync(root, { withFileTypes: true }).filter((d) => d.isDirectory()); }
+  catch { return []; }
+  for (const d of dirs) {
+    const pdir = path.join(root, d.name);
+    let newest = null, newestMs = 0;
+    try {
+      for (const f of fs.readdirSync(pdir)) {
+        if (!f.endsWith('.jsonl')) continue;
+        const st = fs.statSync(path.join(pdir, f));
+        if (st.mtimeMs > newestMs) { newestMs = st.mtimeMs; newest = path.join(pdir, f); }
+      }
+    } catch { continue; }
+    if (!newest) continue;
+    const raw = readCwdFromTranscript(newest);
+    if (!raw) continue;
+    const cwd = path.resolve(raw);
+    const prev = seen.get(cwd);
+    if (!prev || newestMs > prev.lastMs) seen.set(cwd, { name: path.basename(cwd), cwd, lastMs: newestMs });
+  }
+  return [...seen.values()].sort((a, b) => b.lastMs - a.lastMs);
+}
+
+function readPrivList() {
+  try {
+    const v = JSON.parse(fs.readFileSync(privateListPath(), 'utf8'));
+    if (v && typeof v === 'object') {
+      return {
+        paths: Array.isArray(v.paths) ? v.paths : [],
+        visibility: (v.visibility && typeof v.visibility === 'object') ? v.visibility : {},
+      };
+    }
+  } catch { /* missing / broken ≡ empty */ }
+  return { paths: [], visibility: {} };
+}
+
+ipcMain.handle('list-workspaces', async () => {
+  const list = readPrivList();
+  return { workspaces: discoverWorkspaces(), visibility: list.visibility };
+});
+
+ipcMain.handle('set-workspace-visibility', async (_, payload) => {
+  const cwd = payload && payload.cwd ? path.resolve(payload.cwd) : null;
+  const level = payload && payload.level;
+  if (!cwd) return { error: 'no cwd' };
+  const list = readPrivList();
+  if (VIS_LEVELS.includes(level)) list.visibility[cwd] = level;
+  else delete list.visibility[cwd]; // anything else ≡ clear override → default
+  list.paths = (list.paths || []).filter((p) => p !== cwd);
+  try {
+    fs.mkdirSync(path.dirname(privateListPath()), { recursive: true });
+    fs.writeFileSync(privateListPath(), JSON.stringify(list, null, 2));
+    return { ok: true, visibility: list.visibility };
+  } catch (e) {
+    return { error: e.message };
+  }
+});
 
 // ── Log tail ─────────────────────────────────────────────────────────────────
 ipcMain.handle('tail-log', async () => {
@@ -397,8 +597,16 @@ ipcMain.handle('check-for-updates', async () => {
   }
 });
 
-app.on('window-all-closed', () => {
+function cleanup() {
   try { if (serveChild) process.kill(-serveChild.pid); } catch {}
   if (updateCheckTimer) clearInterval(updateCheckTimer);
-  app.quit();
+}
+
+app.on('before-quit', () => { app.isQuitting = true; cleanup(); });
+
+app.on('window-all-closed', () => {
+  // With a tray, closing the window hides it and the app stays resident.
+  // Only exit here if the tray never came up (e.g. the icon was missing),
+  // so the app can't get stuck running headless with no way back in.
+  if (!tray) { cleanup(); app.quit(); }
 });

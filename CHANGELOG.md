@@ -4,6 +4,13 @@ All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachang
 
 ## Unreleased
 
+**Features**
+
+- **System tray for the Electron app.** Closing the window now hides to a tray icon instead of quitting; a right-click menu offers Open settings, Open web dashboard, Start/Stop/Restart daemon (label reflects live status), and Quit. The daemon actions reuse the in-window control path, and the tray label stays in sync whether you drive the daemon from the tray or the Daemon tab. Ships a small on-brand diamond icon (`dashboard/tray.png`).
+- **Data export (web + GUI).** New `GET /api/export.json` (raw aggregate) and `GET /api/export.csv` (daily rows: active time, sessions, prompts, tools, lines, cost, tokens, notifications) with `content-disposition: attachment`; footer links on the web dashboard. The Electron Stats tab gains ⬇ JSON / ⬇ CSV buttons that save via a native dialog. CSV columns are shared by `aggregateToCsv` (server) and the GUI's converter.
+- **Native chart hover tooltips.** The activity chart and churn sparkline now show exact per-day numbers on hover — a cursor-following tooltip that maps pointer position to a data point. No charting library: the SVG charts are still hand-rolled, so the offline/SEA/no-deps guarantees are untouched.
+- **Privacy / Workspaces tab in the GUI.** Lists discovered projects (real cwds recovered from transcript heads) with a Public / Name-only / Hidden toggle each. Toggles write a central path→visibility map in `~/.claude-rpc/private-list.json` — no files are written into your project directories. `src/privacy.js` resolution gains this map as a runtime layer just under per-project `.claude-rpc.json`, where an explicit `public` also opts a repo out of `gh` auto-hide. `setCwdVisibility` / `listVisibility` are the new programmatic surface.
+
 **Internals**
 
 - **Web dashboard assets split out of `src/server/page.js`.** The ~1,260-line string monolith (CSS + HTML + client JS as one file) is now three real, tool-friendly files under `src/server/assets/` — `dashboard.css`, `dashboard.html` (with `{{STYLES}}` / `{{SCRIPT}}` / `{{PORT}}` tokens), and `dashboard.client.js`. `page.js` shrinks to a ~30-line composer. A new `src/server/assets.js` `loadAsset()` reads from disk in dev/npm and from the SEA blob (via `node:sea` `getAsset()`) in the packaged exe — so the single-binary, no-runtime-deps, works-offline guarantees hold. `sea-config.json` gains an `assets` map. Rendered HTML is byte-for-byte identical to before; no user-facing change.

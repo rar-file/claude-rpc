@@ -155,6 +155,17 @@ svg.chart .area { fill: url(#whiteGrad); }
 svg.chart .line { fill: none; stroke: var(--rust); stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
 svg.chart .dot  { fill: var(--rust); stroke: #fff; stroke-width: 2px; }
 svg.chart .ax   { fill: var(--ink-mute); font-size: 10px; font-family: var(--font-mono); font-weight: 700; }
+.chart-wrap, .churn-spark { cursor: crosshair; }
+
+/* Cursor-following hover tooltip shared by the activity chart + churn spark. */
+.chart-tip {
+  position: fixed; z-index: 80; pointer-events: none;
+  background: var(--ink); color: var(--paper);
+  font-family: var(--font-mono); font-size: 11px; font-weight: 700;
+  padding: 4px 8px; border: 2px solid var(--ink); box-shadow: 2px 2px 0 var(--rust);
+  white-space: nowrap; opacity: 0; transition: opacity 0.1s;
+}
+.chart-tip.show { opacity: 1; }
 
 /* ── Stat cards ──────────────────────────────────────── */
 .stat-row {
