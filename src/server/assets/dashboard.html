@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Claude</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+{{STYLES}}</style>
+</head>
+<body>
+<main class="page">
+
+  <!-- ── Top bar ─────────────────────────────────────── -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="mark">◆</span>
+      <span>Claude</span>
+      <span class="sep">·</span>
+      <span class="meta" id="meta">—</span>
+    </div>
+    <div class="top-right">
+      <div class="range-pills" id="range-pills">
+        <button data-range="7d">7d</button>
+        <button data-range="30d">30d</button>
+        <button data-range="90d" class="active">90d</button>
+        <button data-range="1y">1y</button>
+        <button data-range="all">All</button>
+      </div>
+      <button class="theme-btn" id="theme-btn" title="Toggle theme">◐</button>
+      <span class="model" id="model">—</span>
+      <span class="status"><span class="dot" id="dot"></span><span id="statustext">—</span></span>
+    </div>
+  </header>
+
+  <!-- ── Live rail ───────────────────────────────────── -->
+  <section class="live-rail" id="live-rail">
+    <div class="avatar" id="live-avatar"></div>
+    <div>
+      <div class="frame-app">Claude Code</div>
+      <div class="frame-details" id="frame-details">—</div>
+      <div class="frame-state" id="frame-state">—</div>
+    </div>
+    <div class="right">
+      <div class="frame-num" id="frame-num">—</div>
+      <div class="elapsed" id="elapsed">—</div>
+    </div>
+  </section>
+
+  <!-- ── Insights ────────────────────────────────────── -->
+  <section class="insights" id="insights"><div class="insight">Loading…</div></section>
+
+  <!-- ── Hero ────────────────────────────────────────── -->
+  <section class="hero">
+    <div>
+      <div class="eyebrow">Active time</div>
+      <div><span class="figure" id="hero-num">—</span><span class="unit" id="hero-unit">hours</span></div>
+      <div class="caption" id="hero-caption">—</div>
+    </div>
+    <div class="chart-block">
+      <div class="chart-head">
+        <span class="chart-title" id="chart-title">Last 90 days</span>
+        <span class="chart-side"><strong id="chart-total">—</strong> <span style="color: var(--text-4); margin: 0 6px;">·</span> peak <strong id="chart-peak">—</strong></span>
+      </div>
+      <div class="chart-wrap">
+        <svg id="chart" class="chart" viewBox="0 0 800 130" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="whiteGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="var(--text)" stop-opacity="0.14"/>
+              <stop offset="100%" stop-color="var(--text)" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+        </svg>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Stat row ────────────────────────────────────── -->
+  <section class="stat-row">
+    <div class="stat-card">
+      <div class="label">Today</div>
+      <div class="value"><span id="today-num">—</span><span class="unit" id="today-unit">hrs</span></div>
+      <div class="meta"><span class="delta" id="today-delta">—</span> <span id="today-sub" class="num">—</span></div>
+    </div>
+    <div class="stat-card">
+      <div class="label">This range</div>
+      <div class="value"><span id="range-num">—</span><span class="unit" id="range-unit">hrs</span></div>
+      <div class="meta"><span class="delta" id="range-delta">—</span> <span id="range-sub" class="num">—</span></div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Streak</div>
+      <div class="value"><span id="streak-num">—</span><span class="unit">days</span></div>
+      <div class="meta"><span id="streak-sub">—</span></div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Cost · range</div>
+      <div class="value"><span id="cost-num">—</span></div>
+      <div class="meta"><span id="cost-sub">—</span></div>
+    </div>
+  </section>
+
+  <!-- ── Achievements ────────────────────────────────── -->
+  <section class="achievements" id="achievements"></section>
+
+  <!-- ── Heatmap ─────────────────────────────────────── -->
+  <section>
+    <div class="section-head">
+      <h2>Activity</h2>
+      <div class="right" id="heatmap-meta">click a day for details</div>
+    </div>
+    <div class="card heatmap-card">
+      <div class="heatmap">
+        <div class="day-labels"><span></span><span>M</span><span></span><span>W</span><span></span><span>F</span><span></span></div>
+        <div class="grid" id="heatmap-grid"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Split: cost + languages ─────────────────────── -->
+  <section class="split-row">
+    <div class="card">
+      <div class="card-h"><h3>Cost</h3><div class="meta" id="cost-card-meta">approximate · range</div></div>
+      <div class="cost-grid">
+        <div>
+          <div class="cost-figure" id="cost-figure">—</div>
+          <div class="cost-sub" id="cost-figure-sub">—</div>
+        </div>
+        <div class="cost-bars" id="cost-bars"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h3>Languages</h3><div class="meta" id="lang-meta">by edits</div></div>
+      <div class="lang-stack" id="lang-stack"></div>
+      <div class="lang-list" id="lang-list"></div>
+    </div>
+  </section>
+
+  <!-- ── Code churn ──────────────────────────────────── -->
+  <section class="card" style="margin-bottom: 28px;">
+    <div class="card-h"><h3>Code churn</h3><div class="meta" id="churn-meta">lines added / removed · range</div></div>
+    <div class="churn-row">
+      <div class="churn-spark">
+        <svg id="churn-svg" viewBox="0 0 800 60" preserveAspectRatio="none"></svg>
+      </div>
+      <div class="churn-numbers">
+        <div class="row"><span class="label">Added</span><span class="added" id="churn-added">—</span></div>
+        <div class="row"><span class="label">Removed</span><span class="removed" id="churn-removed">—</span></div>
+        <div class="row"><span class="label">Net</span><span class="net" id="churn-net">—</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Tokens ──────────────────────────────────────── -->
+  <section>
+    <div class="section-head">
+      <h2>Tokens</h2>
+      <div class="right"><span id="tok-cache-pct">—</span> from cache</div>
+    </div>
+    <div class="stat-row" style="margin-bottom: 0; grid-template-columns: repeat(3, 1fr);">
+      <div class="stat-card"><div class="label">Grand total</div><div class="value"><span id="tok-grand">—</span></div><div class="meta"><span class="num" id="tok-grand-sub">in + out + cache</span></div></div>
+      <div class="stat-card"><div class="label">Output</div><div class="value"><span id="tok-out">—</span></div><div class="meta"><span class="num" id="tok-in-sub">input —</span></div></div>
+      <div class="stat-card"><div class="label">Cache</div><div class="value"><span id="tok-cache">—</span></div><div class="meta"><span class="num" id="tok-cache-sub">read — · write —</span></div></div>
+    </div>
+  </section>
+
+  <!-- ── Leaderboards ────────────────────────────────── -->
+  <section>
+    <div class="section-head">
+      <h2>Projects · tools · files</h2>
+      <div class="right" id="lb-meta">across <span id="lb-sessions">—</span> sessions</div>
+    </div>
+    <div class="lb-grid">
+      <div class="lb">
+        <div class="lb-h"><span class="t">Projects</span><span class="s">by hours</span></div>
+        <table id="projects-tbl"></table>
+      </div>
+      <div class="lb">
+        <div class="lb-h"><span class="t">Tools</span><span class="s">by calls</span></div>
+        <table id="tools-tbl"></table>
+      </div>
+      <div class="lb">
+        <div class="lb-h"><span class="t">Files</span><span class="s">by edits</span></div>
+        <table id="files-tbl"></table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── More leaderboards: bash + domains + subagents ─ -->
+  <section>
+    <div class="section-head">
+      <h2>Shell · web · subagents</h2>
+      <div class="right"><span id="mcp-label">—</span></div>
+    </div>
+    <div class="lb-grid">
+      <div class="lb">
+        <div class="lb-h"><span class="t">Bash commands</span><span class="s">by invocations</span></div>
+        <table id="bash-tbl"></table>
+      </div>
+      <div class="lb">
+        <div class="lb-h"><span class="t">WebFetch domains</span><span class="s">by hits</span></div>
+        <table id="domains-tbl"></table>
+      </div>
+      <div class="lb">
+        <div class="lb-h"><span class="t">Subagents</span><span class="s">by invocations</span></div>
+        <table id="subagents-tbl"></table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Discord card ────────────────────────────────── -->
+  <section>
+    <div class="section-head">
+      <h2>Discord presence</h2>
+      <div class="right"><span id="frames-live">—</span> live · <span id="frames-total">—</span> total</div>
+    </div>
+    <div class="discord">
+      <div class="discord-h"><span class="t">Now showing</span><span class="s" id="frame-no">—</span></div>
+      <div class="live-frame">
+        <div class="label-tag">On air</div>
+        <div class="details" id="frame-details-2">—</div>
+        <div class="state" id="frame-state-2">—</div>
+      </div>
+      <ul class="rotation-list" id="rotation-list"></ul>
+    </div>
+  </section>
+
+  <footer>
+    <span class="pulse"><span class="pulse-dot"></span><span id="conn-state">live</span></span>
+    <span>
+      <a href="/api/badge.svg?metric=hours&range=7d" target="_blank">badges</a>
+      ·
+      <span>127.0.0.1:{{PORT}}</span>
+      ·
+      <span style="color: var(--text-4);">?</span> for help
+    </span>
+  </footer>
+</main>
+
+<!-- Drawer (project drilldown) -->
+<div class="scrim" id="scrim"></div>
+<div class="drawer" id="drawer">
+  <button class="close" id="drawer-close">×</button>
+  <h3 id="drawer-title">—</h3>
+  <div class="sub" id="drawer-sub">—</div>
+  <div class="grid" id="drawer-body"></div>
+</div>
+
+<!-- Modal (day detail) -->
+<div class="modal" id="modal">
+  <button class="close" id="modal-close">×</button>
+  <h4 id="modal-title">—</h4>
+  <div class="sub" id="modal-sub">—</div>
+  <div id="modal-body"></div>
+</div>
+
+<!-- Keyboard help -->
+<div class="help" id="help">
+  <div class="help-card">
+    <h4>Keyboard shortcuts</h4>
+    <div class="row"><span class="keys"><span class="kbd">1</span><span class="kbd">5</span></span><span>switch range</span></div>
+    <div class="row"><span class="keys"><span class="kbd">t</span></span><span>toggle theme</span></div>
+    <div class="row"><span class="keys"><span class="kbd">esc</span></span><span>close drawer / modal</span></div>
+    <div class="row"><span class="keys"><span class="kbd">?</span></span><span>this help</span></div>
+  </div>
+</div>
+
+<script>
+{{SCRIPT}}</script>
+</body>
+</html>

@@ -3,5 +3,10 @@
   "output": "dist/sea-prep.blob",
   "disableExperimentalSEAWarning": true,
   "useSnapshot": false,
-  "useCodeCache": false
+  "useCodeCache": false,
+  "assets": {
+    "dashboard.html": "src/server/assets/dashboard.html",
+    "dashboard.css": "src/server/assets/dashboard.css",
+    "dashboard.client.js": "src/server/assets/dashboard.client.js"
+  }
 }

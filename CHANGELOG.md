@@ -4,7 +4,9 @@ All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachang
 
 ## Unreleased
 
-_No changes yet._
+**Internals**
+
+- **Web dashboard assets split out of `src/server/page.js`.** The ~1,260-line string monolith (CSS + HTML + client JS as one file) is now three real, tool-friendly files under `src/server/assets/` — `dashboard.css`, `dashboard.html` (with `{{STYLES}}` / `{{SCRIPT}}` / `{{PORT}}` tokens), and `dashboard.client.js`. `page.js` shrinks to a ~30-line composer. A new `src/server/assets.js` `loadAsset()` reads from disk in dev/npm and from the SEA blob (via `node:sea` `getAsset()`) in the packaged exe — so the single-binary, no-runtime-deps, works-offline guarantees hold. `sea-config.json` gains an `assets` map. Rendered HTML is byte-for-byte identical to before; no user-facing change.
 
 ## [0.7.2] - 2026-05-24
 
