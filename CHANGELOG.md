@@ -4,7 +4,9 @@ All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachang
 
 ## Unreleased
 
-_No changes yet._
+**Fixed**
+
+- **`doctor` no longer false-warns on a healthy Discord connection.** The IPC check grepped the log only for a recent "Discord RPC connected" line, but the daemon connects once and stays connected without re-logging — so a long-lived, actively-pushing daemon read as a warning. It now also treats recent "Presence updated" / "Presence cleared" lines as proof of a live connection (both only log after the daemon's `connected` guard), and respects a later "retry in Ns" / "login failed" / "disconnected" as a drop.
 
 ## [0.7.3] - 2026-05-24
 

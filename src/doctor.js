@@ -228,19 +228,30 @@ function checkDaemonLog() {
   }
   const ageMin = (Date.now() - st.mtimeMs) / 60_000;
   const sizeKB = (st.size / 1024).toFixed(1);
-  // Look for "Discord RPC connected" in the tail to confirm Discord IPC.
-  let connected = false;
+  // Infer live IPC state from the log. The daemon connects once and stays
+  // connected without re-logging, so grepping only for "connected" produces
+  // a false warning on a long-lived daemon. Instead: "Discord RPC connected",
+  // "Presence updated", and "Presence cleared" all imply a live connection —
+  // the latter two only log *after* the daemon's `connected` guard passes and
+  // a setActivity/clearActivity succeeds (see daemon.js). A later "retry in
+  // Ns" / "login failed" / "disconnected" line means it dropped. Whichever
+  // happened most recently wins.
+  let ipc = 'unknown';
   try {
-    const tail = readFileSync(LOG_PATH, 'utf8').split('\n').slice(-50).join('\n');
-    connected = /Discord RPC connected/i.test(tail);
-  } catch { /* log unreadable — connected stays false, warn check renders */ }
-  if (connected) {
+    for (const line of readFileSync(LOG_PATH, 'utf8').split('\n').slice(-80)) {
+      if (/Discord RPC connected|Presence updated|Presence cleared/i.test(line)) ipc = 'up';
+      else if (/retry in \d+s|login failed|Discord disconnected/i.test(line)) ipc = 'down';
+    }
+  } catch { /* log unreadable — ipc stays 'unknown', warn renders */ }
+  if (ipc === 'up') {
     check('discord IPC connection', 'pass',
-      `${sizeKB} KB log · last write ${ageMin.toFixed(1)} min ago`);
-  } else {
-    check('discord IPC connection', 'warn',
-      `log shows no recent "connected" line`,
+      `connected · ${sizeKB} KB log · last write ${ageMin.toFixed(1)} min ago`);
+  } else if (ipc === 'down') {
+    check('discord IPC connection', 'warn', 'daemon is reconnecting to Discord',
       'is the discord desktop client running? rpc only works via desktop, not browser');
+  } else {
+    check('discord IPC connection', 'warn', 'no connection activity in the log yet',
+      'start the daemon with discord desktop running');
   }
 }
 
