@@ -10,6 +10,10 @@
 **Discord Rich Presence for [Claude Code](https://claude.com/claude-code).**
 Your live model, project, current tool, tokens, and lifetime stats — in your Discord profile. Driven by the hooks Claude Code already fires. Zero polling between sessions.
 
+[![community · sessions](https://claude-rpc-totals.claude-rpc.workers.dev/sessions.svg)](#community-totals-opt-in) &nbsp; [![community · tokens](https://claude-rpc-totals.claude-rpc.workers.dev/tokens.svg)](#community-totals-opt-in)
+
+<sub>live, opt-in — see [community totals](#community-totals-opt-in)</sub>
+
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node 18+](https://img.shields.io/badge/node-%3E%3D18-43853d.svg?logo=node.js&logoColor=white)](https://nodejs.org)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-hooks-d97757.svg)](https://claude.com/claude-code)
@@ -125,12 +129,7 @@ Cost numbers come from `src/pricing.js`, seeded with **approximate** public list
 
 ### community totals (opt-in)
 
-A small Cloudflare Worker ([`worker/`](worker/)) hosts running totals of sessions and tokens across every install that has opted in:
-
-![sessions](https://claude-rpc-totals.claude-rpc.workers.dev/sessions.svg)
-![tokens](https://claude-rpc-totals.claude-rpc.workers.dev/tokens.svg)
-
-The opt-in is per-install and **off by default**:
+The badges at the top of this README are live, served by a small Cloudflare Worker ([`worker/`](worker/)) that holds running totals of sessions and tokens across every install that has opted in. The opt-in is per-install and **off by default**:
 
 ```sh
 claude-rpc community              # show state
