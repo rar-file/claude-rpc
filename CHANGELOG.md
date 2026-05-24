@@ -6,6 +6,18 @@ All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachang
 
 _No changes yet._
 
+## [0.7.1] - 2026-05-24
+
+**Install / first-run**
+
+- **Community totals on by default for fresh installs.** `seedConfig` now mints an anonymous `instanceId` at the same time it writes the freshly-seeded config, so the new `community.enabled: true` default in `DEFAULT_CONFIG` is immediately actionable — without an id, `flushCommunity` bails with `no-instance-id` and the badge counters would never see fresh installs. Users who want out: `claude-rpc community off`.
+- **Pre-v0.7 upgraders preserved off.** `migrateConfig` writes an explicit `community: { enabled: false }` into any user config that has no `community` block, so the deep-merge in `loadConfig` does NOT silently flip them on. The existing `claude-rpc community on` consent flow remains the only path to enable for these users — the v0.7.0 privacy claim is preserved verbatim.
+- **`claude-rpc setup` and `claude-rpc install` are now aliases.** Both register Claude Code hooks AND the Windows startup entry (`HKCU\…\Run\ClaudeRPC`). Previously `setup` skipped the startup step; in practice users expected one command to do both. Non-Windows: the existing one-line warning still prints, no functional change.
+
+**Tests**
+
+- 210 → 216 in the main suite (worker suite unchanged at 19). New coverage in `test/install.test.js`: `migrate` writes `enabled:false` for pre-v0.7 upgraders, leaves explicit user community blocks untouched, doesn't flip an opted-out user back on; `seed` mints an instanceId when the default is `enabled:true`, never overwrites a pre-existing id, doesn't mint when disabled.
+
 ## [0.7.0] - 2026-05-24
 
 **New presence frames**
