@@ -94,7 +94,9 @@ body {
 .msrow .pct { width: 44px; opacity: 0.85; }
 
 /* ── finale summary ──────────────────────────────────────────── */
-.summary { width: min(92vw, 460px); }
+/* z-index lifts the card + action buttons ABOVE the full-screen .tap nav
+   zones (z-index 20) — otherwise the tap layer swallows every button click. */
+.summary { width: min(92vw, 460px); position: relative; z-index: 24; }
 .card {
   background: var(--paper); color: var(--ink); border: 2px solid var(--ink);
   box-shadow: 8px 9px 0 rgba(0,0,0,0.35); padding: 24px 24px 20px; text-align: left;

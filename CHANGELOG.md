@@ -2,6 +2,12 @@
 
 All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.11.1] - 2026-06-02
+
+**Fixed**
+
+- **Claude Wrapped's finale buttons (replay / poster / copy link) now work.** The full-screen tap/arrow navigation zones (`z-index: 20`) were layered on top of the finale's action buttons, so every click hit the nav layer instead of the button. The summary card + actions now sit above the tap zones (`z-index: 24`).
+
 ## [0.11.0] - 2026-06-02
 
 **Added**
