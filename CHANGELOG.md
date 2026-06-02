@@ -2,6 +2,12 @@
 
 All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.12.0] - 2026-06-02
+
+**Fixed**
+
+- **Token and cost totals were inflated ~2–3× by duplicate `usage` accounting.** Claude Code records a single assistant message (one `message.id`) across several JSONL lines — one per content block (thinking / text / tool_use) — and repeats the *same* `usage` object on every line. The scanner summed it each time, so a 3-block turn counted its input/output/cache tokens (and its turn + per-model split) three times. Usage, cost, turns, and the model split are now counted **once per `message.id`**; content blocks (tool calls, edits, lines) still count per line since those are distinct. Scanner cache version bumped 3 → 4 — the next scan re-parses every transcript once to correct historical totals.
+
 ## [0.11.2] - 2026-06-02
 
 **Changed**

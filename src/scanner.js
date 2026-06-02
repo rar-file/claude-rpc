@@ -7,7 +7,7 @@ import { costFor, pricingKeyFor } from './pricing.js';
 
 // Bumping this forces a full re-parse on next scan. Increment whenever the
 // per-transcript summary schema changes in a way old caches can't satisfy.
-const CACHE_VERSION = 3;
+const CACHE_VERSION = 4;
 
 // Cap counted gap between consecutive timestamps. Anything larger is treated
 // as the user walking away — we count only what's plausibly active time.
@@ -188,6 +188,13 @@ export function parseTranscript(filePath) {
     byModel: {},          // pricing key → { turns, tokens, cost } (model split)
   };
   const fileSet = new Set();
+  // Claude Code splits one assistant message (a single message.id) across
+  // several JSONL lines — one per content block (thinking / text / tool_use)
+  // — and repeats the SAME `usage` object on every line. Token/cost/turn
+  // counting must happen once per message.id, or a 3-block turn is counted 3×
+  // (this was the source of wildly inflated token + cost totals). Content
+  // blocks themselves are distinct per line, so those stay counted per line.
+  const usageCountedIds = new Set();
   // Records in their original order, retaining timestamps for per-day bucketing.
   const records = [];
 
@@ -212,10 +219,15 @@ export function parseTranscript(filePath) {
     if (r.type === 'assistant') {
       const turnModel = r.message?.model || summary.model;
       const u = r.message?.usage;
+      // Count usage/cost/turn only the first time we see this message.id (see
+      // usageCountedIds note above). No id (rare/legacy) → count it.
+      const msgId = r.message?.id;
+      const firstSeen = !msgId || !usageCountedIds.has(msgId);
+      if (msgId) usageCountedIds.add(msgId);
       // Per-model split bucket, keyed by pricing key so cost/tokens/turns align.
       const mkey = turnModel ? pricingKeyFor(turnModel) : null;
       const mb = mkey ? (summary.byModel[mkey] ||= { turns: 0, tokens: 0, cost: 0 }) : null;
-      if (u) {
+      if (u && firstSeen) {
         summary.inputTokens += u.input_tokens || 0;
         summary.outputTokens += u.output_tokens || 0;
         summary.cacheReadTokens += u.cache_read_input_tokens || 0;
@@ -241,8 +253,10 @@ export function parseTranscript(filePath) {
       }
       if (turnModel) {
         if (!summary.model) summary.model = turnModel;
-        summary.modelsUsed[turnModel] = (summary.modelsUsed[turnModel] || 0) + 1;
-        if (mb) mb.turns += 1;
+        if (firstSeen) {
+          summary.modelsUsed[turnModel] = (summary.modelsUsed[turnModel] || 0) + 1;
+          if (mb) mb.turns += 1;
+        }
       }
       const blocks = r.message?.content || [];
       for (const b of blocks) {

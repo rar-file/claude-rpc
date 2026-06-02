@@ -184,3 +184,31 @@ test('parseTranscript: fileEditTs records most-recent edit timestamp', () => {
   assert.equal(s.fileEditTs['/x.js'], new Date('2026-05-23T12:00:00Z').getTime(), 'keeps the latest edit ts');
   rmSync(dir, { recursive: true });
 });
+
+// ── v0.12: dedupe split assistant messages (token/cost overcount fix) ────
+test('parseTranscript: usage counted once per message.id across split lines', () => {
+  // Claude Code splits one assistant message (same message.id) across lines,
+  // one per content block, repeating the SAME usage on each. Tokens must count
+  // once; the distinct tool_use blocks still count per line.
+  const { dir, path } = makeTranscript([
+    { type: 'user', sessionId: 's1', cwd: '/tmp/proj', timestamp: '2026-05-22T10:00:00Z', message: { content: 'go' } },
+    { type: 'assistant', timestamp: '2026-05-22T10:00:10Z',
+      message: { id: 'msg_A', model: 'claude-opus-4-7', usage: { input_tokens: 50, output_tokens: 100 },
+        content: [{ type: 'thinking', text: '...' }] } },
+    { type: 'assistant', timestamp: '2026-05-22T10:00:11Z',
+      message: { id: 'msg_A', model: 'claude-opus-4-7', usage: { input_tokens: 50, output_tokens: 100 },
+        content: [{ type: 'text', text: 'hi' }] } },
+    { type: 'assistant', timestamp: '2026-05-22T10:00:12Z',
+      message: { id: 'msg_A', model: 'claude-opus-4-7', usage: { input_tokens: 50, output_tokens: 100 },
+        content: [{ type: 'tool_use', name: 'Bash', input: { command: 'ls' } }] } },
+  ]);
+  const s = parseTranscript(path);
+  assert.equal(s.outputTokens, 100, 'tokens counted once, not 3×');
+  assert.equal(s.inputTokens, 50);
+  assert.equal(s.toolCalls, 1, 'the single tool_use block still counts');
+  // turns counted once per message id
+  const mk = Object.values(s.byModel)[0];
+  assert.equal(mk.turns, 1, 'one turn, not three');
+  assert.equal(mk.tokens, 150, 'in+out once');
+  rmSync(dir, { recursive: true });
+});
