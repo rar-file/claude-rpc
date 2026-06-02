@@ -19,6 +19,10 @@ const TEMPLATE = loadAsset('dashboard.html');
 const STYLES   = loadAsset('dashboard.css');
 const SCRIPT   = loadAsset('dashboard.client.js');
 
+const WRAPPED_TEMPLATE = loadAsset('wrapped.html');
+const WRAPPED_STYLES   = loadAsset('wrapped.css');
+const WRAPPED_SCRIPT   = loadAsset('wrapped.client.js');
+
 function buildHtml({ port }) {
   // Replacer FUNCTIONS, not strings: the client JS is full of `$(id)` DOM
   // accessors and the CSS could carry `$`, both of which String.prototype
@@ -30,4 +34,11 @@ function buildHtml({ port }) {
     .replaceAll('{{PORT}}', String(port));
 }
 
-export { buildHtml };
+// The animated /wrapped year-in-review. Same compose-once pattern.
+function buildWrappedHtml() {
+  return WRAPPED_TEMPLATE
+    .replace('{{STYLES}}', () => WRAPPED_STYLES)
+    .replace('{{SCRIPT}}', () => WRAPPED_SCRIPT);
+}
+
+export { buildHtml, buildWrappedHtml };

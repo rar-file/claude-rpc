@@ -7,6 +7,9 @@
   "assets": {
     "dashboard.html": "src/server/assets/dashboard.html",
     "dashboard.css": "src/server/assets/dashboard.css",
-    "dashboard.client.js": "src/server/assets/dashboard.client.js"
+    "dashboard.client.js": "src/server/assets/dashboard.client.js",
+    "wrapped.html": "src/server/assets/wrapped.html",
+    "wrapped.css": "src/server/assets/wrapped.css",
+    "wrapped.client.js": "src/server/assets/wrapped.client.js"
   }
 }

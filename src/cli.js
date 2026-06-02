@@ -1141,6 +1141,7 @@ function help() {
     ['calendar',  'Year activity heatmap SVG (--out --gist)'],
     ['session-card', 'Recap card for the current session (--out)'],
     ['mcp',       'Run as an MCP server — expose your stats to Claude Code'],
+    ['wrapped',   'Open your animated year-in-review (Claude Wrapped)'],
     ['private',   'Mark the current directory as private (hide from Discord)'],
     ['public',    'Un-mark the current directory'],
     ['privacy',   'Show resolved visibility for the current directory'],
@@ -1218,6 +1219,7 @@ const packagedDefault = IS_PACKAGED && !cmd;
     case 'calendar':  await doCalendar(process.argv.slice(3)); break;
     case 'session-card': await doSessionCard(process.argv.slice(3)); break;
     case 'mcp':       await doMcp(); break;
+    case 'wrapped':   process.env.CLAUDE_RPC_OPEN_PATH = '/wrapped'; await import('./server/index.js'); break;
     case 'private':   doPrivate(); break;
     case 'public':    doPublic(); break;
     case 'privacy':   doPrivacy(); break;

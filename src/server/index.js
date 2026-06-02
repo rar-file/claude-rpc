@@ -16,11 +16,12 @@ import { exec } from 'node:child_process';
 import { ROUTES, JSON_HEADERS } from './routes.js';
 import { projectDrilldown, dayDetail } from './api.js';
 import { sseClients, watchSources } from './sse.js';
-import { buildHtml } from './page.js';
+import { buildHtml, buildWrappedHtml } from './page.js';
 
 // Pre-compose the HTML once at startup — the only dynamic bit is the port
 // (used in a breadcrumb), which is fixed for the life of the daemon.
 const HTML = buildHtml({ port: Number(process.env.CLAUDE_RPC_PORT) || 47474 });
+const WRAPPED_HTML = buildWrappedHtml();
 
 const PORT = Number(process.env.CLAUDE_RPC_PORT) || 47474;
 
@@ -70,6 +71,13 @@ const server = createServer((req, res) => {
   const handler = ROUTES.get(key);
   if (handler) return handler(req, res, { query });
 
+  // Animated year-in-review.
+  if (req.method === 'GET' && (path === '/wrapped' || path === '/wrapped.html')) {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+    res.end(WRAPPED_HTML);
+    return;
+  }
+
   // Page.
   if (req.method === 'GET' && (path === '/' || path === '/index.html')) {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
@@ -83,9 +91,13 @@ const server = createServer((req, res) => {
 watchSources();
 
 server.listen(PORT, '127.0.0.1', () => {
-  const url = `http://127.0.0.1:${PORT}`;
-  console.log(`◆ Claude RPC dashboard: ${url}`);
-  console.log('  Ctrl-C to stop.');
+  const base = `http://127.0.0.1:${PORT}`;
+  // `claude-rpc wrapped` sets CLAUDE_RPC_OPEN_PATH=/wrapped to land on the
+  // animated year-in-review instead of the dashboard.
+  const openPath = process.env.CLAUDE_RPC_OPEN_PATH || '';
+  const url = base + openPath;
+  console.log(`◆ Claude RPC dashboard: ${base}`);
+  console.log(`  ${openPath ? 'opening ' + url + '  ·  ' : ''}Ctrl-C to stop.`);
   if (!process.env.CLAUDE_RPC_NO_OPEN) {
     const opener = process.platform === 'win32' ? `start "" "${url}"`
       : process.platform === 'darwin' ? `open "${url}"`

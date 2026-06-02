@@ -8,7 +8,7 @@ import { readAggregate } from '../scanner.js';
 import { generateInsights } from '../insights.js';
 import { badgeSvg } from '../badge.js';
 import { renderCard } from '../card.js';
-import { snapshot, windowedAggregate, aggregateToCsv } from './api.js';
+import { snapshot, windowedAggregate, aggregateToCsv, wrappedData } from './api.js';
 
 export const JSON_HEADERS = {
   'content-type': 'application/json',
@@ -20,6 +20,11 @@ export const ROUTES = new Map();
 ROUTES.set('GET /api/state', (req, res) => {
   res.writeHead(200, JSON_HEADERS);
   res.end(JSON.stringify(snapshot()));
+});
+
+ROUTES.set('GET /api/wrapped', (req, res) => {
+  res.writeHead(200, JSON_HEADERS);
+  res.end(JSON.stringify(wrappedData()));
 });
 
 ROUTES.set('GET /api/aggregate', (req, res, { query }) => {

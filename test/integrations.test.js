@@ -79,3 +79,15 @@ test('renderSessionCard: bakes in the session vars', () => {
   assert.ok(svg.includes('47'));
   assert.ok(svg.includes('532.0k'));
 });
+
+// ── wrapped payload shape (v0.11) ───────────────────────────────────────
+const { wrappedData } = await import('../src/server/api.js');
+test('wrappedData: returns the year-in-review payload shape', () => {
+  const w = wrappedData();
+  for (const k of ['activeMs', 'sessions', 'prompts', 'tokens', 'cachePct', 'streak',
+    'longestStreak', 'daysSinceFirst', 'modelSplit', 'linesNet', 'cost', 'generatedAt']) {
+    assert.ok(k in w, `missing key: ${k}`);
+  }
+  assert.ok(Array.isArray(w.modelSplit), 'modelSplit is an array');
+  assert.equal(typeof w.cachePct, 'number');
+});

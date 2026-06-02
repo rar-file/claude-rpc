@@ -324,3 +324,13 @@ footer .pulse-dot { background: var(--grass); border: 1.5px solid var(--ink); }
   .rotation-list { grid-template-columns: 1fr; }
   .drawer { width: 100%; }
 }
+
+/* Wrapped link (v0.11) */
+.wrapped-link {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 12px; font-weight: 700; letter-spacing: 0.5px;
+  text-decoration: none; color: var(--rust, #c2491e);
+  border: 1.5px solid var(--rust, #c2491e); border-radius: 4px;
+  padding: 5px 10px; white-space: nowrap; transition: all 0.15s ease;
+}
+.wrapped-link:hover { background: var(--rust, #c2491e); color: var(--paper, #f4ede0); }

@@ -2,6 +2,12 @@
 
 All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.11.0] - 2026-06-02
+
+**Added**
+
+- **Claude Wrapped — a fully-animated year-in-review.** Visit `/wrapped` on the local dashboard (or run `claude-rpc wrapped`) for a Spotify-Wrapped-style story: an animated intro, count-up stat slides (hours, sessions, prompts, tokens), then your top language, hotspot file, peak day/hour, model split (animated bars), lines written, and a shareable summary card you can screenshot. Story-style progress bars, auto-advance, click/arrow-key navigation, and space-to-pause. Backed by a new `GET /api/wrapped` endpoint; assets in `src/server/assets/wrapped.*`. The dashboard header now links to it (✦ Wrapped).
+
 ## [0.10.0] - 2026-06-02
 
 **Added — ten features**
