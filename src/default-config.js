@@ -87,6 +87,11 @@ export const DEFAULT_CONFIG = {
         details: "Working in {project}",
         state:   "{currentToolPretty} · {currentFilePretty} · {toolElapsed} · {tokensLabel}",
         largeImageText: "Working on a {fileLang} file",
+        rotation: [
+          // Pops in for ~5min when the session crosses an hour milestone, then
+          // the `requires` gate drops it and we're back to the single frame.
+          { details: "{sessionMilestoneLabel} · {project}", state: "{tokensLabel} · {messagesLabel}", requires: ["sessionMilestoneHit"] },
+        ],
       },
       thinking: {
         details: "Thinking in {project}",
@@ -99,7 +104,9 @@ export const DEFAULT_CONFIG = {
         largeImageText: "Compacting · {compactTriggerLabel}",
       },
       shipped: {
-        details: "Just shipped in {project}",
+        // {justShippedLabel} adapts to the action: "Pushed to main",
+        // "Committed on feat/x", "Opened a pull request", "Opened an issue".
+        details: "{justShippedLabel} · {project}",
         state:   "{lastCommit}",
         largeImageText: "{justShippedLabel}",
       },
@@ -115,9 +122,11 @@ export const DEFAULT_CONFIG = {
         rotation: [
           { details: "This week · {weekHours}",                state: "{weekPromptsLabel} · {weekTokensFmt} tokens", requires: ["weekActiveMs"] },
           { details: "{streakLabel}",                          state: "{daysSinceFirstLabel} · {allSessionsLabel}",  requires: ["streakIsMilestone"] },
-          { details: "Hotspot · {topEditedFile}",              state: "{topEditedCountLabel} all-time",              requires: ["topEditedCount"] },
+          { details: "Hotspot · {topEditedFile}",              state: "{topEditedCountLabel} · {topEditedAgeLabel}", requires: ["topEditedCount"] },
+          { details: "Model split",                            state: "{modelSplitLabel}",                          requires: ["modelSplitLabel"] },
           { details: "{allHours} on Claude all-time",          state: "{allSessionsLabel} · {allMessagesFmt} prompts", requires: ["allSessions"] },
           { details: "Lifetime · {allTokensFmt} tokens",       state: "{allToolsFmt} tool calls · {allFilesFmt} files", requires: ["allTools"] },
+          { details: "{allFreshTokensFmt} fresh tokens",       state: "{allCachePctLabel}",                         requires: ["allCachePctLabel"] },
           { details: "Code churn · {linesAddedFmt} added",     state: "{linesNetFmt} net · {topLanguage}",            requires: ["topLanguage"] },
           { details: "Cost · {todayCostFmt} today",            state: "{allCostFmt} all-time",                        requires: ["allCost"] },
         ],

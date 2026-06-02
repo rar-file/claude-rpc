@@ -750,6 +750,41 @@ async function doCard(argv) {
   }
 }
 
+// GitHub profile stat card — a compact, embeddable lifetime summary meant
+// for a profile README. `--gist` publishes it to a gist (raw URL stays stable
+// across re-runs) so the README image auto-refreshes when you re-run it.
+function parseGithubStatArgs(argv) {
+  const out = { out: '', gist: false, handle: '' };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--out' || a === '-o') out.out = argv[++i];
+    else if (a === '--handle' || a === '-u') out.handle = argv[++i];
+    else if (a === '--gist') out.gist = true;
+  }
+  return out;
+}
+
+async function doGithubStat(argv) {
+  const opts = parseGithubStatArgs(argv);
+  const aggregate = readAggregate();
+  if (!aggregate) {
+    fail('no aggregate yet — nothing to render', { hint: 'run `claude-rpc scan` first', code: EX_BAD_STATE });
+  }
+  const { renderProfileCard } = await import('./profile.js');
+  const svg = renderProfileCard(aggregate, { handle: opts.handle });
+  if (opts.gist) {
+    await publishBadgeToGist(svg, { metric: 'profile', range: 'all-time' });
+    return;
+  }
+  if (opts.out) {
+    writeFileSync(opts.out, svg);
+    console.log(`${c.green}✓${c.reset} Wrote ${c.cyan}${opts.out}${c.reset} (${svg.length} bytes)`);
+    console.log(`${c.dim}Embed in your README:  <img src="${opts.out}" alt="Claude Code stats" width="500" />${c.reset}`);
+  } else {
+    process.stdout.write(svg);
+  }
+}
+
 // ── Privacy commands ─────────────────────────────────────────────────────
 //
 // `claude-rpc private`        → add current cwd to ~/.claude-rpc/private-list.json
@@ -1039,6 +1074,7 @@ function help() {
     ['insights',  'Auto-generated insights from your history'],
     ['badge',     'Render a Shields-style SVG (--metric --range --out --gist)'],
     ['card',      'Render a poster-style SVG summary (--range year|month|week|all)'],
+    ['github-stat', 'Render an embeddable profile stat card (--handle --out --gist)'],
     ['private',   'Mark the current directory as private (hide from Discord)'],
     ['public',    'Un-mark the current directory'],
     ['privacy',   'Show resolved visibility for the current directory'],
@@ -1111,6 +1147,7 @@ const packagedDefault = IS_PACKAGED && !cmd;
     case 'insights':  showInsights(); break;
     case 'badge':     await doBadge(process.argv.slice(3)); break;
     case 'card':      await doCard(process.argv.slice(3)); break;
+    case 'github-stat': await doGithubStat(process.argv.slice(3)); break;
     case 'private':   doPrivate(); break;
     case 'public':    doPublic(); break;
     case 'privacy':   doPrivacy(); break;

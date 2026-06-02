@@ -2,6 +2,22 @@
 
 All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.9.0] - 2026-06-02
+
+**Added**
+
+- **`claude-rpc github-stat` — an embeddable profile stat card.** Renders a compact paper/terracotta SVG of your all-time stats (time with Claude, sessions, streak, prompts, tokens, net lines, top language, cost) sized for a GitHub profile README. `--handle <name>` stamps your handle, `--out <file>` writes the SVG, and `--gist` publishes to a gist so the README image auto-refreshes when you re-run it (same gist plumbing as `badge --gist`).
+- **Session-duration milestones.** A celebratory frame pops for ~5 minutes when a live session crosses 1h/2h/3h/5h/8h/12h ("2-hour session"). New `{sessionMilestoneHit}` / `{sessionMilestoneLabel}` template vars; stateless (derived from elapsed time).
+- **PR / issue / release "shipped" detection.** The just-shipped overlay now recognizes `gh pr create`, `gh issue create`, and `gh release create` alongside `git push`/`commit`. `{justShippedLabel}` adapts: "Opened a pull request", "Opened an issue", "Tagged v1.0". `classifyShip()` is exported and tested.
+- **Model split.** The scanner now tracks per-model turns/tokens/cost (`aggregate.modelSplit`, `byModel`). New `{modelSplitLabel}` ("Opus 72% · Sonnet 28%"), `{topModelPretty}`, `{topModelShareLabel}` vars, plus a "Model split" idle frame.
+- **Hotspot aging.** Top edited files carry `lastEditedTs` / `daysSinceLastEdit`; the Hotspot frame now reads "73 edits · 3d since last edit" via `{topEditedAgeLabel}` / `{topEditedDaysAgo}`.
+- **Billable-vs-cache token clarity.** New `{allFreshTokens}` (input+output), `{allCachePct}`, `{allCachePctLabel}` ("82% from cache") so the lumped token total isn't mistaken for billable spend.
+
+**Changed**
+
+- Scanner cache version bumped 2 → 3 — the next scan re-parses every transcript once to populate the new per-model and last-edit fields. Automatic; no action needed.
+- The website's hero install command is now a true one-liner: `npm install -g claude-rpc && claude-rpc setup && claude-rpc start`.
+
 ## [0.8.1] - 2026-06-02
 
 **Fixed**

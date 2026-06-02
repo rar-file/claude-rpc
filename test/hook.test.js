@@ -22,7 +22,7 @@ process.env.TMPDIR = TMP;
 // processHookEvent and asserting via readState (both touch the same shared
 // state file). Tests run serially within this file, so we reset between.
 
-const { processHookEvent } = await import('../src/hook.js');
+const { processHookEvent, classifyShip } = await import('../src/hook.js');
 const { readState } = await import('../src/state.js');
 const { STATE_PATH } = await import('../src/paths.js');
 
@@ -213,6 +213,37 @@ test('Stop/SubagentStop go to idle (not stale)', () => {
   const s = readState();
   assert.equal(s.status, 'idle');
   assert.equal(s.claudeClosed, false, 'Stop must NOT set claudeClosed');
+});
+
+// ── classifyShip: PR / issue / release detection (v0.9) ───────────────
+test('classifyShip: git push / commit', () => {
+  assert.equal(classifyShip('git push origin main'), 'push');
+  assert.equal(classifyShip('git add . && git commit -m "x"'), 'commit');
+  // push outranks commit when a command does both.
+  assert.equal(classifyShip('git commit -m x && git push'), 'push');
+});
+
+test('classifyShip: gh pr / issue / release', () => {
+  assert.equal(classifyShip('gh pr create --fill'), 'pr');
+  assert.equal(classifyShip('gh issue create --title "bug"'), 'issue');
+  assert.equal(classifyShip('gh release create v1.0'), 'tag');
+});
+
+test('classifyShip: unrelated commands return null', () => {
+  assert.equal(classifyShip('ls -la'), null);
+  assert.equal(classifyShip('git status'), null);
+  assert.equal(classifyShip('npm run pushpin'), null); // not a real `git push`
+  assert.equal(classifyShip(''), null);
+  assert.equal(classifyShip(undefined), null);
+});
+
+test('PostToolUse: gh pr create sets justShippedKind=pr', () => {
+  resetStateFile();
+  processHookEvent('SessionStart', { cwd: '/tmp/proj' });
+  processHookEvent('PostToolUse', { tool_name: 'Bash', tool_input: { command: 'gh pr create --fill' }, cwd: '/tmp/proj' });
+  const s = readState();
+  assert.equal(s.justShippedKind, 'pr');
+  assert.ok(s.justShipped, 'justShipped timestamp set');
 });
 
 // Cleanup

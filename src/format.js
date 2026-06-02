@@ -317,6 +317,31 @@ export function buildVars(state, config, aggregate) {
     && (streak % 7 === 0 || streak === 30 || streak === 60 || streak === 100 || streak === 365)
     ? 1 : 0;
 
+  // Session-duration milestones — surface a celebratory frame for a few
+  // minutes after the live session crosses 1h/2h/3h/5h/8h/12h. Stateless:
+  // derived from elapsed duration, so no per-session bookkeeping is needed.
+  const SESSION_MILESTONES_H = [1, 2, 3, 5, 8, 12];
+  let sessionMilestoneHit = 0;
+  let sessionMilestoneLabel = '';
+  if (sessionActive && duration > 0) {
+    for (const h of SESSION_MILESTONES_H) {
+      const t = h * 3_600_000;
+      if (duration >= t && duration - t < 5 * 60_000) {
+        sessionMilestoneHit = 1;
+        sessionMilestoneLabel = `${h}-hour session`;
+      }
+    }
+  }
+
+  // Model split — per-model share of all-time spend, biggest first.
+  const modelSplit = Array.isArray(agg.modelSplit) ? agg.modelSplit : [];
+  const topModelEntry = modelSplit[0] || null;
+  const modelSplitLabel = modelSplit
+    .slice(0, 3)
+    .filter((m) => (m.costPct || 0) > 0)
+    .map((m) => `${humanModel(m.model)} ${Math.round(m.costPct * 100)}%`)
+    .join(' · ');
+
   // Idle duration for sleeker idle copy.
   const idleMs = state.status === 'idle' && state.lastActivity
     ? Math.max(0, Date.now() - state.lastActivity)
@@ -448,7 +473,13 @@ export function buildVars(state, config, aggregate) {
       ? (state.justShippedBranch ? `Pushed to ${state.justShippedBranch}` : 'Pushed')
       : state.justShippedKind === 'commit'
         ? (state.justShippedBranch ? `Committed on ${state.justShippedBranch}` : 'Committed')
-        : '',
+        : state.justShippedKind === 'pr'
+          ? 'Opened a pull request'
+          : state.justShippedKind === 'issue'
+            ? 'Opened an issue'
+            : state.justShippedKind === 'tag'
+              ? (state.justShippedBranch ? `Tagged ${state.justShippedBranch}` : 'Tagged a release')
+              : '',
     // {lastCommit} reads more naturally than {justShippedSubject} in user templates.
     lastCommit: state.justShippedSubject || '',
 
@@ -477,6 +508,20 @@ export function buildVars(state, config, aggregate) {
     allCacheTokens: fmtNum(allCache),
     allCacheReadTokens: fmtNum(allCacheRead),
     allCacheWriteTokens: fmtNum(allCacheWrite),
+    // Fresh (input+output) vs cache breakdown — clarifies the lumped total so
+    // "X tokens" isn't mistaken for billable spend (most of it is cheap cache).
+    allFreshTokens: allReal,
+    allFreshTokensFmt: fmtNum(allReal),
+    allCachePct: allTotal > 0 ? Math.round((allCache / allTotal) * 100) : 0,
+    allCachePctLabel: allTotal > 0 ? `${Math.round((allCache / allTotal) * 100)}% from cache` : '',
+    // Model split (v0.9) — top model by spend + a compact share label.
+    topModel: topModelEntry ? topModelEntry.model : '',
+    topModelPretty: topModelEntry ? humanModel(topModelEntry.model) : '',
+    topModelCostPct: topModelEntry ? Math.round((topModelEntry.costPct || 0) * 100) : 0,
+    topModelShareLabel: topModelEntry && (topModelEntry.costPct || 0) > 0
+      ? `${humanModel(topModelEntry.model)} · ${Math.round(topModelEntry.costPct * 100)}% of spend`
+      : '',
+    modelSplitLabel,
     allHours: fmtHours(agg.activeMs || 0),
     allWallHours: fmtHours(agg.wallMs || 0),
     allMessages: agg.userMessages || 0,
@@ -543,6 +588,12 @@ export function buildVars(state, config, aggregate) {
     topEditedFile: hotspot ? basename(hotspot.path) : '',
     topEditedCount: hotspot?.count || 0,
     topEditedCountLabel: hotspot ? plural(hotspot.count, 'edit') : '0 edits',
+    // Hotspot aging — how long since the top file was last touched.
+    topEditedDaysAgo: hotspot && hotspot.daysSinceLastEdit != null ? hotspot.daysSinceLastEdit : null,
+    topEditedAgeLabel: !hotspot || hotspot.daysSinceLastEdit == null ? ''
+      : hotspot.daysSinceLastEdit === 0 ? 'edited today'
+      : hotspot.daysSinceLastEdit === 1 ? 'edited yesterday'
+      : `${hotspot.daysSinceLastEdit}d since last edit`,
 
     // Per-project (current cwd's project)
     projectHours: projectStats ? fmtHours(projectStats.activeMs || 0) : '0h',
@@ -555,6 +606,9 @@ export function buildVars(state, config, aggregate) {
 
     // Streak milestone gate (for special rotation frame)
     streakIsMilestone,
+    // Session-duration milestone gate + label (v0.9)
+    sessionMilestoneHit,
+    sessionMilestoneLabel,
 
     // ── Code churn ───────────────────────────────────────────────
     linesAdded: allLinesAdded,

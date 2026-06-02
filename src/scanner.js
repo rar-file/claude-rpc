@@ -7,7 +7,7 @@ import { costFor, pricingKeyFor } from './pricing.js';
 
 // Bumping this forces a full re-parse on next scan. Increment whenever the
 // per-transcript summary schema changes in a way old caches can't satisfy.
-const CACHE_VERSION = 2;
+const CACHE_VERSION = 3;
 
 // Cap counted gap between consecutive timestamps. Anything larger is treated
 // as the user walking away — we count only what's plausibly active time.
@@ -175,6 +175,7 @@ export function parseTranscript(filePath) {
     byWeek: {},    // ISO week key → blankDay
     byHour: {},    // hour-of-day (0..23) → blankDay
     fileEdits: {}, // absolute path → edit count
+    fileEditTs: {}, // absolute path → most-recent edit timestamp (hotspot aging)
     // Phase 1 enrichments
     linesAdded: 0,
     linesRemoved: 0,
@@ -184,6 +185,7 @@ export function parseTranscript(filePath) {
     cost: 0,              // estimated USD
     costByModel: {},      // pricing key → USD
     modelsUsed: {},       // raw model id → assistant turns
+    byModel: {},          // pricing key → { turns, tokens, cost } (model split)
   };
   const fileSet = new Set();
   // Records in their original order, retaining timestamps for per-day bucketing.
@@ -210,6 +212,9 @@ export function parseTranscript(filePath) {
     if (r.type === 'assistant') {
       const turnModel = r.message?.model || summary.model;
       const u = r.message?.usage;
+      // Per-model split bucket, keyed by pricing key so cost/tokens/turns align.
+      const mkey = turnModel ? pricingKeyFor(turnModel) : null;
+      const mb = mkey ? (summary.byModel[mkey] ||= { turns: 0, tokens: 0, cost: 0 }) : null;
       if (u) {
         summary.inputTokens += u.input_tokens || 0;
         summary.outputTokens += u.output_tokens || 0;
@@ -221,18 +226,23 @@ export function parseTranscript(filePath) {
           bucket.cacheReadTokens += u.cache_read_input_tokens || 0;
           bucket.cacheWriteTokens += u.cache_creation_input_tokens || 0;
         }
+        if (mb) {
+          mb.tokens += (u.input_tokens || 0) + (u.output_tokens || 0)
+                     + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
+        }
         // Per-turn cost — uses this turn's model id, not the session's first-seen one.
         const turnCost = costFor({ model: turnModel, usage: u });
         if (turnCost > 0) {
           summary.cost += turnCost;
-          const key = pricingKeyFor(turnModel);
-          summary.costByModel[key] = (summary.costByModel[key] || 0) + turnCost;
+          summary.costByModel[mkey] = (summary.costByModel[mkey] || 0) + turnCost;
+          if (mb) mb.cost += turnCost;
           for (const bucket of allBuckets) bucket.cost += turnCost;
         }
       }
       if (turnModel) {
         if (!summary.model) summary.model = turnModel;
         summary.modelsUsed[turnModel] = (summary.modelsUsed[turnModel] || 0) + 1;
+        if (mb) mb.turns += 1;
       }
       const blocks = r.message?.content || [];
       for (const b of blocks) {
@@ -246,6 +256,7 @@ export function parseTranscript(filePath) {
             fileSet.add(f);
             if (EDITING_TOOLS.has(b.name)) {
               summary.fileEdits[f] = (summary.fileEdits[f] || 0) + 1;
+              if (ts && ts > (summary.fileEditTs[f] || 0)) summary.fileEditTs[f] = ts;
             }
           }
           // Code churn — lines added/removed. For Edit, we count
@@ -505,6 +516,7 @@ function aggregateFrom(cache) {
     byHour: {},
     byWeekday: {},
     fileEdits: {},
+    fileEditTs: {},
     streak: 0,
     longestStreak: 0,
     daysSinceFirst: 0,
@@ -524,6 +536,8 @@ function aggregateFrom(cache) {
     estimatedCost: 0,
     costByModel: {},
     modelsUsed: {},
+    byModel: {},
+    modelSplit: [],
     notifications: 0,
     generatedAt: Date.now(),
     _v: CACHE_VERSION,
@@ -552,6 +566,15 @@ function aggregateFrom(cache) {
     }
     for (const [m, v] of Object.entries(summary.modelsUsed || {})) {
       agg.modelsUsed[m] = (agg.modelsUsed[m] || 0) + v;
+    }
+    for (const [m, v] of Object.entries(summary.byModel || {})) {
+      const t = agg.byModel[m] ||= { turns: 0, tokens: 0, cost: 0 };
+      t.turns += v.turns || 0;
+      t.tokens += v.tokens || 0;
+      t.cost += v.cost || 0;
+    }
+    for (const [f, t] of Object.entries(summary.fileEditTs || {})) {
+      if (t > (agg.fileEditTs[f] || 0)) agg.fileEditTs[f] = t;
     }
     for (const [c, n] of Object.entries(summary.bashCommands || {})) {
       agg.bashCommands[c] = (agg.bashCommands[c] || 0) + n;
@@ -690,11 +713,36 @@ function aggregateFrom(cache) {
     agg.peakHour = bestHour;
   }
 
-  // Top edited files (paths + counts), descending.
+  // Top edited files (paths + counts), descending. Carries last-edit time and
+  // age in days so the dashboard / insights can flag a hotspot cooling off.
+  const nowMs = Date.now();
   agg.topEditedFiles = Object.entries(agg.fileEdits)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 25)
-    .map(([path, count]) => ({ path, count }));
+    .map(([path, count]) => {
+      const lastTs = agg.fileEditTs[path] || 0;
+      return {
+        path,
+        count,
+        lastEditedTs: lastTs || null,
+        daysSinceLastEdit: lastTs ? Math.floor((nowMs - lastTs) / 86_400_000) : null,
+      };
+    });
+
+  // Model split — per pricing key, sorted by cost. Each entry carries its share
+  // of total cost so the dashboard / card can show "Sonnet · 61% of spend".
+  const splitCostTotal = Object.values(agg.byModel).reduce((s, v) => s + (v.cost || 0), 0);
+  const splitTokenTotal = Object.values(agg.byModel).reduce((s, v) => s + (v.tokens || 0), 0);
+  agg.modelSplit = Object.entries(agg.byModel)
+    .map(([model, v]) => ({
+      model,
+      turns: v.turns || 0,
+      tokens: v.tokens || 0,
+      cost: v.cost || 0,
+      costPct: splitCostTotal > 0 ? (v.cost || 0) / splitCostTotal : 0,
+      tokenPct: splitTokenTotal > 0 ? (v.tokens || 0) / splitTokenTotal : 0,
+    }))
+    .sort((a, b) => b.cost - a.cost);
 
   // Languages: bucket file edits by extension via languages.js.
   for (const [path, count] of Object.entries(agg.fileEdits)) {

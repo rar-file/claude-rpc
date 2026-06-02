@@ -5,10 +5,24 @@ import { updateState, resetState, pushUnique, shortFile } from './state.js';
 import { detectLastCommitSubject, detectGitBranch } from './git.js';
 import { EVENTS_LOG_PATH } from './paths.js';
 
-// Match the bash invocations we treat as "just shipped" — captures the
-// verb (push / commit) for state.justShippedKind. Tolerates extra args,
-// leading env vars, and chained commands ("git add . && git commit -m ...").
-const GIT_SHIP_RE = /(?:^|[;&|]|\s)git\s+(push|commit)(?:\s|$)/;
+// Bash invocations we treat as "just shipped", classified into a kind for
+// state.justShippedKind. Tolerates extra args, leading env vars, and chained
+// commands ("git add . && git commit -m …"). Order matters: push outranks
+// commit when a command does both (`git commit && git push`).
+const SHIP_PATTERNS = [
+  { kind: 'push',   re: /(?:^|[;&|]|\s)git\s+push(?:\s|$)/ },
+  { kind: 'commit', re: /(?:^|[;&|]|\s)git\s+commit(?:\s|$)/ },
+  { kind: 'pr',     re: /(?:^|[;&|]|\s)gh\s+pr\s+create(?:\s|$)/ },
+  { kind: 'issue',  re: /(?:^|[;&|]|\s)gh\s+issue\s+create(?:\s|$)/ },
+  { kind: 'tag',    re: /(?:^|[;&|]|\s)gh\s+release\s+create(?:\s|$)/ },
+];
+
+// Return the "shipped" kind for a shell command, or null. Exported for tests.
+export function classifyShip(cmd) {
+  const s = String(cmd || '');
+  for (const p of SHIP_PATTERNS) if (p.re.test(s)) return p.kind;
+  return null;
+}
 
 const EVENTS_LOG_ROTATE_BYTES = 5 * 1024 * 1024;
 
@@ -112,13 +126,15 @@ export function processHookEvent(event, input = {}) {
       let shipSubject = null;
       let shipBranch = null;
       if (toolName === 'Bash') {
-        const cmd = String(toolInput.command || '');
-        const m = cmd.match(GIT_SHIP_RE);
-        if (m) {
-          shipKind = m[1];
+        shipKind = classifyShip(toolInput.command);
+        if (shipKind) {
           const shipCwd = input.cwd || process.cwd();
-          shipSubject = detectLastCommitSubject(shipCwd) || null;
           shipBranch = detectGitBranch(shipCwd) || null;
+          // Only commit/push carry a meaningful "what shipped" subject; a PR
+          // or issue creation doesn't map to a commit message.
+          if (shipKind === 'commit' || shipKind === 'push') {
+            shipSubject = detectLastCommitSubject(shipCwd) || null;
+          }
         }
       }
       updateState((s) => {

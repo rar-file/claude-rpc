@@ -511,3 +511,53 @@ test('plural picks singular when n=1', () => {
   assert.equal(plural(0, 'prompt'), '0 prompts');
   assert.equal(plural(1, 'edit', 'edits'), '1 edit');
 });
+
+// ── v0.9 buildVars additions ───────────────────────────────────────────
+
+test('buildVars: justShippedLabel covers pr / issue / tag', () => {
+  const pr = buildVars(baseState({ justShippedKind: 'pr' }), {}, {});
+  assert.equal(pr.justShippedLabel, 'Opened a pull request');
+  const issue = buildVars(baseState({ justShippedKind: 'issue' }), {}, {});
+  assert.equal(issue.justShippedLabel, 'Opened an issue');
+  const tag = buildVars(baseState({ justShippedKind: 'tag', justShippedBranch: 'v1.0' }), {}, {});
+  assert.equal(tag.justShippedLabel, 'Tagged v1.0');
+});
+
+test('buildVars: model split label from aggregate.modelSplit', () => {
+  const agg = { modelSplit: [
+    { model: 'opus',   cost: 90, costPct: 0.75, tokens: 100 },
+    { model: 'sonnet', cost: 30, costPct: 0.25, tokens: 50 },
+  ] };
+  const v = buildVars(baseState(), {}, agg);
+  assert.match(v.modelSplitLabel, /75%/);
+  assert.match(v.modelSplitLabel, /25%/);
+  assert.equal(v.topModelCostPct, 75);
+  assert.ok(v.topModelShareLabel.includes('75% of spend'));
+});
+
+test('buildVars: hotspot aging label', () => {
+  const mk = (days) => buildVars(baseState(), {}, { topEditedFiles: [{ path: '/a/page.js', count: 7, daysSinceLastEdit: days }] });
+  assert.equal(mk(0).topEditedAgeLabel, 'edited today');
+  assert.equal(mk(1).topEditedAgeLabel, 'edited yesterday');
+  assert.equal(mk(14).topEditedAgeLabel, '14d since last edit');
+  assert.equal(mk(0).topEditedDaysAgo, 0);
+});
+
+test('buildVars: billable-vs-cache breakdown', () => {
+  const agg = { inputTokens: 100, outputTokens: 100, cacheReadTokens: 800, cacheWriteTokens: 0 };
+  const v = buildVars(baseState(), {}, agg);
+  assert.equal(v.allFreshTokens, 200);
+  assert.equal(v.allCachePct, 80);
+  assert.equal(v.allCachePctLabel, '80% from cache');
+});
+
+test('buildVars: session milestone fires within window, not outside', () => {
+  // 2h + 1min into the session → milestone hit.
+  const hit = buildVars(baseState({ sessionStart: now() - (2 * 3_600_000 + 60_000) }), {}, {});
+  assert.equal(hit.sessionMilestoneHit, 1);
+  assert.equal(hit.sessionMilestoneLabel, '2-hour session');
+  // 2h + 10min → past the 5min window, no milestone.
+  const miss = buildVars(baseState({ sessionStart: now() - (2 * 3_600_000 + 10 * 60_000) }), {}, {});
+  assert.equal(miss.sessionMilestoneHit, 0);
+  assert.equal(miss.sessionMilestoneLabel, '');
+});

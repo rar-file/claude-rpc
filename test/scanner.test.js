@@ -148,3 +148,39 @@ test('hourKey: 0..23 from local time', () => {
   const ts = new Date(2026, 4, 23, 14, 30).getTime();
   assert.equal(hourKey(ts), 14);
 });
+
+// ── v0.9: model split + hotspot aging (parse-level) ─────────────────────
+
+test('parseTranscript: byModel accumulates turns/tokens/cost per model', () => {
+  const { dir, path } = makeTranscript([
+    { type: 'user', sessionId: 's1', cwd: '/tmp/proj', timestamp: '2026-05-22T10:00:00Z', message: { content: 'go' } },
+    { type: 'assistant', timestamp: '2026-05-22T10:00:30Z',
+      message: { model: 'claude-opus-4-7', usage: { input_tokens: 100, output_tokens: 50 }, content: [{ type: 'text', text: 'a' }] } },
+    { type: 'assistant', timestamp: '2026-05-22T10:01:00Z',
+      message: { model: 'claude-opus-4-7', usage: { input_tokens: 200, output_tokens: 100 }, content: [{ type: 'text', text: 'b' }] } },
+  ]);
+  const s = parseTranscript(path);
+  const keys = Object.keys(s.byModel);
+  assert.equal(keys.length, 1, 'one model bucket');
+  const mb = s.byModel[keys[0]];
+  assert.equal(mb.turns, 2);
+  assert.equal(mb.tokens, 450, 'sum of in+out across both turns');
+  assert.ok(mb.cost > 0, 'cost accrued');
+  rmSync(dir, { recursive: true });
+});
+
+test('parseTranscript: fileEditTs records most-recent edit timestamp', () => {
+  const { dir, path } = makeTranscript([
+    { type: 'user', sessionId: 's1', cwd: '/tmp/proj', timestamp: '2026-05-22T10:00:00Z', message: { content: 'go' } },
+    { type: 'assistant', timestamp: '2026-05-22T10:00:30Z',
+      message: { model: 'claude-opus-4-7', usage: { input_tokens: 0, output_tokens: 0 },
+        content: [{ type: 'tool_use', name: 'Edit', input: { file_path: '/x.js', old_string: 'a', new_string: 'b' } }] } },
+    { type: 'assistant', timestamp: '2026-05-23T12:00:00Z',
+      message: { model: 'claude-opus-4-7', usage: { input_tokens: 0, output_tokens: 0 },
+        content: [{ type: 'tool_use', name: 'Edit', input: { file_path: '/x.js', old_string: 'b', new_string: 'c' } }] } },
+  ]);
+  const s = parseTranscript(path);
+  assert.equal(s.fileEdits['/x.js'], 2);
+  assert.equal(s.fileEditTs['/x.js'], new Date('2026-05-23T12:00:00Z').getTime(), 'keeps the latest edit ts');
+  rmSync(dir, { recursive: true });
+});
