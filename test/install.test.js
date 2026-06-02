@@ -284,3 +284,12 @@ test('verifyHookPipe sets shell:true for Windows+npm mode', async () => {
   assert.match(src, /IS_NPM_INSTALL\s*&&\s*process\.platform\s*===\s*['"]win32['"]/,
     'shell flag must gate on npm-install + Windows');
 });
+
+// ── v0.12.1: MCP server command resolution ──────────────────────────────
+const { mcpServerCommand } = await import('../src/install.js');
+test('mcpServerCommand: resolves a runnable {command, args} ending in mcp', () => {
+  const r = mcpServerCommand('/some/exe');
+  assert.ok(r.command, 'has a command');
+  assert.ok(Array.isArray(r.args));
+  assert.equal(r.args[r.args.length - 1], 'mcp', 'last arg is the mcp subcommand');
+});

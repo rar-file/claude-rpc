@@ -15,7 +15,7 @@ import { readState } from './state.js';
 import { buildVars, fillTemplate, humanProject, humanTool, applyIdle, framePasses } from './format.js';
 import { scan, readAggregate, findLiveSessions, dayKey, weekKey } from './scanner.js';
 import { runHookCli } from './hook.js';
-import { install as runInstall, uninstall as runUninstall, isInstalled, migrateConfig, installHooks, ensureCanonicalExe } from './install.js';
+import { install as runInstall, uninstall as runUninstall, isInstalled, migrateConfig, installHooks, ensureCanonicalExe, installMcp, uninstallMcp, mcpServerCommand } from './install.js';
 import { startTui } from './tui.js';
 import { generateInsights } from './insights.js';
 import { badgeSvg } from './badge.js';
@@ -847,6 +847,34 @@ async function doMcp() {
   runMcpServer();
 }
 
+// One-command wiring into Claude Code — runs `claude mcp add` for the user.
+function doMcpInstall(argv) {
+  const scope = argv.includes('--project') ? 'project' : argv.includes('--local') ? 'local' : 'user';
+  const res = installMcp({ exePath: EXE_PATH || process.execPath, scope });
+  const manual = (r) => `claude mcp add claude-rpc --scope ${scope} -- ${r.command} ${r.args.join(' ')}`;
+  if (res.ok) {
+    console.log('');
+    console.log(`  ${c.green}✓${c.reset} Registered the ${c.cyan}claude-rpc${c.reset} MCP server with Claude Code (scope: ${scope}).`);
+    console.log(`  ${c.dim}Restart Claude Code (or run /mcp), then ask: "how long have I coded today?"${c.reset}`);
+    console.log('');
+  } else if (res.reason === 'no-claude') {
+    fail('the `claude` CLI was not found on your PATH', {
+      hint: `install Claude Code first, then run: ${manual(res)}`,
+      code: EX_USER_ERROR,
+    });
+  } else {
+    fail(`\`claude mcp add\` failed (exit ${res.code})`, { hint: `try it manually: ${manual(res)}`, code: EX_USER_ERROR });
+  }
+}
+
+function doMcpUninstall(argv) {
+  const scope = argv.includes('--project') ? 'project' : argv.includes('--local') ? 'local' : 'user';
+  const res = uninstallMcp({ scope });
+  if (res.ok) console.log(`${c.green}✓${c.reset} Removed the claude-rpc MCP server (scope: ${scope}).`);
+  else if (res.reason === 'no-claude') fail('the `claude` CLI was not found on your PATH', { code: EX_USER_ERROR });
+  else fail('could not remove the MCP server', { hint: 'claude mcp remove claude-rpc', code: EX_USER_ERROR });
+}
+
 // ── Privacy commands ─────────────────────────────────────────────────────
 //
 // `claude-rpc private`        → add current cwd to ~/.claude-rpc/private-list.json
@@ -1140,7 +1168,8 @@ function help() {
     ['statusline', 'One-line status for tmux/shell prompts (--template)'],
     ['calendar',  'Year activity heatmap SVG (--out --gist)'],
     ['session-card', 'Recap card for the current session (--out)'],
-    ['mcp',       'Run as an MCP server — expose your stats to Claude Code'],
+    ['mcp install', 'Wire the stats MCP server into Claude Code (one command)'],
+    ['mcp',       'Run the MCP server (stdio) — exposes your stats to Claude'],
     ['wrapped',   'Open your animated year-in-review (Claude Wrapped)'],
     ['private',   'Mark the current directory as private (hide from Discord)'],
     ['public',    'Un-mark the current directory'],
@@ -1218,7 +1247,13 @@ const packagedDefault = IS_PACKAGED && !cmd;
     case 'statusline': doStatusline(process.argv.slice(3)); break;
     case 'calendar':  await doCalendar(process.argv.slice(3)); break;
     case 'session-card': await doSessionCard(process.argv.slice(3)); break;
-    case 'mcp':       await doMcp(); break;
+    case 'mcp': {
+      const sub = process.argv[3];
+      if (sub === 'install')   { doMcpInstall(process.argv.slice(4)); break; }
+      if (sub === 'uninstall') { doMcpUninstall(process.argv.slice(4)); break; }
+      await doMcp();
+      break;
+    }
     case 'wrapped':   process.env.CLAUDE_RPC_OPEN_PATH = '/wrapped'; await import('./server/index.js'); break;
     case 'private':   doPrivate(); break;
     case 'public':    doPublic(); break;

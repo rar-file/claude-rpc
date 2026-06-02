@@ -235,6 +235,35 @@ export function seedConfig() {
 // without clobbering the user's customizations. Anything the user already
 // has — including a pre-existing byStatus, custom rotation array, custom
 // appName etc. — is left untouched.
+// How Claude Code should invoke the MCP server — same three-mode resolution
+// as the hook commands (packaged exe / npm bin / dev source).
+export function mcpServerCommand(exePath) {
+  if (IS_PACKAGED) return { command: exePath, args: ['mcp'] };
+  if (IS_NPM_INSTALL) return { command: 'claude-rpc', args: ['mcp'] };
+  const cli = join(dirname(HOOK_SCRIPT), 'cli.js').replace(/\\/g, '/');
+  return { command: 'node', args: [cli, 'mcp'] };
+}
+
+// Register the MCP server with Claude Code via its own `claude mcp add`, so a
+// user never has to hand-type the command. Best-effort: returns { ok, reason,
+// command, args }. Needs the `claude` CLI on PATH.
+export function installMcp({ exePath, scope = 'user' } = {}) {
+  const { command, args } = mcpServerCommand(exePath);
+  const winShell = process.platform === 'win32';
+  // Replace any stale entry first so re-running is idempotent (ignore failure).
+  spawnSync('claude', ['mcp', 'remove', 'claude-rpc', '--scope', scope], { stdio: 'ignore', shell: winShell });
+  const r = spawnSync('claude', ['mcp', 'add', 'claude-rpc', '--scope', scope, '--', command, ...args], { stdio: 'inherit', shell: winShell });
+  if (r.error && r.error.code === 'ENOENT') return { ok: false, reason: 'no-claude', command, args };
+  if (r.status !== 0) return { ok: false, reason: 'add-failed', code: r.status, command, args };
+  return { ok: true, command, args, scope };
+}
+
+export function uninstallMcp({ scope = 'user' } = {}) {
+  const r = spawnSync('claude', ['mcp', 'remove', 'claude-rpc', '--scope', scope], { stdio: 'inherit', shell: process.platform === 'win32' });
+  if (r.error && r.error.code === 'ENOENT') return { ok: false, reason: 'no-claude' };
+  return { ok: r.status === 0 };
+}
+
 export function migrateConfig({ silent = false } = {}) {
   if (!existsSync(CONFIG_PATH)) return false;
   let cfg;

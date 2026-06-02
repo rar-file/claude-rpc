@@ -2,6 +2,12 @@
 
 All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.12.1] - 2026-06-02
+
+**Added**
+
+- **`claude-rpc mcp install` — one-command MCP setup.** Wiring the stats MCP server into Claude Code used to mean hand-typing `claude mcp add claude-rpc -- claude-rpc mcp`. Now `claude-rpc mcp install` does it for you: it resolves the right invocation for your install mode (packaged exe / npm bin / dev source) and runs `claude mcp add` under the hood (idempotent — re-running replaces the old entry). `--project`/`--local` to change scope (default `user`); `claude-rpc mcp uninstall` removes it. Falls back to printing the exact manual command if the `claude` CLI isn't on PATH.
+
 ## [0.12.0] - 2026-06-02
 
 **Fixed**
