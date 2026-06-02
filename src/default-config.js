@@ -21,12 +21,14 @@ export const DEFAULT_CONFIG = {
   // when Claude isn't open, the Discord presence should disappear quickly.
   // The SessionEnd hook short-circuits this — see hook.js + format.applyIdle.
   staleSessionMin: 5,
-  // When the Claude Code session is still open but its transcript has gone
-  // quiet (you paused, stepped away briefly), show 'idle' rather than
-  // clearing the card. Only an authoritative SessionEnd or the full
-  // staleSessionMin dormancy window drops to stale. Set false to restore the
-  // old behavior (clear ~90-120s after the last transcript write).
-  idleWhenOpen: true,
+  // Closing the terminal kills Claude Code without firing its SessionEnd hook,
+  // so the daemon can't tell "closed" from "paused" — it only sees the
+  // transcript stop. Default false: clear the card ~90-120s after the
+  // transcript goes quiet, so a closed terminal doesn't leave a stale card up.
+  // Set true to instead linger as 'idle' until staleSessionMin (keeps the card
+  // up through short pauses, at the cost of a closed terminal showing idle for
+  // up to staleSessionMin minutes before clearing).
+  idleWhenOpen: false,
   // When true, the daemon CLEARS Discord activity entirely once the state
   // goes stale — your profile shows nothing instead of an "Away" frame.
   hideWhenStale: true,

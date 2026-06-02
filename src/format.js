@@ -736,12 +736,13 @@ export function applyIdle(state, cfg = {}) {
   const idleMs = (cfg.idleThresholdSec || 60) * 1000;
   const staleMs = Math.max(60_000, (cfg.staleSessionMin || 5) * 60 * 1000);
   const notificationMs = (cfg.notificationWindowSec || 8) * 1000;
-  // When the Claude Code session is still open (no authoritative SessionEnd)
-  // but its transcript has gone quiet, prefer 'idle' over clearing the card.
-  // Only an explicit close (claudeClosed) or the staleMs dormancy backstop
-  // drops us to stale. Default on; set idleWhenOpen:false to restore the old
-  // aggressive ~90-120s clear when no transcript is being written.
-  const idleWhenOpen = cfg.idleWhenOpen !== false;
+  // Closing the terminal kills Claude Code without firing SessionEnd, so the
+  // only passive "is it gone?" signal is "no transcript is being written".
+  // DEFAULT (false): clear the card within ~90-120s of the transcript going
+  // quiet — a closed terminal shouldn't leave a card up for 5 minutes. Opt in
+  // with idleWhenOpen:true to instead linger as 'idle' until the staleMs
+  // backstop (keeps the card up through short pauses with the terminal open).
+  const idleWhenOpen = cfg.idleWhenOpen === true;
 
   // Authoritative close signal from the SessionEnd hook — trust it instead
   // of waiting on staleSessionMin. Any other hook clears the flag, so a

@@ -79,57 +79,57 @@ test('applyIdle: respects legacy state with no claudeClosed field', () => {
   assert.equal(r.status, 'working', 'undefined flag is falsy, no crash');
 });
 
-// ── idle-when-open vs fast-path stale (v0.8.0) ─────────────────────────
+// ── close-detection: fast clear vs idle-when-open (v0.9.1 default flip) ──
 //
-// SessionEnd doesn't fire on force-quit / crash / OS sleep, so "no
+// SessionEnd doesn't fire on terminal-close / force-quit / crash, so "no
 // transcripts are being written to disk" is the only passive signal that
-// Claude Code may be gone. Pre-0.8.0 the daemon went stale immediately on
-// that signal. With idleWhenOpen (default true) an open-but-quiet session
-// instead resolves to 'idle' — the session hasn't been authoritatively
-// closed, and the 5-min staleMs dormancy backstop still catches a real
-// crash. idleWhenOpen:false restores the old aggressive ~90-120s clear.
+// Claude Code is gone. DEFAULT (idleWhenOpen omitted/false): clear within
+// ~90-120s of the transcript going quiet — closing the terminal shouldn't
+// leave a card up for 5 minutes. Opt in with idleWhenOpen:true to instead
+// linger as 'idle' until the staleMs backstop (keeps the card up through
+// short pauses with the terminal still open).
 
-test('applyIdle: status=idle + no live sessions → stays idle (idleWhenOpen default)', () => {
+test('applyIdle: status=idle + no live sessions → stale by default (fast clear)', () => {
   const s = baseState({ status: 'idle', lastActivity: now() - 30_000, liveSessions: [] });
   const r = applyIdle(s, { staleSessionMin: 5, idleThresholdSec: 60 });
-  assert.equal(r.status, 'idle', 'open-but-paused session stays idle, not stale');
-});
-
-test('applyIdle: status=idle + no live sessions + idleWhenOpen:false → stale immediately', () => {
-  const s = baseState({ status: 'idle', lastActivity: now() - 30_000, liveSessions: [] });
-  const r = applyIdle(s, { staleSessionMin: 5, idleThresholdSec: 60, idleWhenOpen: false });
-  assert.equal(r.status, 'stale', 'opt-out restores the old aggressive clear');
+  assert.equal(r.status, 'stale', 'no transcripts ≡ Claude gone → clear');
   assert.equal(r.cwd, '', 'cwd wiped so {project} stops leaking');
 });
 
-test('applyIdle: status=idle WITH live sessions stays idle', () => {
+test('applyIdle: status=idle + no live sessions + idleWhenOpen:true → stays idle', () => {
+  const s = baseState({ status: 'idle', lastActivity: now() - 30_000, liveSessions: [] });
+  const r = applyIdle(s, { staleSessionMin: 5, idleThresholdSec: 60, idleWhenOpen: true });
+  assert.equal(r.status, 'idle', 'opt-in keeps the card up through a pause');
+});
+
+test('applyIdle: status=idle WITH live sessions stays idle (even by default)', () => {
   const recent = now() - 30_000;
   const s = baseState({ status: 'idle', lastActivity: now() - 30_000,
     liveSessions: [{ cwd: '/p', mtime: recent }] });
   const r = applyIdle(s, { staleSessionMin: 5, idleThresholdSec: 60 });
-  assert.equal(r.status, 'idle', 'paused-but-open Claude stays idle');
+  assert.equal(r.status, 'idle', 'a live transcript means the user is still here');
 });
 
-test('applyIdle: working past idleMs + no live sessions → idle (idleWhenOpen default)', () => {
+test('applyIdle: working past idleMs + no live sessions → stale by default', () => {
   const past = now() - 90_000; // 90s ago, past idleMs=60s but well under staleMs=5min
   const s = baseState({ status: 'working', lastActivity: past, liveSessions: [] });
   const r = applyIdle(s, { staleSessionMin: 5, idleThresholdSec: 60 });
-  assert.equal(r.status, 'idle', 'open-but-paused drops to idle, not stale');
-});
-
-test('applyIdle: working past idleMs + no live sessions + idleWhenOpen:false → stale', () => {
-  const past = now() - 90_000;
-  const s = baseState({ status: 'working', lastActivity: past, liveSessions: [] });
-  const r = applyIdle(s, { staleSessionMin: 5, idleThresholdSec: 60, idleWhenOpen: false });
-  assert.equal(r.status, 'stale', 'opt-out: no live sessions overrides the 5-min staleMs wait');
+  assert.equal(r.status, 'stale', 'no transcripts → clear without waiting staleMs');
   assert.equal(r.cwd, '');
 });
 
-test('applyIdle: dormant past staleMs + no live sessions → stale even with idleWhenOpen', () => {
+test('applyIdle: working past idleMs + no live sessions + idleWhenOpen:true → idle', () => {
+  const past = now() - 90_000;
+  const s = baseState({ status: 'working', lastActivity: past, liveSessions: [] });
+  const r = applyIdle(s, { staleSessionMin: 5, idleThresholdSec: 60, idleWhenOpen: true });
+  assert.equal(r.status, 'idle', 'opt-in: drops to idle instead of clearing');
+});
+
+test('applyIdle: dormant past staleMs → stale even with idleWhenOpen:true', () => {
   const past = now() - 6 * 60_000; // 6min, past staleMs=5min
   const s = baseState({ status: 'working', lastActivity: past, liveSessions: [] });
-  const r = applyIdle(s, { staleSessionMin: 5, idleThresholdSec: 60 });
-  assert.equal(r.status, 'stale', 'dormancy backstop still clears a truly-dead session');
+  const r = applyIdle(s, { staleSessionMin: 5, idleThresholdSec: 60, idleWhenOpen: true });
+  assert.equal(r.status, 'stale', 'dormancy backstop clears even the opt-in idle-stay');
   assert.equal(r.cwd, '');
 });
 

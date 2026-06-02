@@ -2,6 +2,12 @@
 
 All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.9.1] - 2026-06-02
+
+**Changed**
+
+- **`idleWhenOpen` now defaults to `false` — a closed terminal clears the card fast.** Closing a terminal kills Claude Code without firing its `SessionEnd` hook, so the daemon can't distinguish "closed" from "paused" — it only sees the transcript stop. The 0.8.0 default (`true`) lingered as `idle` for the full `staleSessionMin` (5 min) in that case. The new default clears within ~90s of the transcript going quiet, matching most people's "I just close the terminal" workflow. Opt back into the pause-friendly behavior (card stays `idle` through short pauses, clears at the 5-min backstop) with `"idleWhenOpen": true`. A graceful exit (Ctrl+C / `/exit`) still clears instantly via `SessionEnd`, and a live transcript anywhere still keeps the card up.
+
 ## [0.9.0] - 2026-06-02
 
 **Added**
