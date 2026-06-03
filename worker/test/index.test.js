@@ -6,7 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-const { validateReport, handleReport, handleBadge, handleJson } = await import('../src/index.js');
+const { validateReport, handleReport, handleBadge, handleJson, handleRef, handleRefs } = await import('../src/index.js');
 const worker = (await import('../src/index.js')).default;
 
 function makeKv() {
@@ -16,6 +16,10 @@ function makeKv() {
     async get(k) { return store.has(k) ? store.get(k).value : null; },
     async put(k, v, opts = {}) {
       store.set(k, { value: String(v), ttl: opts.expirationTtl || null });
+    },
+    async list({ prefix = '' } = {}) {
+      const keys = [...store.keys()].filter((k) => k.startsWith(prefix)).map((name) => ({ name }));
+      return { keys, list_complete: true };
     },
   };
 }
@@ -163,6 +167,66 @@ test('handleJson: returns both totals + schemaVersion', async () => {
   assert.equal(j.sessions, 42);
   assert.equal(j.tokens, 999);
   assert.equal(j.schemaVersion, 1);
+});
+
+// ── referral attribution ──────────────────────────────────────────────
+
+function refRequest(s) {
+  return new URL(`http://localhost/ref${s == null ? '' : `?s=${encodeURIComponent(s)}`}`);
+}
+
+test('handleRef: counts an allowlisted source and returns 204', async () => {
+  const env = makeEnv();
+  const res = await handleRef(refRequest('discord'), env);
+  assert.equal(res.status, 204);
+  assert.equal(res.headers.get('Access-Control-Allow-Origin'), '*');
+  assert.equal(await env.TOTALS.get('ref:discord'), '1');
+});
+
+test('handleRef: accumulates repeat hits for the same source', async () => {
+  const env = makeEnv();
+  await handleRef(refRequest('wrapped'), env);
+  await handleRef(refRequest('wrapped'), env);
+  await handleRef(refRequest('wrapped'), env);
+  assert.equal(await env.TOTALS.get('ref:wrapped'), '3');
+});
+
+test('handleRef: ignores unknown sources (no KV pollution)', async () => {
+  const env = makeEnv();
+  await handleRef(refRequest('evil-junk'), env);
+  await handleRef(refRequest(''), env);
+  await handleRef(refRequest(null), env);
+  assert.equal(env.TOTALS.store.size, 0, 'nothing written for non-allowlisted sources');
+});
+
+test('handleRef: source matching is case-insensitive', async () => {
+  const env = makeEnv();
+  await handleRef(refRequest('Discord'), env);
+  assert.equal(await env.TOTALS.get('ref:discord'), '1');
+});
+
+test('handleRefs: returns a by-source breakdown with a total', async () => {
+  const env = makeEnv();
+  await env.TOTALS.put('ref:discord', '7');
+  await env.TOTALS.put('ref:wrapped', '3');
+  await env.TOTALS.put('total:sessions', '99'); // must NOT leak into refs
+  const res = await handleRefs(env);
+  assert.equal(res.headers.get('Access-Control-Allow-Origin'), '*');
+  const j = await res.json();
+  assert.deepEqual(j.refs, { discord: 7, wrapped: 3 });
+  assert.equal(j.total, 10);
+});
+
+test('handleJson: includes CORS so the stats page can fetch cross-origin', async () => {
+  const res = await handleJson(makeEnv());
+  assert.equal(res.headers.get('Access-Control-Allow-Origin'), '*');
+});
+
+test('default export: routes /ref and /refs.json', async () => {
+  const env = makeEnv();
+  assert.equal((await worker.fetch(new Request('http://localhost/ref?s=hn'), env)).status, 204);
+  const refs = await (await worker.fetch(new Request('http://localhost/refs.json'), env)).json();
+  assert.equal(refs.refs.hn, 1);
 });
 
 // ── default export (route dispatch) ────────────────────────────────────

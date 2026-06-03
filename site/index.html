@@ -1228,6 +1228,23 @@
 </div>
 
 <script>
+  // ─── referral beacon ──────────────────────────────────────────────────────
+  // Fire-and-forget: tell the totals worker which surface sent this visitor, so
+  // we can see what's actually working. Source comes from ?ref= (or ?utm_source).
+  // Fired at most once per source per browser (first-touch) — no PII, no cookies,
+  // just an allowlisted per-source counter on the worker side.
+  (function () {
+    try {
+      const q = new URLSearchParams(location.search);
+      const src = (q.get('ref') || q.get('utm_source') || '').toLowerCase().replace(/[^a-z]/g, '');
+      if (!src) return;
+      const flag = 'crpc_ref_' + src;
+      if (localStorage.getItem(flag)) return;
+      localStorage.setItem(flag, '1');
+      new Image().src = 'https://claude-rpc-totals.claude-rpc.workers.dev/ref?s=' + encodeURIComponent(src);
+    } catch (_) { /* private mode / blocked storage — skip silently */ }
+  })();
+
   // ─── reveal on scroll ────────────────────────────────────────────────────
   document.querySelectorAll('section, .hero').forEach(s => s.classList.add('reveal'));
   const io = new IntersectionObserver((entries) => {

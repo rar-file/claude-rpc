@@ -5,6 +5,8 @@
 //   GET  /sessions.svg   — shields-style badge for the README
 //   GET  /tokens.svg     — same, for tokens
 //   GET  /total.json     — JSON for arbitrary consumers / dashboards
+//   GET  /ref?s=<src>    — referral beacon (counts an allowlisted source)
+//   GET  /refs.json      — referral breakdown by source
 //   GET  /health         — sanity check
 //
 // Storage is a single KV namespace bound as `TOTALS`. We keep:
@@ -24,6 +26,30 @@ const MAX_DELTA_TOKENS   = 5_000_000_000; // 5B; ~5 years of heavy use
 const SEEN_TTL_SECONDS   = 30 * 24 * 60 * 60;
 const RATE_WINDOW_SEC    = 60;            // 1 report/minute/instance
 const RATE_LIMIT_KEY     = (id) => `rate:${id}`;
+
+// Referral attribution. The landing page fires a beacon `GET /ref?s=<source>`
+// on first touch so we can see which surface actually drives visits. We count
+// against a fixed ALLOWLIST only — anything else is ignored, so a stray query
+// param can't pollute KV with junk keys. No PII: a per-source counter, nothing
+// tied to a person. Stored as `ref:<source>`.
+const REF_SOURCES = new Set([
+  'discord',     // the presence-card button
+  'wrapped',     // Claude Wrapped share
+  'card',        // poster / calendar / profile / session card footers
+  'badge',       // README badge click-through
+  'readme',      // links in the GitHub README
+  'github',      // the repo About / homepage link
+  'npm',         // npmjs.com package page
+  'hn',          // Hacker News
+  'reddit',      // Reddit
+  'producthunt', // Product Hunt
+  'devto',       // dev.to
+  'twitter',     // X / Twitter
+]);
+
+// Permissive CORS for the read-only JSON endpoints — the stats page is served
+// from the Vercel origin and fetches these cross-origin.
+const CORS = { 'Access-Control-Allow-Origin': '*' };
 
 // ── Validation ─────────────────────────────────────────────────────────
 
@@ -139,6 +165,39 @@ export async function handleBadge(metric, env) {
   });
 }
 
+// Record a referral hit. Returns 204 regardless (it's a fire-and-forget
+// beacon) but only actually counts allowlisted sources. Never throws.
+export async function handleRef(url, env) {
+  const s = (url.searchParams.get('s') || '').toLowerCase();
+  if (REF_SOURCES.has(s)) {
+    try { await addInt(env, `ref:${s}`, 1); } catch { /* best-effort */ }
+  }
+  return new Response(null, {
+    status: 204,
+    headers: { ...CORS, 'Cache-Control': 'no-store' },
+  });
+}
+
+// Referral breakdown: { discord: 12, wrapped: 5, ... }. Only allowlisted
+// sources are ever present (handleRef gates writes), so a list() over `ref:`
+// is bounded by REF_SOURCES.size.
+export async function handleRefs(env) {
+  const out = {};
+  let total = 0;
+  try {
+    const { keys } = await env.TOTALS.list({ prefix: 'ref:' });
+    for (const { name } of keys) {
+      const source = name.slice('ref:'.length);
+      const n = await getInt(env, name);
+      out[source] = n;
+      total += n;
+    }
+  } catch { /* list unsupported / empty → {} */ }
+  return new Response(JSON.stringify({ schemaVersion: SCHEMA_VERSION, refs: out, total, ts: Date.now() }, null, 2), {
+    headers: { ...CORS, 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'public, max-age=60' },
+  });
+}
+
 export async function handleJson(env) {
   const sessions = await getInt(env, 'total:sessions');
   const tokens   = await getInt(env, 'total:tokens');
@@ -149,6 +208,7 @@ export async function handleJson(env) {
     ts: Date.now(),
   }, null, 2), {
     headers: {
+      ...CORS,
       'Content-Type': 'application/json; charset=utf-8',
       'Cache-Control': 'public, max-age=60',
     },
@@ -179,6 +239,12 @@ export default {
     }
     if (request.method === 'GET' && url.pathname === '/total.json') {
       return handleJson(env);
+    }
+    if (request.method === 'GET' && url.pathname === '/ref') {
+      return handleRef(url, env);
+    }
+    if (request.method === 'GET' && url.pathname === '/refs.json') {
+      return handleRefs(env);
     }
     if (request.method === 'GET' && url.pathname === '/health') {
       return new Response(JSON.stringify({ ok: true, schemaVersion: SCHEMA_VERSION }), {
