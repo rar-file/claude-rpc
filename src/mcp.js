@@ -7,7 +7,7 @@
 // The tool HANDLERS are pure functions of an aggregate, so they're unit-tested
 // without standing up the transport.
 
-import { readAggregate } from './scanner.js';
+import { readAggregate, dayKey } from './scanner.js';
 import { buildVars } from './format.js';
 import { readState } from './state.js';
 import { loadConfig } from './config.js';
@@ -44,7 +44,10 @@ export const TOOLS = {
   get_today: {
     description: "Today's Claude Code activity: active hours, prompts, tool calls, tokens, estimated cost.",
     handler(agg) {
-      const today = (agg.byDay || {})[new Date().toISOString().slice(0, 10)] || {};
+      // Key by LOCAL date via the same dayKey the scanner uses to WRITE byDay
+      // (and format.js uses to read it). A UTC slice here silently surfaced the
+      // wrong/empty bucket for anyone not on UTC once local and UTC dates split.
+      const today = (agg.byDay || {})[dayKey(Date.now())] || {};
       const tokens = (today.inputTokens || 0) + (today.outputTokens || 0) + (today.cacheReadTokens || 0) + (today.cacheWriteTokens || 0);
       return [
         `Active time:  ${fmtH(today.activeMs)}`,

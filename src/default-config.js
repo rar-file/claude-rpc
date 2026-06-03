@@ -172,7 +172,12 @@ export const DEFAULT_CONFIG = {
     },
 
     buttons: [
-      { label: "Claude Code", url: "https://github.com/rar-file/claude-rpc" },
+      // The card others see in Discord is the project's main distribution
+      // surface — make the button a real call-to-action, not a bare repo link.
+      // ?ref=discord lets the landing page attribute installs that originate
+      // from a presence card. (When the cwd is a github repo the daemon also
+      // prepends a "View on GitHub →" button, so both can show.)
+      { label: "Get claude-rpc →", url: "https://claude-rpc.vercel.app/?ref=discord" },
     ],
   },
   statusIcons: {

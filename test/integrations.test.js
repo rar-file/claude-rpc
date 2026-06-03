@@ -8,6 +8,8 @@ const { shouldWebhook, shouldNotify } = await import('../src/notify.js');
 const { toolList, callTool, TOOLS } = await import('../src/mcp.js');
 const { renderCalendar } = await import('../src/calendar.js');
 const { renderSessionCard } = await import('../src/session-card.js');
+// LOCAL-date key, matching scanner/format — see note in format.test.js.
+const { dayKey } = await import('../src/scanner.js');
 
 // ── webhook / desktop-notify decisions ────────────────────────────────
 test('shouldWebhook: fires only on a configured transition', () => {
@@ -33,7 +35,7 @@ const AGG = {
   languages: { Python: { files: 10, edits: 579 }, JavaScript: { files: 5, edits: 100 } },
   topEditedFiles: [{ path: '/a/cli.js', count: 57, daysSinceLastEdit: 0 }],
   modelSplit: [{ model: 'opus-4-7', cost: 100, costPct: 0.9, tokens: 5e6, turns: 200 }],
-  byDay: { [new Date().toISOString().slice(0, 10)]: { activeMs: 2 * 3.6e6, userMessages: 20, toolCalls: 50, cost: 4 } },
+  byDay: { [dayKey(Date.now())]: { activeMs: 2 * 3.6e6, userMessages: 20, toolCalls: 50, cost: 4 } },
 };
 
 test('mcp: toolList exposes the registered tools with schemas', () => {

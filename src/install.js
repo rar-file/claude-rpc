@@ -329,20 +329,32 @@ export function migrateConfig({ silent = false } = {}) {
     added.push('community (preserved-off)');
   }
 
-  // v0.8.1: the default presence button moved from the Claude Code website
-  // to the project repo. Existing configs carry their own `buttons` array,
-  // which fully REPLACES the default (arrays don't deep-merge) — so the new
-  // default never reaches upgraders just by bumping the package. Rewrite
-  // ONLY a button still pointing at the verbatim old default URL; anything a
-  // user has customized (label or url) is left untouched.
-  const OLD_BTN_URL = 'https://claude.com/claude-code';
-  const NEW_BTN_URL = DEFAULT_CONFIG.presence?.buttons?.[0]?.url;
-  if (NEW_BTN_URL && Array.isArray(cfg.presence?.buttons)) {
+  // Button defaults have moved twice: the Claude Code website (pre-v0.8.1) →
+  // the project repo (v0.8.1) → a landing-page call-to-action (v0.13). Existing
+  // configs carry their own `buttons` array, which fully REPLACES the default
+  // (arrays don't deep-merge), so a new default never reaches upgraders just by
+  // bumping the package. Upgrade any button that's still a verbatim shipped
+  // default to the current CTA; as a safety net, also repoint a button that's
+  // merely been relabeled but still aims at the long-dead claude.com URL.
+  // Anything a user fully customized (their own label AND url) is left alone.
+  const NEW_BTN = DEFAULT_CONFIG.presence?.buttons?.[0];
+  const SHIPPED_DEFAULT_BTNS = [
+    { label: 'Claude Code', url: 'https://claude.com/claude-code' },
+    { label: 'Claude Code', url: 'https://github.com/rar-file/claude-rpc' },
+  ];
+  if (NEW_BTN && Array.isArray(cfg.presence?.buttons)) {
     let changed = false;
     for (const b of cfg.presence.buttons) {
-      if (b && b.url === OLD_BTN_URL) { b.url = NEW_BTN_URL; changed = true; }
+      if (!b) continue;
+      const isShippedDefault = SHIPPED_DEFAULT_BTNS.some((d) => d.label === b.label && d.url === b.url);
+      const alreadyCurrent = b.label === NEW_BTN.label && b.url === NEW_BTN.url;
+      if (isShippedDefault && !alreadyCurrent) {
+        b.label = NEW_BTN.label; b.url = NEW_BTN.url; changed = true;
+      } else if (b.url === 'https://claude.com/claude-code') {
+        b.url = NEW_BTN.url; changed = true;   // dead link, keep their custom label
+      }
     }
-    if (changed) added.push('presence.buttons[].url → repo');
+    if (changed) added.push('presence.buttons[] → CTA');
   }
 
   if (added.length === 0) {

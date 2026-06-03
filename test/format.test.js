@@ -6,6 +6,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 const { applyIdle, applyShipped, buildVars, fillTemplate, framePasses } = await import('../src/format.js');
+// buildVars keys "today" via scanner's dayKey (LOCAL date). Fixtures must use
+// the same helper, not a UTC ISO slice — otherwise on a runner east of UTC the
+// local day and the UTC day differ and the fixture entry is never matched.
+const { dayKey } = await import('../src/scanner.js');
 
 const now = () => Date.now();
 
@@ -566,7 +570,7 @@ test('buildVars: session milestone fires within window, not outside', () => {
 const { applyTrigger } = await import('../src/format.js');
 
 test('buildVars: daily goal progress label', () => {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = dayKey(Date.now());
   const agg = { byDay: { [today]: { activeMs: 2 * 3.6e6, userMessages: 20 } } };
   const v = buildVars(baseState({ status: 'idle' }), { goals: { dailyHours: 4 } }, agg);
   assert.equal(v.goalLabel, '2.0h / 4h · 50%');
@@ -576,7 +580,7 @@ test('buildVars: daily goal progress label', () => {
 });
 
 test('buildVars: monthly budget label + warn flag', () => {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = dayKey(Date.now());
   const agg = { byDay: { [today]: { cost: 45 } } };
   const v = buildVars(baseState(), { budget: { monthly: 50, warnAtPct: 80 } }, agg);
   assert.equal(v.budgetLabel, '$45.00 / $50.00 · 90%');

@@ -29,15 +29,27 @@ function migrateInPlace(cfg) {
     cfg.presence.largeImageText = DEFAULT_CONFIG.presence.largeImageText;
     added.push('presence.largeImageText');
   }
-  // v0.8.1 button-URL move — rewrite only the verbatim old default.
-  const OLD_BTN_URL = 'https://claude.com/claude-code';
-  const NEW_BTN_URL = DEFAULT_CONFIG.presence?.buttons?.[0]?.url;
-  if (NEW_BTN_URL && Array.isArray(cfg.presence?.buttons)) {
+  // Button defaults moved claude.com → repo (v0.8.1) → landing CTA (v0.13).
+  // Upgrade verbatim shipped defaults wholesale; repoint a relabeled-but-dead
+  // claude.com link; leave fully-customized buttons alone. Mirrors install.js.
+  const NEW_BTN = DEFAULT_CONFIG.presence?.buttons?.[0];
+  const SHIPPED_DEFAULT_BTNS = [
+    { label: 'Claude Code', url: 'https://claude.com/claude-code' },
+    { label: 'Claude Code', url: 'https://github.com/rar-file/claude-rpc' },
+  ];
+  if (NEW_BTN && Array.isArray(cfg.presence?.buttons)) {
     let changed = false;
     for (const b of cfg.presence.buttons) {
-      if (b && b.url === OLD_BTN_URL) { b.url = NEW_BTN_URL; changed = true; }
+      if (!b) continue;
+      const isShippedDefault = SHIPPED_DEFAULT_BTNS.some((d) => d.label === b.label && d.url === b.url);
+      const alreadyCurrent = b.label === NEW_BTN.label && b.url === NEW_BTN.url;
+      if (isShippedDefault && !alreadyCurrent) {
+        b.label = NEW_BTN.label; b.url = NEW_BTN.url; changed = true;
+      } else if (b.url === 'https://claude.com/claude-code') {
+        b.url = NEW_BTN.url; changed = true;
+      }
     }
-    if (changed) added.push('presence.buttons[].url → repo');
+    if (changed) added.push('presence.buttons[] → CTA');
   }
   return added;
 }
@@ -59,7 +71,7 @@ test('migrate: legacy v0.3.0 config gains byStatus + appName', () => {
   assert.deepEqual(cfg.presence.rotation, [{ details: 'A', state: 'B' }], 'rotation preserved');
 });
 
-test('migrate: old Claude Code button URL is rewritten to the repo (label kept)', () => {
+test('migrate: legacy claude.com default button is upgraded wholesale to the CTA', () => {
   const cfg = {
     clientId: '123', appName: 'Claude Code',
     presence: {
@@ -68,13 +80,39 @@ test('migrate: old Claude Code button URL is rewritten to the repo (label kept)'
     },
   };
   const added = migrateInPlace(cfg);
-  assert.ok(added.includes('presence.buttons[].url → repo'), 'button url migrated');
-  assert.equal(cfg.presence.buttons[0].url, DEFAULT_CONFIG.presence.buttons[0].url);
-  assert.notEqual(cfg.presence.buttons[0].url, 'https://claude.com/claude-code');
-  assert.equal(cfg.presence.buttons[0].label, 'Claude Code', 'label left untouched');
+  assert.ok(added.includes('presence.buttons[] → CTA'), 'button migrated');
+  assert.deepEqual(cfg.presence.buttons[0], DEFAULT_CONFIG.presence.buttons[0],
+    'matches the current default CTA (label + url)');
 });
 
-test('migrate: a user-customized button URL is left untouched', () => {
+test('migrate: v0.8.1 repo default button is upgraded to the CTA', () => {
+  const cfg = {
+    clientId: '123', appName: 'Claude Code',
+    presence: {
+      byStatus: { working: { details: 'X', state: 'Y' } },
+      buttons: [{ label: 'Claude Code', url: 'https://github.com/rar-file/claude-rpc' }],
+    },
+  };
+  const added = migrateInPlace(cfg);
+  assert.ok(added.includes('presence.buttons[] → CTA'), 'button migrated');
+  assert.deepEqual(cfg.presence.buttons[0], DEFAULT_CONFIG.presence.buttons[0]);
+});
+
+test('migrate: a relabeled-but-dead claude.com link gets repointed, label kept', () => {
+  const cfg = {
+    clientId: '123', appName: 'Claude Code',
+    presence: {
+      byStatus: { working: { details: 'X', state: 'Y' } },
+      buttons: [{ label: 'My Custom Label', url: 'https://claude.com/claude-code' }],
+    },
+  };
+  const added = migrateInPlace(cfg);
+  assert.ok(added.includes('presence.buttons[] → CTA'), 'dead link repointed');
+  assert.equal(cfg.presence.buttons[0].url, DEFAULT_CONFIG.presence.buttons[0].url);
+  assert.equal(cfg.presence.buttons[0].label, 'My Custom Label', 'custom label preserved');
+});
+
+test('migrate: a fully user-customized button is left untouched', () => {
   const cfg = {
     clientId: '123', appName: 'Claude Code',
     presence: {
@@ -83,8 +121,21 @@ test('migrate: a user-customized button URL is left untouched', () => {
     },
   };
   const added = migrateInPlace(cfg);
-  assert.ok(!added.includes('presence.buttons[].url → repo'), 'custom button not touched');
+  assert.ok(!added.includes('presence.buttons[] → CTA'), 'custom button not touched');
   assert.equal(cfg.presence.buttons[0].url, 'https://example.com');
+  assert.equal(cfg.presence.buttons[0].label, 'My Site');
+});
+
+test('migrate: a config already on the CTA button is a no-op', () => {
+  const cfg = {
+    clientId: '123', appName: 'Claude Code',
+    presence: {
+      byStatus: { working: { details: 'X', state: 'Y' } },
+      buttons: [{ ...DEFAULT_CONFIG.presence.buttons[0] }],
+    },
+  };
+  const added = migrateInPlace(cfg);
+  assert.ok(!added.includes('presence.buttons[] → CTA'), 'no churn when already current');
 });
 
 test('migrate: already-migrated config is a no-op', () => {
