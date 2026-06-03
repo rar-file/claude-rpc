@@ -16,6 +16,11 @@ function detectMode(rootPath, execPath) {
   return IS_PACKAGED ? 'packaged' : IS_NPM_INSTALL ? 'npm' : 'dev';
 }
 
+// npx is an npm-install whose root sits in npm's ephemeral _npx cache.
+function isNpx(rootPath, execPath) {
+  return detectMode(rootPath, execPath) === 'npm' && /[\\/]_npx[\\/]/i.test(rootPath);
+}
+
 test('mode: npm global on Windows nvm', () => {
   assert.equal(
     detectMode(
@@ -64,6 +69,26 @@ test('mode: SEA exe on Linux', () => {
     ),
     'packaged'
   );
+});
+
+test('npx: _npx cache path is detected as npx (and as npm mode)', () => {
+  const root = '/home/foo/.npm/_npx/a1b2c3d4e5f6/node_modules/claude-rpc';
+  const exe = '/home/foo/.nvm/versions/node/v20.0.0/bin/node';
+  assert.equal(detectMode(root, exe), 'npm', 'npx is an npm-mode install');
+  assert.equal(isNpx(root, exe), true, 'but flagged as ephemeral npx');
+});
+
+test('npx: a real global npm install is NOT flagged as npx', () => {
+  const root = '/usr/local/lib/node_modules/claude-rpc';
+  const exe = '/usr/local/bin/node';
+  assert.equal(detectMode(root, exe), 'npm');
+  assert.equal(isNpx(root, exe), false, 'persistent global install is not npx');
+});
+
+test('npx: Windows _npx cache path is detected', () => {
+  const root = 'C:\\Users\\foo\\AppData\\Local\\npm-cache\\_npx\\abcdef\\node_modules\\claude-rpc';
+  const exe = 'C:\\Program Files\\nodejs\\node.exe';
+  assert.equal(isNpx(root, exe), true);
 });
 
 test('mode: npm-install path beats node-as-exe heuristic', () => {

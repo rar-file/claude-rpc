@@ -10,7 +10,7 @@ import process from 'node:process';
 if (process.platform === 'win32' && process.stdout.isTTY) {
   try { spawnSync('chcp.com', ['65001'], { stdio: 'ignore', windowsHide: true }); } catch { /* chcp absent (Wine, custom shell) — accept whatever code page is set */ }
 }
-import { DAEMON_SCRIPT, PID_PATH, STATE_PATH, LOG_PATH, AGGREGATE_PATH, CONFIG_PATH, IS_PACKAGED, EXE_PATH, CANONICAL_EXE } from './paths.js';
+import { DAEMON_SCRIPT, PID_PATH, STATE_PATH, LOG_PATH, AGGREGATE_PATH, CONFIG_PATH, IS_PACKAGED, IS_NPX, EXE_PATH, CANONICAL_EXE } from './paths.js';
 import { readState } from './state.js';
 import { buildVars, fillTemplate, humanProject, humanTool, applyIdle, framePasses } from './format.js';
 import { scan, readAggregate, findLiveSessions, dayKey, weekKey } from './scanner.js';
@@ -1219,7 +1219,30 @@ const packagedDefault = IS_PACKAGED && !cmd;
     // startup, install = with) but in practice users expect one command
     // to do everything. Non-Windows: addStartupEntry is a no-op + warning.
     case 'setup':
-    case 'install':   await runInstall({ exePath: EXE_PATH || process.execPath }); break;
+    case 'install':
+      await runInstall({ exePath: EXE_PATH || process.execPath });
+      // Slimmer first run: bring the daemon up now so the card appears
+      // immediately, instead of making the user run a separate `start`.
+      // Best-effort — a start hiccup must never make `setup` look failed.
+      try {
+        if (IS_NPX) {
+          // Our own tree is npm's throwaway _npx cache; launch from the global
+          // install setup just promoted to, via the PATH-resolved bin.
+          if (!daemonPid()) {
+            spawn('claude-rpc', ['daemon'], {
+              detached: true, stdio: 'ignore', windowsHide: true,
+              shell: process.platform === 'win32',
+            }).unref();
+            console.log(`${c.green}✓${c.reset} Daemon launched  ${c.dim}logs: ${LOG_PATH}${c.reset}`);
+          }
+        } else {
+          startDaemon();
+        }
+      } catch (e) {
+        console.log(`${c.yellow}!${c.reset} Couldn't auto-start the daemon: ${e.message}`);
+        console.log(`  ${c.dim}↳ run \`claude-rpc start\` when you're ready${c.reset}`);
+      }
+      break;
     case 'uninstall': await runUninstall(); break;
     case 'upgrade-config': migrateConfig(); break;
     case 'start':     startDaemon(); break;

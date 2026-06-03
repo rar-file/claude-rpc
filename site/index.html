@@ -342,6 +342,8 @@
   }
   .copy-box button:hover { background: var(--tape); border-color: var(--tape); }
   .copy-box button.copied { background: var(--grass); color: var(--paper); border-color: var(--grass); }
+  .install-note { margin-top: 10px; max-width: 540px; font-size: 0.8rem; color: var(--ink-mute, #6b6357); }
+  .install-note a { color: var(--rust-3); text-decoration: underline; }
 
   /* ─── download ─────────────────────────────────────────────────── */
   .downloads { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-top: 20px; }
@@ -822,9 +824,10 @@
     </div>
     <div class="copy-box" title="click to copy">
       <span class="ps1">$</span>
-      <span class="cmd" id="install-cmd">npm install -g claude-rpc &amp;&amp; claude-rpc setup &amp;&amp; claude-rpc start</span>
+      <span class="cmd" id="install-cmd">npx claude-rpc setup</span>
       <button id="copy-btn" type="button">copy</button>
     </div>
+    <p class="install-note">one command — installs globally, wires Claude Code's hooks, and starts the daemon. No Node? <a href="#download">grab the desktop app ↓</a></p>
     <div class="hero-meta">
       <span><span class="ok">●</span> <span id="latest-tag">v0.3.8</span></span>
       <span class="dot">·</span>

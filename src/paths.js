@@ -16,6 +16,13 @@ export const ROOT = resolve(__dirname, '..');
 // SEA exe) and dev mode (cloned repo, no node_modules wrapper).
 export const IS_NPM_INSTALL = !IS_PACKAGED && /[\\/]node_modules[\\/]/i.test(ROOT);
 
+// True when we were launched via `npx claude-rpc` — npm stages the package in
+// its ephemeral `_npx/<hash>/node_modules/...` cache, which matches the
+// node_modules test above but is DELETED when the process exits. A hook wired
+// to the PATH-resolved `claude-rpc` bin would dangle, so setup must promote an
+// npx run to a real global install before wiring anything. See install.js.
+export const IS_NPX = IS_NPM_INSTALL && /[\\/]_npx[\\/]/i.test(ROOT);
+
 // "Installed" covers both real distribution paths — config and runtime
 // artifacts live outside the install tree so they survive package updates.
 export const IS_INSTALLED = IS_PACKAGED || IS_NPM_INSTALL;

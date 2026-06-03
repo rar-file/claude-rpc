@@ -35,14 +35,21 @@ A small Node daemon that takes the lifecycle events Claude Code already fires an
 
 ## install
 
-**Windows (no Node required)** — [grab the portable exe from the latest release](https://github.com/rar-file/claude-rpc/releases/latest):
+**macOS / Linux / any Node 18+** — one command:
+
+```sh
+npx claude-rpc setup
+```
+
+That installs `claude-rpc` globally, wires the hooks into Claude Code, and starts the daemon — no separate `start` step. Open Claude Code in any project and the card appears within a second. Something looks wrong? `claude-rpc doctor`.
+
+**Windows (no Node required)** — [grab the portable exe from the latest release](https://github.com/rar-file/claude-rpc/releases/latest), then:
 
 ```sh
 claude-rpc setup
-claude-rpc start
 ```
 
-That's the whole pitch. Open Claude Code in any project — the daemon picks it up within a second. Something looks wrong? `claude-rpc doctor`.
+That's the whole pitch.
 
 > `setup` registers a Windows startup entry and wires hooks into Claude Code's `settings.json`, and the daemon reports anonymous totals by default. All of it is reversible (`claude-rpc uninstall`, `community off`) and fully documented in [`SECURITY.md`](SECURITY.md) — read it first if you want to know exactly what runs.
 
@@ -55,11 +62,10 @@ The Discord *desktop* app must be running. The browser client doesn't expose the
 git clone https://github.com/rar-file/claude-rpc.git
 cd claude-rpc
 npm install
-node ./src/cli.js setup
-node ./src/cli.js start
+node ./src/cli.js setup     # wires hooks + starts the daemon
 ```
 
-Or `npm install -g claude-rpc` for the global bin. Both modes survive `npm update` without losing your `clientId` — user config lives under the per-OS config dir, not inside `node_modules`.
+Or `npm install -g claude-rpc && claude-rpc setup` for the global bin. `setup` starts the daemon for you; manage it afterward with `claude-rpc start | stop | status`. Every mode survives `npm update` without losing your `clientId` — user config lives under the per-OS config dir, not inside `node_modules`.
 </details>
 
 <details>

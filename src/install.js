@@ -12,10 +12,11 @@ import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
   CLAUDE_SETTINGS, CONFIG_PATH, USER_CONFIG_DIR, ROOT,
-  HOOK_SCRIPT, IS_PACKAGED, IS_NPM_INSTALL,
+  HOOK_SCRIPT, IS_PACKAGED, IS_NPM_INSTALL, IS_NPX,
   CANONICAL_EXE, CANONICAL_INSTALL_DIR, CANONICAL_EXE_NAME,
 } from './paths.js';
 import { DEFAULT_CONFIG } from './default-config.js';
+import { VERSION } from './version.js';
 
 const STARTUP_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run';
 const STARTUP_VALUE = 'ClaudeRPC';
@@ -409,7 +410,32 @@ function verifyHookPipe(exePath) {
   return { ok: true, detail: 'SessionStart round-trip succeeded' };
 }
 
+// `npx claude-rpc setup` runs from npm's throwaway _npx cache, so the
+// `claude-rpc` bin the hooks resolve through PATH disappears the moment npx
+// exits. Promote to a real global install first, then the rest of setup wires
+// hooks to the now-persistent global bin exactly like a normal npm install.
+// Best-effort + loud: a failed -g (perms, offline) returns false so the caller
+// can stop with the manual command rather than wire a dead hook.
+function promoteNpxToGlobal() {
+  console.log('  npx is one-off — installing claude-rpc globally so hooks survive…');
+  const r = spawnSync('npm', ['install', '-g', `claude-rpc@${VERSION}`], {
+    stdio: 'inherit',
+    shell: process.platform === 'win32',   // npm is npm.cmd on Windows
+  });
+  return !r.error && r.status === 0;
+}
+
 export async function install({ exePath, withStartup = true } = {}) {
+  if (IS_NPX) {
+    if (!promoteNpxToGlobal()) {
+      console.error('\n  ✗ Global install failed. Run this once, then you\'re set:');
+      console.error('      npm install -g claude-rpc && claude-rpc setup');
+      const err = new Error('npx self-install failed');
+      err.code = 3;   // system error (see exit-code contract)
+      throw err;
+    }
+    console.log('  ✓ claude-rpc installed globally\n');
+  }
   if (process.platform !== 'win32' && withStartup) {
     console.warn('Note: startup registration only works on Windows; other steps still run.');
   }
@@ -440,19 +466,17 @@ export async function install({ exePath, withStartup = true } = {}) {
   }
 
   console.log('\nDone.');
-  console.log(`Edit ${CONFIG_PATH} to set your Discord clientId, then run:`);
-  // Per-mode "start" instructions — packaged exe takes a daemon subcommand,
-  // the npm bin shim handles `start` as a subcommand of itself, and dev
-  // mode runs the daemon script directly through node.
+  console.log(`Config: ${CONFIG_PATH}`);
+  console.log(`  (a working Discord app is bundled — edit clientId only to use your own)`);
+  // setup auto-starts the daemon (see cli.js), so we point at management +
+  // verification rather than a start command. The packaged exe manages the
+  // daemon via its own subcommands; the npm/dev bin uses `claude-rpc …`.
   if (IS_PACKAGED) {
-    console.log(`  "${target}" daemon`);
-  } else if (IS_NPM_INSTALL) {
-    console.log(`  claude-rpc start`);
+    console.log(`\nManage the daemon:  "${target}" daemon  (start) · check with claude-rpc doctor`);
   } else {
-    console.log(`  node "${join(ROOT, 'src', 'daemon.js').replace(/\\/g, '/')}"`);
-    console.log(`  # or: claude-rpc start  (if you've run \`npm link\`)`);
+    console.log(`\nManage the daemon:  claude-rpc start | stop | status`);
+    console.log(`Verify wiring:      claude-rpc doctor`);
   }
-  console.log(`\nThen: \`claude-rpc doctor\` to verify everything is wired.`);
 }
 
 export async function uninstall() {
