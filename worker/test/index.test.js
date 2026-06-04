@@ -295,11 +295,11 @@ const profileBody = {
   instanceId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
   handle: 'archer',
   displayName: 'Archer',
-  sessionsDelta: 3,
-  tokensDelta: 1000,
-  activeMsDelta: 60000,
+  tokens: 1000,
+  sessions: 3,
+  activeMs: 60000,
   streak: 5,
-  version: '0.13.1',
+  version: '0.13.2',
   osFamily: 'linux',
 };
 
@@ -315,27 +315,41 @@ test('validateProfile: accepts a well-formed profile', () => {
   assert.equal(validateProfile(profileBody), null);
 });
 
-test('validateProfile: rejects bad handle / github / deltas / id', () => {
+test('validateProfile: rejects bad handle / github / totals / id', () => {
   assert.match(validateProfile({ ...profileBody, handle: '!' }), /handle/);
   assert.match(validateProfile({ ...profileBody, githubUser: '-bad' }), /githubUser/);
-  assert.match(validateProfile({ ...profileBody, tokensDelta: -1 }), /tokensDelta/);
+  assert.match(validateProfile({ ...profileBody, tokens: -1 }), /tokens/);
   assert.match(validateProfile({ ...profileBody, instanceId: 'x' }), /instanceId/);
 });
 
-test('handleProfile: upserts and accumulates server-side deltas', async () => {
+test('handleProfile: SETS absolute totals (idempotent, not accumulated)', async () => {
   const env = makeEnv();
   let res = await handleProfile(profileRequest(profileBody), env);
   assert.equal(res.status, 200);
   let j = await res.json();
   assert.equal(j.profile.tokens, 1000);
   assert.equal(j.profile.verified, false);
-  // clear the per-instance rate marker so a second report from the same
-  // instance is accepted, and confirm deltas accumulate server-side.
+  // A later report SETS the latest absolute totals (no double-counting).
   env.TOTALS.store.delete('rate:' + profileBody.instanceId);
-  res = await handleProfile(profileRequest({ ...profileBody, tokensDelta: 500, sessionsDelta: 1 }), env);
+  res = await handleProfile(profileRequest({ ...profileBody, tokens: 2000, sessions: 9 }), env);
   j = await res.json();
-  assert.equal(j.profile.tokens, 1500);
-  assert.equal(j.profile.sessions, 4);
+  assert.equal(j.profile.tokens, 2000);
+  assert.equal(j.profile.sessions, 9);
+});
+
+test('handleProfile: accepts a multi-billion lifetime total (the v0.13.2 400 bug)', async () => {
+  const env = makeEnv();
+  const res = await handleProfile(profileRequest({ ...profileBody, tokens: 9_427_309_583 }), env);
+  assert.equal(res.status, 200);
+  const j = await res.json();
+  assert.equal(j.profile.tokens, 9_427_309_583); // under the 1T ceiling — not clamped, not rejected
+});
+
+test('handleProfile: clamps an absurd total to the ceiling', async () => {
+  const env = makeEnv();
+  const res = await handleProfile(profileRequest({ ...profileBody, tokens: 9e15 }), env);
+  const j = await res.json();
+  assert.equal(j.profile.tokens, 1_000_000_000_000); // clamped to MAX_PF_TOKENS
 });
 
 test('handleProfile: a client cannot self-assert verified=true', async () => {

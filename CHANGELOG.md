@@ -2,6 +2,13 @@
 
 All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.13.3] - 2026-06-05
+
+**Fixed**
+
+- **Publishing a profile no longer fails with HTTP 400 for established users.** The profile flush sent *deltas* against a cursor, so the first publish carried your entire lifetime total as one delta — which blew past the worker's per-report cap for anyone with billions of tokens (cache-read tokens add up fast). Profiles now report **absolute lifetime totals**, which the worker **stores directly** (idempotent, no cursor, no double-count) clamped to a generous plausibility ceiling. The board now matches your real aggregate exactly, and a multi-billion-token total goes through fine.
+- **`profile verify` now publishes your profile first**, so it can't fail with "create your profile first" if you verify before publishing.
+
 ## [0.13.2] - 2026-06-05
 
 **Fixed**

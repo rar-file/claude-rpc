@@ -284,8 +284,15 @@ export async function handleJson(env) {
 //   pf:<instanceId>   profile JSON (server-accumulated stats + identity)
 //   handle:<handle>   → owning instanceId (uniqueness)
 //   verify:<id>       pending {githubUser, token}, 1h TTL
-const MAX_DELTA_ACTIVE_MS   = 7 * 24 * 60 * 60 * 1000; // 7 days of active time per report
-const MAX_STREAK            = 3650;                    // clamp absurd streak claims
+// Profiles report ABSOLUTE lifetime totals (not deltas — a profile is per-user
+// and keyed by instanceId, so the server just stores the latest value
+// idempotently). These are generous plausibility ceilings: high enough never to
+// reject a real power user, low enough to bound an absurd fake. Values above the
+// ceiling are clamped, not rejected.
+const MAX_PF_TOKENS    = 1_000_000_000_000;            // 1 trillion
+const MAX_PF_SESSIONS  = 1_000_000;
+const MAX_PF_ACTIVE_MS = 10 * 365 * 24 * 60 * 60 * 1000; // ~10 years
+const MAX_STREAK       = 3650;                          // ~10 years
 const UNVERIFIED_TOKENS_CAP = 1_000_000_000;           // unverified ranking ceiling
 const VERIFY_TTL_SECONDS    = 60 * 60;
 const BOARD_MAX             = 100;
@@ -316,12 +323,13 @@ export function validateProfile(body) {
   if (!body || typeof body !== 'object') return 'body must be an object';
   if (!isUuidish(body.instanceId)) return 'instanceId must be a UUID';
   if (!normHandle(body.handle)) return 'handle invalid';
-  const sd = Number(body.sessionsDelta || 0);
-  const td = Number(body.tokensDelta || 0);
-  const ad = Number(body.activeMsDelta || 0);
-  if (!Number.isFinite(sd) || sd < 0 || sd > MAX_DELTA_SESSIONS) return 'sessionsDelta out of range';
-  if (!Number.isFinite(td) || td < 0 || td > MAX_DELTA_TOKENS) return 'tokensDelta out of range';
-  if (!Number.isFinite(ad) || ad < 0 || ad > MAX_DELTA_ACTIVE_MS) return 'activeMsDelta out of range';
+  // Absolute lifetime totals — must be finite and non-negative; oversized
+  // values are clamped (not rejected) in the handler.
+  for (const k of ['tokens', 'sessions', 'activeMs', 'streak']) {
+    if (body[k] == null) continue;
+    const v = Number(body[k]);
+    if (!Number.isFinite(v) || v < 0) return `${k} invalid`;
+  }
   if (typeof body.version !== 'string' || body.version.length > 32) return 'version missing or too long';
   if (typeof body.osFamily !== 'string' || !/^(linux|darwin|win32)$/.test(body.osFamily)) return 'osFamily invalid';
   if (body.githubUser != null && !normGithub(body.githubUser)) return 'githubUser invalid';
@@ -375,15 +383,21 @@ export async function handleProfile(request, env) {
     try { await env.TOTALS.delete(HANDLE_KEY(prev.handle)); } catch { /* best-effort */ }
   }
 
+  // Set (not accumulate) absolute totals, clamped to the ceilings. Missing
+  // fields keep the previous value. Idempotent: re-sending the same totals is a
+  // no-op, so there's no double-count risk and the board matches the user's
+  // real aggregate exactly.
+  const setClamp = (v, max, prevV) =>
+    v == null ? (prevV || 0) : Math.min(max, Math.max(0, Math.floor(Number(v) || 0)));
   const next = {
     handle,
     displayName: cleanName(body.displayName) || prev.displayName || null,
     githubUser:  normGithub(body.githubUser) || prev.githubUser  || null,
     verified:    !!prev.verified, // only the verify flow flips this — never the client
-    tokens:      (prev.tokens   || 0) + Number(body.tokensDelta   || 0),
-    sessions:    (prev.sessions || 0) + Number(body.sessionsDelta || 0),
-    activeMs:    (prev.activeMs || 0) + Number(body.activeMsDelta || 0),
-    streak:      Math.min(MAX_STREAK, Math.max(0, Math.floor(Number(body.streak) || 0))),
+    tokens:      setClamp(body.tokens,   MAX_PF_TOKENS,    prev.tokens),
+    sessions:    setClamp(body.sessions, MAX_PF_SESSIONS,  prev.sessions),
+    activeMs:    setClamp(body.activeMs, MAX_PF_ACTIVE_MS, prev.activeMs),
+    streak:      setClamp(body.streak,   MAX_STREAK,       prev.streak),
     createdAt:   prev.createdAt || now,
     updatedAt:   now,
   };

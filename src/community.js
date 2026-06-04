@@ -26,7 +26,6 @@ import { VERSION } from './version.js';
 import { profileIsPublishable } from './leaderboard.js';
 
 const CURSOR_PATH = join(STATE_DIR, 'community-cursor.json');
-const PROFILE_CURSOR_PATH = join(STATE_DIR, 'profile-cursor.json');
 
 export function readCursor(path = CURSOR_PATH) {
   if (!existsSync(path)) return { sessions: 0, tokens: 0, ts: 0 };
@@ -87,25 +86,20 @@ function totalTokens(aggregate) {
     + (aggregate?.cacheWriteTokens || 0);
 }
 
-export function readProfileCursor(path = PROFILE_CURSOR_PATH) {
-  const base = { sessions: 0, tokens: 0, activeMs: 0, ts: 0 };
-  if (!existsSync(path)) return base;
-  try { return { ...base, ...JSON.parse(readFileSync(path, 'utf8')) }; }
-  catch { return base; }
-}
-
-export function buildProfilePayload(aggregate, profileCfg, cursor, { instanceId, now = Date.now() }) {
-  const sessions = aggregate?.sessions || 0;
-  const tokens = totalTokens(aggregate);
-  const activeMs = aggregate?.activeMs || 0;
+// A profile reports ABSOLUTE lifetime totals (not deltas). It's per-user and
+// keyed by the instanceId, so the server just stores the latest value — no
+// cursor, no double-count risk, and the board matches your real aggregate
+// exactly. (Deltas were wrong here: the first publish carried the entire
+// lifetime total, which blew past the per-report caps for any established user.)
+export function buildProfilePayload(aggregate, profileCfg, { instanceId, now = Date.now() }) {
   return {
     instanceId,
     handle: profileCfg.handle,
     displayName: profileCfg.displayName || null,
     githubUser: profileCfg.githubUser || null,
-    sessionsDelta: Math.max(0, sessions - (cursor.sessions || 0)),
-    tokensDelta:   Math.max(0, tokens   - (cursor.tokens   || 0)),
-    activeMsDelta: Math.max(0, activeMs  - (cursor.activeMs || 0)),
+    tokens: totalTokens(aggregate),
+    sessions: aggregate?.sessions || 0,
+    activeMs: aggregate?.activeMs || 0,
     streak: aggregate?.streak || 0,
     version: VERSION,
     osFamily: osFamily(),
@@ -115,7 +109,6 @@ export function buildProfilePayload(aggregate, profileCfg, cursor, { instanceId,
 
 export async function flushProfile(cfg, {
   aggregatePath = AGGREGATE_PATH,
-  cursorPath = PROFILE_CURSOR_PATH,
   fetchImpl = globalThis.fetch,
 } = {}) {
   const profile = cfg?.profile || {};
@@ -130,9 +123,7 @@ export async function flushProfile(cfg, {
   try { aggregate = JSON.parse(readFileSync(aggregatePath, 'utf8')); }
   catch { return { ok: false, reason: 'unreadable-aggregate' }; }
 
-  const cursor = readProfileCursor(cursorPath);
-  const payload = buildProfilePayload(aggregate, profile, cursor, { instanceId });
-
+  const payload = buildProfilePayload(aggregate, profile, { instanceId });
   const url = community.endpoint.replace(/\/+$/, '') + '/profile';
   let res;
   try {
@@ -148,16 +139,7 @@ export async function flushProfile(cfg, {
     if (res.status === 429) return { ok: false, reason: 'rate-limited' };
     return { ok: false, reason: `http-${res.status}` };
   }
-
-  // Advance the cursor only on acceptance (same reasoning as flushCommunity).
-  writeCursor({
-    sessions: (cursor.sessions || 0) + payload.sessionsDelta,
-    tokens:   (cursor.tokens   || 0) + payload.tokensDelta,
-    activeMs: (cursor.activeMs || 0) + payload.activeMsDelta,
-    ts: payload.ts,
-  }, cursorPath);
-
-  return { ok: true, delta: { sessions: payload.sessionsDelta, tokens: payload.tokensDelta, activeMs: payload.activeMsDelta } };
+  return { ok: true, totals: { tokens: payload.tokens, sessions: payload.sessions, activeMs: payload.activeMs } };
 }
 
 // Single best-effort flush. Returns { ok, reason, delta? } — never throws.

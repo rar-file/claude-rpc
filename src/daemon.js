@@ -627,8 +627,8 @@ async function runCommunityFlush() {
     }
     if (config.profile?.enabled) {
       const pr = await flushProfile(config);
-      if (pr.ok && pr.delta) {
-        log(`profile: published @${config.profile.handle} (+${pr.delta.tokens} tokens)`);
+      if (pr.ok && pr.totals) {
+        log(`profile: published @${config.profile.handle} (${pr.totals.tokens} tokens)`);
       } else if (!pr.ok && pr.reason !== 'rate-limited' && pr.reason !== 'disabled') {
         log(`profile: ${pr.reason}${pr.error ? ' (' + pr.error + ')' : ''}`);
       }

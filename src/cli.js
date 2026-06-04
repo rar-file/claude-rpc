@@ -1179,6 +1179,12 @@ async function profileVerify() {
   };
 
   try {
+    // Make sure the profile row exists server-side before we verify it, so
+    // verification works regardless of whether `profile publish` was run first.
+    if (lb.profileIsPublishable(profile)) {
+      const { flushProfile } = await import('./community.js');
+      await flushProfile(cfg);
+    }
     console.log(`${c.dim}requesting a verification token…${c.reset}`);
     const start = await post('/verify/start', { instanceId: community.instanceId, githubUser: profile.githubUser });
     if (!start.json?.token) return fail(`verify/start failed: ${start.json?.error || start.status}`, { code: EX_SYS_ERROR });
