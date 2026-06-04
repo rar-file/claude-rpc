@@ -53,6 +53,15 @@ export function osFamily() {
   return 'linux';
 }
 
+// Per-report caps. These mirror the worker's validateReport limits — the
+// client CLAMPS each delta to them so a large first-time backfill (a heavy
+// user's whole lifetime total on the very first report) STREAMS over multiple
+// flushes instead of being rejected. Without this, anyone with >5B lifetime
+// tokens would 400 forever (the cursor never advances on a rejected report) and
+// be silently dropped from the community totals.
+const MAX_REPORT_SESSIONS = 100_000;
+const MAX_REPORT_TOKENS = 5_000_000_000;
+
 // Pure: given an aggregate and a cursor, produce the next payload. The
 // worker's validateReport must accept this shape; if you add a field
 // here, add it there too.
@@ -64,8 +73,8 @@ export function buildPayload(aggregate, cursor, { instanceId, now = Date.now() }
     + (aggregate?.cacheWriteTokens || 0);
   return {
     instanceId,
-    sessionsDelta: Math.max(0, sessions - (cursor.sessions || 0)),
-    tokensDelta:   Math.max(0, tokens   - (cursor.tokens   || 0)),
+    sessionsDelta: Math.min(MAX_REPORT_SESSIONS, Math.max(0, sessions - (cursor.sessions || 0))),
+    tokensDelta:   Math.min(MAX_REPORT_TOKENS,   Math.max(0, tokens   - (cursor.tokens   || 0))),
     version: VERSION,
     osFamily: osFamily(),
     ts: now,

@@ -61,6 +61,14 @@ test('buildPayload: clamps negative deltas to zero (cursor newer than aggregate)
   assert.equal(p.tokensDelta, 0);
 });
 
+test('buildPayload: clamps a huge first-backfill delta so it streams (no 400)', () => {
+  // A heavy user's whole lifetime total on the first report (cursor at 0).
+  const agg = { sessions: 250_000, inputTokens: 9_400_000_000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+  const p = buildPayload(agg, { sessions: 0, tokens: 0 }, { instanceId: VALID_ID });
+  assert.equal(p.tokensDelta, 5_000_000_000); // clamped to the per-report cap; the rest streams next flush
+  assert.equal(p.sessionsDelta, 100_000);
+});
+
 test('buildPayload: empty aggregate produces zero deltas', () => {
   const p = buildPayload(null, { sessions: 0, tokens: 0 }, { instanceId: VALID_ID });
   assert.equal(p.sessionsDelta, 0);

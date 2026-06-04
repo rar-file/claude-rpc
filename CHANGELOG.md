@@ -2,6 +2,12 @@
 
 All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.13.4] - 2026-06-05
+
+**Fixed**
+
+- **Heavy users are no longer silently dropped from community totals.** The community report sends a delta against a cursor, so the *first* report carried your entire lifetime token total as one delta. For anyone past the 5B per-report cap (cache-read tokens add up fast) that report 400'd — and since the cursor only advances on success, it would 400 *forever*, excluding every heavy user from the totals. The client now **clamps each report's delta to the per-report cap and streams the backfill** over successive flushes, so any lifetime total gets counted no matter how large, while the per-report cap still bounds abuse. (The leaderboard *profile* cap is a separate, generous 1-trillion ceiling — it was never the issue here.)
+
 ## [0.13.3] - 2026-06-05
 
 **Fixed**
