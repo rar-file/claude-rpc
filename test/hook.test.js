@@ -238,6 +238,20 @@ test('classifyShip: unrelated commands return null', () => {
   assert.equal(classifyShip(undefined), null);
 });
 
+test('classifyShip: quoted mentions of git push do not false-fire', () => {
+  // The old substring regex flagged all of these as a ship.
+  assert.equal(classifyShip('echo "remember to git push later"'), null);
+  assert.equal(classifyShip('grep -r "git push" .'), null);
+  // A commit whose message mentions push is a commit, not a push.
+  assert.equal(classifyShip('git commit -m "prep for git push"'), 'commit');
+});
+
+test('classifyShip: env prefixes, sudo, paths, and git global flags', () => {
+  assert.equal(classifyShip('GIT_SSH_COMMAND=ssh git push'), 'push');
+  assert.equal(classifyShip('/usr/bin/git push'), 'push');
+  assert.equal(classifyShip('git -C /repo -c user.name=x push'), 'push');
+});
+
 test('PostToolUse: gh pr create sets justShippedKind=pr', () => {
   resetStateFile();
   processHookEvent('SessionStart', { cwd: '/tmp/proj' });

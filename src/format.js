@@ -107,9 +107,13 @@ function humanTool(name) {
   return name;
 }
 
-// "C--Users-simmo-Downloads-CLAUDE" → "CLAUDE"
-// "-home-alice-projects-my-app"     → "my-app"
-// "archive-2026-04-25T185311Z"      → "archive"
+// Given a real path, the basename is exact: "/home/alice/my-app" → "my-app".
+// Given a Claude Code project *slug* (path with separators replaced by '-')
+// we can only best-effort the last segment: "C--Users-simmo-Downloads-CLAUDE"
+// → "CLAUDE". A hyphenated name ("my-app") can't be recovered from a bare slug
+// because '-' also encodes the separators — but callers pass the real cwd
+// wherever they have it (live sessions, aggregate keys), so the slug branch is
+// a rare fallback for transcripts whose cwd we never saw.
 function humanProject(slugOrPath) {
   if (!slugOrPath) return '';
   const raw = String(slugOrPath);
@@ -122,8 +126,10 @@ function humanProject(slugOrPath) {
         || raw.startsWith('-tmp-')
         || raw.startsWith('-var-')
         || raw.startsWith('-opt-')) {
-    // Path-style slug — take the last segment.
-    const parts = raw.split('-').filter((p) => p && p !== 'C');
+    // Path-style slug — strip a leading Windows drive letter ("C--") and take
+    // the last segment. (The old code filtered out every segment equal to 'C',
+    // which wrongly dropped a real path/project segment literally named "C".)
+    const parts = raw.replace(/^[A-Za-z]--/, '').split('-').filter(Boolean);
     name = parts[parts.length - 1] || raw;
   } else {
     name = raw;

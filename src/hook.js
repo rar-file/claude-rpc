@@ -5,22 +5,65 @@ import { updateState, resetState, pushUnique, shortFile } from './state.js';
 import { detectLastCommitSubject, detectGitBranch } from './git.js';
 import { EVENTS_LOG_PATH } from './paths.js';
 
-// Bash invocations we treat as "just shipped", classified into a kind for
-// state.justShippedKind. Tolerates extra args, leading env vars, and chained
-// commands ("git add . && git commit -m …"). Order matters: push outranks
-// commit when a command does both (`git commit && git push`).
-const SHIP_PATTERNS = [
-  { kind: 'push',   re: /(?:^|[;&|]|\s)git\s+push(?:\s|$)/ },
-  { kind: 'commit', re: /(?:^|[;&|]|\s)git\s+commit(?:\s|$)/ },
-  { kind: 'pr',     re: /(?:^|[;&|]|\s)gh\s+pr\s+create(?:\s|$)/ },
-  { kind: 'issue',  re: /(?:^|[;&|]|\s)gh\s+issue\s+create(?:\s|$)/ },
-  { kind: 'tag',    re: /(?:^|[;&|]|\s)gh\s+release\s+create(?:\s|$)/ },
-];
+// Precedence when a command ships more than one way (`git commit && git push`
+// → push). Highest first.
+const SHIP_PRECEDENCE = ['push', 'commit', 'pr', 'issue', 'tag'];
+
+// Tokenize one command segment the way a shell roughly would for our purposes:
+// strip leading env assignments (FOO=bar) and sudo/time wrappers, drop the path
+// from the leading binary (/usr/bin/git → git), lowercase it.
+function tokenizeSegment(seg) {
+  const stripped = seg.replace(/^\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)+/, '').trim();
+  let toks = stripped.split(/\s+/).filter(Boolean);
+  while (toks.length && (toks[0] === 'sudo' || toks[0] === 'time')) toks = toks.slice(1);
+  if (toks.length) {
+    const slash = toks[0].lastIndexOf('/');
+    if (slash !== -1) toks[0] = toks[0].slice(slash + 1);
+    toks[0] = toks[0].toLowerCase();
+  }
+  return toks;
+}
+
+// First real git subcommand, skipping global flags and their values
+// (`git -C /repo -c k=v push` → push).
+function gitSubcommand(args) {
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '-C' || a === '-c') { i++; continue; } // flag that takes a value
+    if (a.startsWith('-')) continue;
+    return a.toLowerCase();
+  }
+  return null;
+}
+
+function shipKindForSegment(seg) {
+  const toks = tokenizeSegment(seg);
+  if (!toks.length) return null;
+  if (toks[0] === 'git') {
+    const sub = gitSubcommand(toks.slice(1));
+    if (sub === 'push') return 'push';
+    if (sub === 'commit') return 'commit';
+  } else if (toks[0] === 'gh') {
+    if (toks[1] === 'pr' && toks[2] === 'create') return 'pr';
+    if (toks[1] === 'issue' && toks[2] === 'create') return 'issue';
+    if (toks[1] === 'release' && toks[2] === 'create') return 'tag';
+  }
+  return null;
+}
 
 // Return the "shipped" kind for a shell command, or null. Exported for tests.
+// Splits on shell separators and only classifies a segment whose *actual*
+// leading command is git/gh — so a quoted mention ("git push later" inside an
+// echo or a commit message) no longer false-fires. Tolerates env prefixes,
+// sudo/time, chained commands, and git global flags.
 export function classifyShip(cmd) {
-  const s = String(cmd || '');
-  for (const p of SHIP_PATTERNS) if (p.re.test(s)) return p.kind;
+  const segments = String(cmd || '').split(/[;&|\n]+/);
+  const found = new Set();
+  for (const seg of segments) {
+    const k = shipKindForSegment(seg);
+    if (k) found.add(k);
+  }
+  for (const kind of SHIP_PRECEDENCE) if (found.has(kind)) return kind;
   return null;
 }
 

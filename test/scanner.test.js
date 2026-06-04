@@ -4,7 +4,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync, mkdtempSync, rmSync, utimesSync, statSync } from 'node:fs';
+import { writeFileSync, appendFileSync, mkdtempSync, rmSync, utimesSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -16,7 +16,9 @@ const {
 function makeTranscript(records) {
   const dir = mkdtempSync(join(tmpdir(), 'rpc-scan-'));
   const path = join(dir, 'sample.jsonl');
-  writeFileSync(path, records.map((r) => JSON.stringify(r)).join('\n'));
+  // Real Claude Code transcripts append each record as `JSON + '\n'`, so the
+  // file is newline-terminated. Match that here.
+  writeFileSync(path, records.map((r) => JSON.stringify(r) + '\n').join(''));
   return { dir, path };
 }
 
@@ -100,6 +102,25 @@ test('readSessionTokens: sums tokens across assistant records', () => {
   assert.equal(t.output, 250);
   assert.equal(t.cacheRead, 100);
   assert.equal(t.cacheWrite, 5);
+  rmSync(dir, { recursive: true });
+});
+
+test('readSessionTokens: incremental append accumulates across reads', () => {
+  const { dir, path } = makeTranscript([
+    { type: 'assistant', message: { usage: { input_tokens: 100, output_tokens: 50, cache_read_input_tokens: 10 } } },
+  ]);
+  const t1 = readSessionTokens(path);
+  assert.equal(t1.input, 100);
+  assert.equal(t1.output, 50);
+  // Append a record and bump mtime so the cache invalidates; the reader should
+  // parse only the appended tail and add it to the running totals.
+  appendFileSync(path, JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 250, output_tokens: 30 } } }) + '\n');
+  const future = new Date(Date.now() + 5000);
+  utimesSync(path, future, future);
+  const t2 = readSessionTokens(path);
+  assert.equal(t2.input, 350);
+  assert.equal(t2.output, 80);
+  assert.equal(t2.cacheRead, 10);
   rmSync(dir, { recursive: true });
 });
 

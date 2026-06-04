@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync, existsSync, writeFileSync, mkdirSync, renameSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync, existsSync, writeFileSync, mkdirSync, renameSync, openSync, readSync, closeSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 import { homedir } from 'node:os';
 import { CLAUDE_PROJECTS, SCAN_CACHE_PATH, AGGREGATE_PATH, DATA_DIR, EVENTS_LOG_PATH } from './paths.js';
@@ -178,10 +178,40 @@ function collectFilePath(input = {}) {
   return input.file_path || input.path || input.notebook_path || null;
 }
 
+// Iterate newline-delimited lines of a string without materializing the full
+// `.split('\n')` array (a second full-size copy of the file). Peak overhead is
+// one line slice instead of N strings — meaningful for multi-MB transcripts.
+function* iterLines(raw) {
+  let start = 0;
+  let nl;
+  while ((nl = raw.indexOf('\n', start)) !== -1) {
+    yield raw.slice(start, nl);
+    start = nl + 1;
+  }
+  if (start < raw.length) yield raw.slice(start);
+}
+
+// Read up to `maxBytes` from the head of a file without loading the whole
+// thing. Used to pull the cwd from a transcript's first lines — reading a
+// multi-MB transcript in full just to inspect its head was pure waste.
+function readHead(path, maxBytes = 65536) {
+  let fd;
+  try {
+    fd = openSync(path, 'r');
+    const buf = Buffer.allocUnsafe(maxBytes);
+    const n = readSync(fd, buf, 0, maxBytes, 0);
+    return buf.toString('utf8', 0, n);
+  } finally {
+    if (fd !== undefined) {
+      try { closeSync(fd); } catch { /* already closed */ }
+    }
+  }
+}
+
 // Parse a single transcript JSONL into a per-file summary.
 export function parseTranscript(filePath) {
   const raw = readFileSync(filePath, 'utf8');
-  const lines = raw.split('\n');
+  const lines = iterLines(raw);
   const summary = {
     sessionId: null,
     project: null,
@@ -404,8 +434,9 @@ function readTranscriptCwd(path, mtimeMs) {
   if (cached && cached.mtime === mtimeMs) return cached.cwd;
   let cwd = null;
   try {
-    const head = readFileSync(path, 'utf8').split('\n', 25);
-    for (const line of head) {
+    let seen = 0;
+    for (const line of iterLines(readHead(path))) {
+      if (++seen > 25) break;
       if (!line) continue;
       const r = safeJson(line);
       if (r?.cwd) { cwd = r.cwd; break; }
@@ -418,7 +449,22 @@ function readTranscriptCwd(path, mtimeMs) {
 // Per-transcript token cache. Reading a multi-MB .jsonl on every push tick
 // (4s) would be wasteful, so we only re-parse when the file's mtime has
 // advanced since the last read.
-const sessionTokenCache = new Map();  // path → { mtime, tokens }
+const sessionTokenCache = new Map();  // path → { mtime, size, offset, tokens }
+
+// Accumulate assistant-usage tokens from a chunk of complete JSONL lines.
+function sumUsageLines(text, tokens) {
+  for (const line of iterLines(text)) {
+    if (!line) continue;
+    const r = safeJson(line);
+    if (!r || r.type !== 'assistant') continue;
+    const u = r.message?.usage;
+    if (!u) continue;
+    tokens.input      += u.input_tokens || 0;
+    tokens.output     += u.output_tokens || 0;
+    tokens.cacheRead  += u.cache_read_input_tokens || 0;
+    tokens.cacheWrite += u.cache_creation_input_tokens || 0;
+  }
+}
 
 // Sum input/output/cache tokens from a single transcript JSONL.
 //
@@ -436,23 +482,44 @@ export function readSessionTokens(path) {
   const cached = sessionTokenCache.get(path);
   if (cached && cached.mtime === st.mtimeMs) return cached.tokens;
 
-  const tokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
-  try {
-    const raw = readFileSync(path, 'utf8');
-    for (const line of raw.split('\n')) {
-      if (!line) continue;
-      const r = safeJson(line);
-      if (!r || r.type !== 'assistant') continue;
-      const u = r.message?.usage;
-      if (!u) continue;
-      tokens.input      += u.input_tokens || 0;
-      tokens.output     += u.output_tokens || 0;
-      tokens.cacheRead  += u.cache_read_input_tokens || 0;
-      tokens.cacheWrite += u.cache_creation_input_tokens || 0;
-    }
-  } catch { return null; }
+  // Transcripts are append-only JSONL. If the file only grew since the last
+  // read, parse just the appended tail from the cached byte offset instead of
+  // re-reading the whole (growing) file on every 4s daemon tick. Anything else
+  // (shrunk/truncated/rewritten) falls back to a full re-read.
+  const canAppend = cached && st.size >= cached.size && cached.offset <= st.size;
+  const tokens = canAppend
+    ? { ...cached.tokens }
+    : { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+  const startOffset = canAppend ? cached.offset : 0;
+  let newOffset = startOffset;
 
-  sessionTokenCache.set(path, { mtime: st.mtimeMs, tokens });
+  let fd;
+  try {
+    fd = openSync(path, 'r');
+    const len = st.size - startOffset;
+    if (len > 0) {
+      const buf = Buffer.allocUnsafe(len);
+      const n = readSync(fd, buf, 0, len, startOffset);
+      const text = buf.toString('utf8', 0, n);
+      // Only consume through the last newline; a trailing partial line is left
+      // for a later read (offset stays before it). \n is single-byte ASCII so
+      // the boundary is exact even with multi-byte content in the lines.
+      const lastNl = text.lastIndexOf('\n');
+      if (lastNl !== -1) {
+        const complete = text.slice(0, lastNl + 1);
+        newOffset = startOffset + Buffer.byteLength(complete, 'utf8');
+        sumUsageLines(complete, tokens);
+      }
+    }
+  } catch {
+    return null;
+  } finally {
+    if (fd !== undefined) {
+      try { closeSync(fd); } catch { /* already closed */ }
+    }
+  }
+
+  sessionTokenCache.set(path, { mtime: st.mtimeMs, size: st.size, offset: newOffset, tokens });
   return tokens;
 }
 

@@ -136,7 +136,13 @@ function pickFrames(p, status) {
   return { frames: [{ details: p.details, state: p.state }], largeImageTextTpl: null };
 }
 
-function buildActivity(opts = {}) {
+// Resolve the raw state file into the final presence state: idle/stale, shipped
+// and trigger overlays, live-session token enrichment, and the privacy verdict.
+// Run ONCE per tick (in pushPresence) and reused by buildActivity, so the
+// clear-vs-push decision and the rendered frame are guaranteed to agree —
+// previously this chain ran twice and only buildActivity applied the trigger
+// overlay, so the two could diverge.
+function resolvePresence(opts = {}) {
   let state = opts.state || readState();
   // Attach live sessions BEFORE applyIdle so the stale/idle decision can
   // see ongoing transcript activity, not just this daemon's hook state.
@@ -169,6 +175,13 @@ function buildActivity(opts = {}) {
   // visibility decision. Sets state._privacy so we can short-circuit to
   // clearActivity when visibility=hidden.
   state = applyPrivacy(state, config);
+  return state;
+}
+
+function buildActivity(opts = {}) {
+  // opts.resolved is an already-resolved state (the common path, from
+  // pushPresence). Fall back to resolving here for any standalone caller.
+  const state = opts.resolved || resolvePresence(opts);
 
   const vars = buildVars(state, config, opts.aggregate || aggregate);
   const p = config.presence || {};
@@ -303,17 +316,10 @@ function fireStatusSideEffects(resolved) {
 async function pushPresence() {
   if (!connected || !client?.user) return;
   try {
-    // Resolve state once so we can decide whether to push or clear.
-    // Mirrors buildActivity's first two lines — kept here so we don't
-    // have to round-trip through buildActivity just to learn the status.
-    let resolved = readState();
-    resolved.liveSessions = liveSessions;
-    resolved = applyIdle(resolved, config);
-    resolved = applyShipped(resolved, config);
-    // Privacy can convert any state into a "hidden" verdict — give it the
-    // same treatment as hideWhenStale: a single clearActivity, deduped via
-    // lastPayloadHash so we don't spam the IPC.
-    resolved = applyPrivacy(resolved, config);
+    // Resolve state ONCE — this same object decides clear-vs-push, drives the
+    // status side-effects, AND is rendered by buildActivity, so there's no way
+    // for the decision and the frame to disagree.
+    const resolved = resolvePresence();
 
     // Outbound side-effects on a status TRANSITION (fire once per change):
     // a desktop notification when Claude needs you, and an opt-in webhook POST.
@@ -334,7 +340,7 @@ async function pushPresence() {
       return;
     }
 
-    const activity = buildActivity({ state: resolved });
+    const activity = buildActivity({ resolved });
     const hash = JSON.stringify(activity);
     if (hash === lastPayloadHash) return;
     lastPayloadHash = hash;
