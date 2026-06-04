@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>claude-rpc — promo</title>
+<style>
+  /* ── A self-playing, screen-recordable promo "video" in pure HTML/CSS/JS.
+     Open it, let it loop once, screen-record the centered stage. The stage
+     sits on a black field so it crops cleanly. ?format=square for 1:1. ── */
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=JetBrains+Mono:wght@400;700&display=swap');
+  :root{
+    --paper:#f4ede0;--paper2:#ebe2d2;--ink:#2b2722;--mute:#6b6357;--faint:#9a9183;
+    --rust:#d97757;--rust3:#b8552f;--grass:#5a7d4f;--blurple:#5865F2;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;background:#000;overflow:hidden}
+  #fit{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}
+  #stage{
+    width:1280px;height:720px;position:relative;overflow:hidden;
+    background:radial-gradient(120% 120% at 0% 0%, #f7f1e6 0%, var(--paper) 45%, var(--paper2) 100%);
+    background-image:radial-gradient(rgba(43,39,34,.05) 1.5px, transparent 1.5px);
+    background-size:26px 26px;
+    font-family:"Space Grotesk",system-ui,sans-serif;color:var(--ink);
+    transform-origin:center center;
+  }
+  body.square #stage{width:1080px;height:1080px}
+  #stage::before{content:"";position:absolute;top:0;left:0;right:0;height:10px;background:var(--rust);z-index:50}
+
+  .scene{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    opacity:0;transition:opacity .5s ease, transform .6s cubic-bezier(.2,.7,.2,1);transform:translateY(14px) scale(.99);padding:60px}
+  .scene.active{opacity:1;transform:none}
+  .scene.out{opacity:0;transform:translateY(-14px) scale(.99);transition:opacity .4s ease, transform .4s ease}
+
+  .kicker{font-family:"JetBrains Mono",monospace;font-weight:700;letter-spacing:.32em;font-size:18px;color:var(--rust3);text-transform:uppercase}
+  .word{font-weight:700;font-size:128px;letter-spacing:-4px;line-height:1;margin:14px 0 6px}
+  .word .ch{display:inline-block;opacity:0;filter:blur(10px);transform:translateY(18px);animation:chIn .5s forwards}
+  @keyframes chIn{to{opacity:1;filter:blur(0);transform:none}}
+  .tag{font-size:34px;font-weight:500;color:var(--ink);opacity:.92}
+  .rule{height:5px;width:0;background:var(--rust);margin-top:22px;animation:rule .8s .5s forwards cubic-bezier(.2,.7,.2,1)}
+  @keyframes rule{to{width:340px}}
+
+  /* presence card */
+  .caption{font-family:"JetBrains Mono",monospace;font-size:16px;color:var(--mute);margin-bottom:18px;letter-spacing:.04em}
+  .card{width:520px;background:var(--paper2);border:2.5px solid var(--ink);box-shadow:10px 10px 0 rgba(43,39,34,.14);padding:24px;border-radius:10px}
+  .card .top{display:flex;gap:16px;align-items:center}
+  .avatar{width:84px;height:84px;border-radius:14px;background:linear-gradient(135deg,var(--rust),var(--rust3));position:relative;flex:0 0 auto}
+  .avatar .dot{position:absolute;right:-4px;bottom:-4px;width:22px;height:22px;border-radius:50%;background:var(--grass);border:4px solid var(--paper2);box-shadow:0 0 0 0 rgba(90,125,79,.55);animation:pulse 1.8s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(90,125,79,.5)}70%{box-shadow:0 0 0 12px rgba(90,125,79,0)}100%{box-shadow:0 0 0 0 rgba(90,125,79,0)}}
+  .card .name{font-family:"JetBrains Mono",monospace;font-weight:700;font-size:20px}
+  .card .line{font-family:"JetBrains Mono",monospace;font-size:18px;color:var(--mute);margin-top:8px;min-height:24px}
+  .card .line .cur{display:inline-block;width:9px;height:19px;background:var(--rust);margin-left:2px;vertical-align:-3px;animation:blink 1s step-end infinite}
+  @keyframes blink{50%{opacity:0}}
+  .card .sub{font-family:"JetBrains Mono",monospace;font-size:15px;color:var(--faint);margin-top:4px}
+  .chip{margin-top:18px;background:var(--paper);border:2px solid var(--ink);border-radius:6px;padding:10px 12px;font-family:"JetBrains Mono",monospace;font-size:15px;color:var(--mute)}
+  .btn{margin-top:14px;display:inline-block;background:var(--blurple);color:#fff;font-family:"JetBrains Mono",monospace;font-weight:700;font-size:15px;padding:9px 16px;border-radius:6px;opacity:0;transform:scale(.9);transition:all .4s .2s cubic-bezier(.2,.7,.2,1)}
+  .card.show .btn{opacity:1;transform:none}
+
+  /* stats scene */
+  .h2{font-weight:700;font-size:56px;letter-spacing:-2px;text-align:center}
+  .h2 .rs{color:var(--rust3)}
+  .stats{display:flex;gap:40px;margin-top:38px}
+  .stat{text-align:center;min-width:170px}
+  .stat .n{font-weight:700;font-size:62px;line-height:1;letter-spacing:-2px}
+  .stat .n.rust{color:var(--rust3)} .stat .n.grass{color:var(--grass)}
+  .stat .l{font-family:"JetBrains Mono",monospace;font-size:15px;color:var(--mute);text-transform:uppercase;letter-spacing:.1em;margin-top:10px}
+  .wraptag{margin-top:34px;font-family:"JetBrains Mono",monospace;font-size:16px;color:var(--mute)}
+  .wraptag b{color:var(--rust3)}
+
+  /* CTA terminal */
+  .term{width:640px;background:var(--ink);border-radius:10px;box-shadow:10px 10px 0 rgba(43,39,34,.18);overflow:hidden}
+  .term .bar{height:34px;background:#221f1a;display:flex;align-items:center;gap:8px;padding:0 14px}
+  .term .bar i{width:12px;height:12px;border-radius:50%;background:#5a554c}
+  .term .bar i:nth-child(1){background:var(--rust)} .term .bar i:nth-child(2){background:#caa34a} .term .bar i:nth-child(3){background:var(--grass)}
+  .term .body{padding:22px 24px;font-family:"JetBrains Mono",monospace;font-size:22px;color:var(--paper);min-height:120px}
+  .term .ps{color:var(--rust)} .term .ok{color:#8fd17a}
+  .term .cur{display:inline-block;width:11px;height:23px;background:var(--paper);vertical-align:-4px;animation:blink 1s step-end infinite}
+  .url{margin-top:30px;font-weight:700;font-size:46px;letter-spacing:-1px}
+  .meta{margin-top:14px;font-family:"JetBrains Mono",monospace;font-size:17px;color:var(--faint)}
+
+  .progress{position:absolute;bottom:0;left:0;height:5px;background:var(--rust);width:0;z-index:60}
+  #replay{position:absolute;right:14px;bottom:14px;z-index:70;font-family:"JetBrains Mono",monospace;font-size:12px;background:rgba(43,39,34,.8);color:var(--paper);border:none;border-radius:5px;padding:6px 10px;cursor:pointer;opacity:.5}
+  #replay:hover{opacity:1}
+</style>
+</head>
+<body>
+<div id="fit"><div id="stage">
+
+  <section class="scene" id="sA">
+    <div class="kicker">discord rich presence</div>
+    <div class="word" id="word"></div>
+    <div class="tag">for Claude&nbsp;Code</div>
+    <div class="rule"></div>
+  </section>
+
+  <section class="scene" id="sB">
+    <div class="caption">live on your Discord profile ↓</div>
+    <div class="card" id="card">
+      <div class="top">
+        <div class="avatar"><div class="dot"></div></div>
+        <div>
+          <div class="name">Claude Code</div>
+          <div class="line" id="cardLine"><span class="cur"></span></div>
+          <div class="sub">claude-rpc · Opus 4.8</div>
+        </div>
+      </div>
+      <div class="chip" id="chip">3.2h today · 1.4M tokens · 12&#128293; streak</div>
+      <div><span class="btn">Get claude-rpc →</span></div>
+    </div>
+  </section>
+
+  <section class="scene" id="sC">
+    <div class="h2">your <span class="rs">whole year</span> on Claude, too</div>
+    <div class="stats">
+      <div class="stat"><div class="n rust" data-to="312" data-suf="h" id="n1">0</div><div class="l">active time</div></div>
+      <div class="stat"><div class="n" data-to="1204" id="n2">0</div><div class="l">sessions</div></div>
+      <div class="stat"><div class="n" data-to="48" data-suf="M" id="n3">0</div><div class="l">tokens</div></div>
+      <div class="stat"><div class="n grass" data-to="31" data-suf="d" id="n4">0</div><div class="l">best streak</div></div>
+    </div>
+    <div class="wraptag">dashboard · TUI · shareable cards · <b>Claude Wrapped</b></div>
+  </section>
+
+  <section class="scene" id="sD">
+    <div class="term">
+      <div class="bar"><i></i><i></i><i></i></div>
+      <div class="body"><span class="ps">$</span> <span id="cmd"></span><span class="cur" id="cmdcur"></span><div id="okline" style="opacity:0;margin-top:10px"><span class="ok">✓</span> daemon launched — card is live</div></div>
+    </div>
+    <div class="url">claude-rpc.vercel.app</div>
+    <div class="meta">free · MIT · macOS · Windows · Linux</div>
+  </section>
+
+  <div class="progress" id="prog"></div>
+  <button id="replay">↺ replay</button>
+</div></div>
+
+<script>
+  // fit the fixed stage to the window (so it's full-screen recordable at any size)
+  if (new URLSearchParams(location.search).get('format') === 'square') document.body.classList.add('square');
+  const stage = document.getElementById('stage');
+  function fit(){
+    const s = Math.min(innerWidth / stage.offsetWidth, innerHeight / stage.offsetHeight);
+    stage.style.transform = `scale(${s})`;
+  }
+  addEventListener('resize', fit); fit();
+
+  const $ = (id) => document.getElementById(id);
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+  async function type(el, text, sp=55){ el.textContent=''; for(const c of text){ el.textContent+=c; await sleep(sp);} }
+  function countUp(el, to, dur, suf=''){
+    const start=performance.now();
+    function step(now){ const p=Math.min(1,(now-start)/dur); const e=1-Math.pow(1-p,3);
+      const v=Math.round(to*e); el.textContent=(to>=1000?v.toLocaleString():v)+suf; if(p<1)requestAnimationFrame(step);}
+    requestAnimationFrame(step);
+  }
+
+  // scene timeline
+  const TL = [
+    { el:'sA', dur:3200, on:()=>{
+        const w=$('word'), s='claude-rpc'; w.innerHTML='';
+        [...s].forEach((c,i)=>{const sp=document.createElement('span');sp.className='ch';sp.textContent=c;sp.style.animationDelay=(i*55)+'ms';w.appendChild(sp);});
+      }},
+    { el:'sB', dur:6000, on:async()=>{
+        $('card').classList.add('show');
+        const line=$('cardLine'), cur='<span class="cur"></span>';
+        const states=['Editing src/daemon.js','Running tests in claude-rpc','Just shipped 🚀 v0.13.0'];
+        for(const st of states){ line.innerHTML=cur; await sleep(180);
+          for(let i=0;i<st.length;i++){ line.innerHTML=st.slice(0,i+1)+cur; await sleep(45);} await sleep(900); }
+        line.innerHTML=states[states.length-1]+cur;
+      }},
+    { el:'sC', dur:4600, on:()=>{
+        countUp($('n1'),312,1600,'h'); countUp($('n2'),1204,1700);
+        countUp($('n3'),48,1500,'M'); countUp($('n4'),31,1400,'d');
+      }},
+    { el:'sD', dur:4600, on:async()=>{
+        await type($('cmd'),'npx claude-rpc setup',70);
+        $('cmdcur').style.display='none'; await sleep(500); $('okline').style.opacity='1';
+      }},
+  ];
+
+  let timer=null, raf=null;
+  async function play(){
+    cancelAnimationFrame(raf); clearTimeout(timer);
+    document.querySelectorAll('.scene').forEach(s=>s.classList.remove('active','out'));
+    $('card').classList.remove('show'); $('cmd').textContent=''; $('cmdcur').style.display=''; $('okline').style.opacity='0';
+    const total = TL.reduce((a,s)=>a+s.dur,0);
+    const t0=performance.now();
+    (function prog(now){ $('prog').style.width=Math.min(100,((now-t0)/total)*100)+'%'; raf=requestAnimationFrame(prog); })(t0);
+    let acc=0;
+    for(let i=0;i<TL.length;i++){
+      const sc=TL[i], elPrev = i>0 ? $(TL[i-1].el) : null;
+      if(elPrev){ elPrev.classList.add('out'); elPrev.classList.remove('active'); }
+      const elNow=$(sc.el); elNow.classList.remove('out'); elNow.classList.add('active');
+      sc.on && sc.on();
+      await sleep(sc.dur);
+    }
+    timer=setTimeout(play, 600); // loop
+  }
+  $('replay').onclick=play;
+  play();
+</script>
+</body>
+</html>
