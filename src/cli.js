@@ -23,6 +23,7 @@ import { badgeSvg } from './badge.js';
 import { fmtCost } from './pricing.js';
 import { addPrivateCwd, removePrivateCwd, listPrivateCwds, resolveVisibility } from './privacy.js';
 import { loadConfig, hasUserConfig } from './config.js';
+import * as lb from './leaderboard.js';
 import { VERSION } from './version.js';
 import { fail, EX_USER_ERROR, EX_BAD_STATE } from './ui.js';
 import { randomUUID } from 'node:crypto';
@@ -1046,6 +1047,89 @@ async function communityReport() {
   console.log('');
 }
 
+// ── leaderboard profile (local) ───────────────────────────────────────
+// `profile` manages the local, opt-in identity used by the public leaderboard.
+// Everything is stored locally in config.json; nothing is published until the
+// daemon flush runs with profile.enabled + a valid handle (Phase 2).
+function readFlag(argv, name) {
+  const i = argv.indexOf(`--${name}`);
+  if (i !== -1 && i + 1 < argv.length) return argv[i + 1];
+  const eq = argv.find((a) => a.startsWith(`--${name}=`));
+  return eq ? eq.slice(name.length + 3) : undefined;
+}
+
+function profileStatus() {
+  const p = (loadConfig().profile) || {};
+  console.log('');
+  console.log(`  ${c.bold}claude-rpc profile${c.reset}  ${c.dim}— public leaderboard identity${c.reset}`);
+  console.log('');
+  console.log(`  state:    ${p.enabled ? `${c.green}on${c.reset}` : `${c.dim}off${c.reset}`}`);
+  console.log(`  handle:   ${p.handle ? c.cyan + p.handle + c.reset : c.dim + '(unset)' + c.reset}`);
+  console.log(`  name:     ${p.displayName ? p.displayName : c.dim + '(unset)' + c.reset}`);
+  console.log(`  github:   ${p.githubUser ? `${p.githubUser} ${c.dim}(verify to earn ✓)${c.reset}` : c.dim + '(unset — unverified)' + c.reset}`);
+  console.log('');
+  if (!p.handle) console.log(`  ${c.dim}set one with:${c.reset} claude-rpc profile set --handle <name> [--name "..."] [--github <user>]`);
+  else if (!p.enabled) console.log(`  ${c.dim}publish to the board with:${c.reset} claude-rpc profile on`);
+  console.log('');
+}
+
+function profileSet(argv) {
+  const { normalizeHandle, cleanDisplayName, normalizeGithubUser } = lb;
+  const userCfg = readJson(CONFIG_PATH, {});
+  const next = { ...(userCfg.profile || {}) };
+
+  const rawHandle = readFlag(argv, 'handle');
+  if (rawHandle !== undefined) {
+    const h = normalizeHandle(rawHandle);
+    if (!h) return fail('invalid handle — use 2–32 chars of letters, numbers, and dashes', { code: EX_USER_ERROR });
+    next.handle = h;
+  }
+  const rawName = readFlag(argv, 'name');
+  if (rawName !== undefined) next.displayName = cleanDisplayName(rawName);
+  const rawGh = readFlag(argv, 'github');
+  if (rawGh !== undefined) {
+    if (rawGh === '') next.githubUser = null;
+    else {
+      const u = normalizeGithubUser(rawGh);
+      if (!u) return fail(`invalid GitHub username: ${rawGh}`, { code: EX_USER_ERROR });
+      next.githubUser = u;
+    }
+  }
+
+  userCfg.profile = next;
+  writeFileSync(CONFIG_PATH, JSON.stringify(userCfg, null, 2));
+  console.log(`${c.green}✓${c.reset} profile saved`);
+  profileStatus();
+}
+
+function profileEnable(on) {
+  const userCfg = readJson(CONFIG_PATH, {});
+  const next = { ...(userCfg.profile || {}) };
+  if (on && !lb.isValidHandle(next.handle)) {
+    return fail('set a handle before going on', {
+      hint: 'claude-rpc profile set --handle <name>',
+      code: EX_BAD_STATE,
+    });
+  }
+  next.enabled = on;
+  userCfg.profile = next;
+  writeFileSync(CONFIG_PATH, JSON.stringify(userCfg, null, 2));
+  console.log(`${c.green}✓${c.reset} leaderboard publishing ${on ? 'enabled' : 'disabled'}`);
+  if (on) console.log(`  ${c.dim}your stats publish on the next daemon flush. link & verify GitHub for the ✓.${c.reset}`);
+}
+
+function doProfile(argv) {
+  const sub = (argv[0] || 'status').toLowerCase();
+  if (sub === 'status' || sub === '') return profileStatus();
+  if (sub === 'set') return profileSet(argv.slice(1));
+  if (sub === 'on') return profileEnable(true);
+  if (sub === 'off') return profileEnable(false);
+  fail(`unknown profile subcommand: ${sub}`, {
+    hint: 'try: profile [status|set|on|off]',
+    code: EX_USER_ERROR,
+  });
+}
+
 async function doCommunity(argv) {
   const sub = (argv[0] || 'status').toLowerCase();
   if (sub === 'on') return communityOn();
@@ -1183,6 +1267,7 @@ function help() {
     ['public',    'Un-mark the current directory'],
     ['privacy',   'Show resolved visibility for the current directory'],
     ['community', 'Opt in/out of anonymous community totals (on|off|status|report)'],
+    ['profile',   'Public leaderboard identity — set handle/name/github (status|set|on|off)'],
     ['doctor',    'Run a diagnostic checklist — common-failure triage (--fix to auto-repair)'],
     ['tail',      'Tail the daemon log file'],
     ['daemon',    'Run daemon in foreground (debug)'],
@@ -1290,6 +1375,7 @@ const packagedDefault = IS_PACKAGED && !cmd;
     case 'public':    doPublic(); break;
     case 'privacy':   doPrivacy(); break;
     case 'community': await doCommunity(process.argv.slice(3)); break;
+    case 'profile':   doProfile(process.argv.slice(3)); break;
     case 'doctor': {
       const { runDoctor, fixPlan } = await import('./doctor.js');
       const fix = process.argv.includes('--fix');

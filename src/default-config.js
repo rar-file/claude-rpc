@@ -104,6 +104,15 @@ export const DEFAULT_CONFIG = {
     endpoint: "https://claude-rpc-totals.claude-rpc.workers.dev",
     flushIntervalMin: 30,
   },
+  // Public leaderboard / profile (opt-in, off by default). When enabled with a
+  // handle, the daemon flush also publishes your display identity + validated
+  // usage deltas to the board. Link a GitHub user to earn the verified ✓.
+  profile: {
+    enabled: false,
+    handle: null,
+    displayName: null,
+    githubUser: null,
+  },
   showElapsed: true,
   activityType: 0,
   statusAssets: {
