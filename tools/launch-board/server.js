@@ -12,6 +12,7 @@ import { createServer } from 'node:http';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { networkInterfaces } from 'node:os';
 import { verify, postTweet } from './x.js';
 
 const DIR = dirname(fileURLToPath(import.meta.url));
@@ -19,6 +20,11 @@ const DATA = join(DIR, '.data');
 const CREDS = join(DATA, 'creds.json');
 const QUEUE = join(DATA, 'queue.json');
 const PORT = process.env.PORT || 8787;
+// Bind all interfaces by default so the board is reachable over a Tailscale /
+// LAN address, not just localhost. Override with HOST=127.0.0.1 to restrict.
+// NOTE: there's no auth on this board — anyone who can reach HOST:PORT can post
+// to your X account. Keep it on a trusted network (a tailnet is fine).
+const HOST = process.env.HOST || '0.0.0.0';
 
 const readJson = (p, fb) => { try { return JSON.parse(readFileSync(p, 'utf8')); } catch { return fb; } };
 const writeJson = (p, v) => { mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, JSON.stringify(v, null, 2)); };
@@ -144,4 +150,13 @@ createServer(async (req, res) => {
   const handler = routes[key];
   if (handler) { try { await handler(req, res); } catch (e) { send(res, 500, { ok: false, error: e.message }); } }
   else send(res, 404, { ok: false, error: 'not found' });
-}).listen(PORT, () => console.log(`launch board → http://localhost:${PORT}`));
+}).listen(PORT, HOST, () => {
+  console.log(`launch board listening on ${HOST}:${PORT}`);
+  const addrs = Object.values(networkInterfaces()).flat()
+    .filter((n) => n && n.family === 'IPv4' && !n.internal);
+  console.log(`  local:     http://localhost:${PORT}`);
+  for (const a of addrs) {
+    const tailscale = a.address.startsWith('100.') ? '   ← Tailscale' : '';
+    console.log(`  network:   http://${a.address}:${PORT}${tailscale}`);
+  }
+});
