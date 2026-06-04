@@ -28,7 +28,9 @@
   #stage::before{content:"";position:absolute;top:0;left:0;right:0;height:10px;background:var(--rust);z-index:50}
 
   .scene{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
-    opacity:0;transition:opacity .5s ease, transform .6s cubic-bezier(.2,.7,.2,1);transform:translateY(14px) scale(.99);padding:60px}
+    opacity:0;transition:opacity .5s ease, transform .6s cubic-bezier(.2,.7,.2,1);transform:translateY(14px) scale(.99);padding:60px;
+    will-change:opacity,transform}
+  #stage.noanim .scene,#stage.noanim .progress{transition:none !important}
   .scene.active{opacity:1;transform:none}
   .scene.out{opacity:0;transform:translateY(-14px) scale(.99);transition:opacity .4s ease, transform .4s ease}
 
@@ -79,8 +81,10 @@
   .meta{margin-top:14px;font-family:"JetBrains Mono",monospace;font-size:17px;color:var(--faint)}
 
   .progress{position:absolute;bottom:0;left:0;height:5px;background:var(--rust);width:0;z-index:60}
-  #replay{position:absolute;right:14px;bottom:14px;z-index:70;font-family:"JetBrains Mono",monospace;font-size:12px;background:rgba(43,39,34,.8);color:var(--paper);border:none;border-radius:5px;padding:6px 10px;cursor:pointer;opacity:.5}
-  #replay:hover{opacity:1}
+  #ctrl{position:absolute;right:14px;bottom:14px;z-index:70;display:flex;gap:8px}
+  #ctrl a,#ctrl button{font-family:"JetBrains Mono",monospace;font-size:12px;background:rgba(43,39,34,.8);color:var(--paper);border:none;border-radius:5px;padding:7px 11px;cursor:pointer;opacity:.55;text-decoration:none}
+  #ctrl a:hover,#ctrl button:hover{opacity:1}
+  @media (max-width:760px){ #ctrl a,#ctrl button{font-size:14px;padding:10px 14px;opacity:.8} }
 </style>
 </head>
 <body>
@@ -130,71 +134,85 @@
   </section>
 
   <div class="progress" id="prog"></div>
-  <button id="replay">↺ replay</button>
+  <div id="ctrl">
+    <a id="dlgif" href="img/promo.gif" download="claude-rpc.gif" title="download the looping card GIF">⬇ GIF</a>
+    <button id="replay">↺ replay</button>
+  </div>
 </div></div>
 
 <script>
-  // fit the fixed stage to the window (so it's full-screen recordable at any size)
-  if (new URLSearchParams(location.search).get('format') === 'square') document.body.classList.add('square');
+  // Pick aspect: explicit ?format=square|wide, else square on portrait screens
+  // (phones) so it fills the width instead of a tiny letterboxed strip.
+  const params = new URLSearchParams(location.search);
+  const fmt = params.get('format') || (innerHeight > innerWidth ? 'square' : 'wide');
+  if (fmt === 'square') document.body.classList.add('square');
+
   const stage = document.getElementById('stage');
-  function fit(){
-    const s = Math.min(innerWidth / stage.offsetWidth, innerHeight / stage.offsetHeight);
-    stage.style.transform = `scale(${s})`;
-  }
+  function fit(){ stage.style.transform = `scale(${Math.min(innerWidth/stage.offsetWidth, innerHeight/stage.offsetHeight)})`; }
   addEventListener('resize', fit); fit();
 
   const $ = (id) => document.getElementById(id);
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-  async function type(el, text, sp=55){ el.textContent=''; for(const c of text){ el.textContent+=c; await sleep(sp);} }
-  function countUp(el, to, dur, suf=''){
+  // GEN cancels any in-flight typing/count-ups when a new loop or replay starts —
+  // this is what kills the occasional "glitch" of two scenes writing at once.
+  let GEN = 0;
+  async function type(el, text, sp, g){ el.textContent=''; for(const c of text){ if(g!==GEN) return; el.textContent+=c; await sleep(sp);} }
+  function countUp(el, to, dur, suf, g){
     const start=performance.now();
-    function step(now){ const p=Math.min(1,(now-start)/dur); const e=1-Math.pow(1-p,3);
-      const v=Math.round(to*e); el.textContent=(to>=1000?v.toLocaleString():v)+suf; if(p<1)requestAnimationFrame(step);}
-    requestAnimationFrame(step);
+    (function step(now){ if(g!==GEN) return; const p=Math.min(1,(now-start)/dur); const e=1-Math.pow(1-p,3);
+      const v=Math.round(to*e); el.textContent=(to>=1000?v.toLocaleString():v)+suf; if(p<1) requestAnimationFrame(step); })(performance.now());
   }
 
-  // scene timeline
   const TL = [
-    { el:'sA', dur:3200, on:()=>{
-        const w=$('word'), s='claude-rpc'; w.innerHTML='';
-        [...s].forEach((c,i)=>{const sp=document.createElement('span');sp.className='ch';sp.textContent=c;sp.style.animationDelay=(i*55)+'ms';w.appendChild(sp);});
+    { el:'sA', dur:3200, on:(g)=>{
+        const w=$('word'); w.innerHTML='';
+        [...'claude-rpc'].forEach((c,i)=>{const sp=document.createElement('span');sp.className='ch';sp.textContent=c;sp.style.animationDelay=(i*55)+'ms';w.appendChild(sp);});
       }},
-    { el:'sB', dur:6000, on:async()=>{
+    { el:'sB', dur:6200, on:async(g)=>{
         $('card').classList.add('show');
         const line=$('cardLine'), cur='<span class="cur"></span>';
-        const states=['Editing src/daemon.js','Running tests in claude-rpc','Just shipped 🚀 v0.13.0'];
-        for(const st of states){ line.innerHTML=cur; await sleep(180);
-          for(let i=0;i<st.length;i++){ line.innerHTML=st.slice(0,i+1)+cur; await sleep(45);} await sleep(900); }
+        const states=['Editing src/daemon.js','Running tests in claude-rpc','Just shipped v0.13.0'];
+        for(const st of states){ if(g!==GEN) return; line.innerHTML=cur; await sleep(160);
+          for(let i=0;i<st.length;i++){ if(g!==GEN) return; line.innerHTML=st.slice(0,i+1)+cur; await sleep(45);} await sleep(700); }
         line.innerHTML=states[states.length-1]+cur;
       }},
-    { el:'sC', dur:4600, on:()=>{
-        countUp($('n1'),312,1600,'h'); countUp($('n2'),1204,1700);
-        countUp($('n3'),48,1500,'M'); countUp($('n4'),31,1400,'d');
+    { el:'sC', dur:4600, on:(g)=>{
+        countUp($('n1'),312,1600,'h',g); countUp($('n2'),1204,1700,'',g);
+        countUp($('n3'),48,1500,'M',g); countUp($('n4'),31,1400,'d',g);
       }},
-    { el:'sD', dur:4600, on:async()=>{
-        await type($('cmd'),'npx claude-rpc setup',70);
-        $('cmdcur').style.display='none'; await sleep(500); $('okline').style.opacity='1';
+    { el:'sD', dur:4600, on:async(g)=>{
+        await type($('cmd'),'npx claude-rpc setup',70,g); if(g!==GEN) return;
+        $('cmdcur').style.display='none'; await sleep(500); if(g!==GEN) return; $('okline').style.opacity='1';
       }},
   ];
 
   let timer=null, raf=null;
-  async function play(){
-    cancelAnimationFrame(raf); clearTimeout(timer);
+  // Snap everything back to its base state WITHOUT transitions, so the loop
+  // restart doesn't flash a half-faded scene.
+  function hardReset(){
+    stage.classList.add('noanim');
     document.querySelectorAll('.scene').forEach(s=>s.classList.remove('active','out'));
     $('card').classList.remove('show'); $('cmd').textContent=''; $('cmdcur').style.display=''; $('okline').style.opacity='0';
-    const total = TL.reduce((a,s)=>a+s.dur,0);
-    const t0=performance.now();
-    (function prog(now){ $('prog').style.width=Math.min(100,((now-t0)/total)*100)+'%'; raf=requestAnimationFrame(prog); })(t0);
-    let acc=0;
+    $('prog').style.width='0';
+    void stage.offsetWidth;            // force reflow so the reset "takes"
+    stage.classList.remove('noanim');
+  }
+  async function play(){
+    clearTimeout(timer); cancelAnimationFrame(raf);
+    const g = ++GEN;
+    hardReset();
+    const total = TL.reduce((a,s)=>a+s.dur,0), t0=performance.now();
+    (function prog(now){ if(g!==GEN) return; $('prog').style.width=Math.min(100,((now-t0)/total)*100)+'%'; raf=requestAnimationFrame(prog); })(t0);
     for(let i=0;i<TL.length;i++){
-      const sc=TL[i], elPrev = i>0 ? $(TL[i-1].el) : null;
-      if(elPrev){ elPrev.classList.add('out'); elPrev.classList.remove('active'); }
-      const elNow=$(sc.el); elNow.classList.remove('out'); elNow.classList.add('active');
-      sc.on && sc.on();
-      await sleep(sc.dur);
+      if(g!==GEN) return;
+      if(i>0){ const p=$(TL[i-1].el); p.classList.add('out'); p.classList.remove('active'); }
+      const el=$(TL[i].el); el.classList.remove('out'); el.classList.add('active');
+      TL[i].on && TL[i].on(g);
+      await sleep(TL[i].dur);
     }
-    timer=setTimeout(play, 600); // loop
+    if(g!==GEN) return;
+    timer=setTimeout(play, 500); // loop
   }
   $('replay').onclick=play;
   play();
