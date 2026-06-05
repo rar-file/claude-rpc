@@ -1,6 +1,6 @@
 {
   "name": "claude-rpc",
-  "version": "0.13.4",
+  "version": "0.13.5",
   "description": "Discord Rich Presence for Claude Code — live model, project, tokens, and lifetime stats driven by Claude Code's hook system.",
   "type": "module",
   "license": "MIT",
@@ -37,9 +37,7 @@
     "format:check": "prettier --check \"src/**/*.js\" \"test/**/*.js\"",
     "typecheck": "tsc -p jsconfig.json"
   },
-  "dependencies": {
-    "@xhayper/discord-rpc": "^1.2.1"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "esbuild": "^0.24.0",
@@ -51,6 +49,10 @@
   },
   "engines": {
     "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "keywords": [
     "claude",

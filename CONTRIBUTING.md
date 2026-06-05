@@ -35,8 +35,9 @@ claude-rpc doctor
 
 - **ESM only** — `import`/`export`, no CommonJS.
 - **2-space indentation**, single quotes, semicolons, ~100 column print width.
-- Keep the dependency surface tiny. The only runtime dependency is
-  `@xhayper/discord-rpc`; please don't add more without a strong reason.
+- Keep the dependency surface tiny. claude-rpc ships with **zero runtime
+  dependencies** (Discord IPC is hand-rolled in `src/discord-ipc.js`); please
+  don't add any without a strong reason.
 - Prefer small, pure, testable helpers — most of the logic in `src/` is
   unit-tested as plain functions, separate from any I/O or transport layer.
 

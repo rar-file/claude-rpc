@@ -2,6 +2,16 @@
 
 All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.13.5] - 2026-06-05
+
+**Changed**
+
+- **Zero runtime dependencies.** Dropped the last runtime dependency, `@xhayper/discord-rpc`, by hand-rolling the small slice of Discord Rich Presence we actually use — the local IPC client in [`src/discord-ipc.js`](src/discord-ipc.js). That library pulled in ~10 transitive packages (undici, ws, the `@discordjs/*` stack) to talk to a local socket; presence over IPC is, on the wire, an 8-byte header plus a JSON blob. The activity → payload mapping is a faithful copy of the old library's, so the rendered card is unchanged. The published package now installs **nothing** beyond its own source — the smallest possible supply-chain surface.
+
+**Security / supply chain**
+
+- **CI Actions are pinned to full commit SHAs** (with a Dependabot group to keep them current). The release pipeline holds `id-token: write` plus the npm token, so a moved tag on a third-party action was a real injection path; SHA pins close it. Publishing also declares `provenance` in `publishConfig`, so every release must carry its SLSA provenance attestation, not just when the `--provenance` flag is remembered.
+
 ## [0.13.4] - 2026-06-05
 
 **Fixed**

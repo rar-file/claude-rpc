@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { writeFileSync, existsSync, unlinkSync, watch, appendFileSync, mkdirSync, statSync, renameSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { Client } from '@xhayper/discord-rpc';
+import { Client } from './discord-ipc.js';
 import { readState } from './state.js';
 import { buildVars, fillTemplate, framePasses, applyIdle, applyShipped, applyTrigger } from './format.js';
 import { scan, readAggregate, findLiveSessions, readSessionTokens } from './scanner.js';
@@ -259,7 +259,7 @@ function buildActivity(opts = {}) {
     effectiveSessionStart = state.lastActivity || Date.now();
   }
   if (config.showElapsed && effectiveSessionStart && state.status !== 'stale') {
-    // Discord IPC + @xhayper/discord-rpc expect milliseconds (not seconds).
+    // Discord IPC expects millisecond timestamps (not seconds).
     activity.startTimestamp = effectiveSessionStart;
   }
 
@@ -366,7 +366,7 @@ async function pushPresence() {
 
 // Heuristic: does this error indicate the IPC transport itself is dead
 // (vs. a transient/application-level failure)? Matches the common broken-pipe
-// / closed-socket shapes from @xhayper/discord-rpc and the underlying net
+// / closed-socket shapes from our IPC client (src/discord-ipc.js) and the net
 // socket so we only force a reconnect when the connection is actually gone.
 function isConnectionError(e) {
   const code = (e && e.code) || '';
