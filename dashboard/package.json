@@ -1,6 +1,6 @@
 {
   "name": "claude-rpc-dashboard",
-  "version": "0.5.0",
+  "version": "0.13.7",
   "private": true,
   "description": "Desktop control panel for claude-rpc — daemon control, config editor, presence preview",
   "license": "MIT",
@@ -47,7 +47,9 @@
       {
         "from": "resources/bin",
         "to": "bin",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": "../config.example.json",
@@ -57,7 +59,12 @@
     "asar": true,
     "mac": {
       "target": [
-        { "target": "dmg", "arch": ["arm64"] }
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
       ],
       "category": "public.app-category.developer-tools",
       "identity": null,
@@ -68,8 +75,16 @@
     "dmg": {
       "title": "Claude RPC ${version}",
       "contents": [
-        { "x": 130, "y": 220 },
-        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
       ],
       "window": {
         "width": 540,
@@ -78,8 +93,18 @@
     },
     "win": {
       "target": [
-        { "target": "nsis", "arch": ["x64"] },
-        { "target": "portable", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
       ]
     },
     "nsis": {

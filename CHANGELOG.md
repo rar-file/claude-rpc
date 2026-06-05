@@ -2,6 +2,12 @@
 
 All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.13.7] - 2026-06-06
+
+**Fixed**
+
+- **Dashboard auto-update works again (and release binaries carry the right version).** The Electron dashboard's own `package.json` had sat at `0.5.0` since the 0.5 days, and electron-builder takes both artifact names and the auto-update feed (`latest*.yml`) from it — so every release since shipped `claude-rpc-0.5.0-*` binaries and a feed that told installed dashboards they were already current. Auto-update never fired. The release build now syncs the dashboard version from the root package before building, so this can't drift again; installed dashboards will see this release as an update.
+
 ## [0.13.6] - 2026-06-06
 
 **Security**

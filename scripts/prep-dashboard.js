@@ -7,7 +7,7 @@
 // step in a job that's pinned to the matching OS, and we want this script
 // to be a fast pre-flight check rather than a 30-second rebuild.
 
-import { existsSync, mkdirSync, copyFileSync, chmodSync, rmSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, copyFileSync, chmodSync, rmSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -40,3 +40,17 @@ copyFileSync(src, dest);
 if (!isWin) chmodSync(dest, 0o755);
 
 console.log(`✓ staged ${binName} → ${dest}`);
+
+// Sync the dashboard's version with the root package. electron-builder names
+// artifacts and writes the auto-update feed (latest*.yml) from the dashboard
+// package.json — when it drifted (it sat at 0.5.0 through v0.13.x), every
+// release shipped misnamed binaries and an updater feed that told installed
+// dashboards they were already current, so auto-update never fired.
+const rootPkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
+const dashPkgPath = join(ROOT, 'dashboard', 'package.json');
+const dashPkg = JSON.parse(readFileSync(dashPkgPath, 'utf8'));
+if (dashPkg.version !== rootPkg.version) {
+  dashPkg.version = rootPkg.version;
+  writeFileSync(dashPkgPath, JSON.stringify(dashPkg, null, 2) + '\n');
+  console.log(`✓ synced dashboard version → ${rootPkg.version}`);
+}
