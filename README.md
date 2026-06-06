@@ -38,8 +38,10 @@ A small Node daemon that takes the lifecycle events Claude Code already fires an
 **macOS / Linux / any Node 18+** — one command:
 
 ```sh
-npx claude-rpc setup
+npx claude-rpc@latest setup
 ```
+
+(The `@latest` matters — bare `npx claude-rpc` will happily reuse a stale cached copy.)
 
 That installs `claude-rpc` globally, wires the hooks into Claude Code, and starts the daemon — no separate `start` step. Open Claude Code in any project and the card appears within a second. Something looks wrong? `claude-rpc doctor` (or `claude-rpc doctor --fix` to auto-repair).
 

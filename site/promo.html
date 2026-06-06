@@ -182,7 +182,7 @@
         countUp($('n3'),48,1500,'M',g); countUp($('n4'),31,1400,'d',g);
       }},
     { el:'sD', dur:4600, on:async(g)=>{
-        await type($('cmd'),'npx claude-rpc setup',70,g); if(g!==GEN) return;
+        await type($('cmd'),'npx claude-rpc@latest setup',70,g); if(g!==GEN) return;
         $('cmdcur').style.display='none'; await sleep(500); if(g!==GEN) return; $('okline').style.opacity='1';
       }},
   ];

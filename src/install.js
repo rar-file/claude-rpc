@@ -425,7 +425,31 @@ function promoteNpxToGlobal() {
   return !r.error && r.status === 0;
 }
 
+// Best-effort registry check. npx serves stale cached copies without
+// warning, and promoteNpxToGlobal pins @VERSION — so a stale npx cache
+// would otherwise propagate itself into the global install silently, and
+// the user's next `claude-rpc profile …` hits "unknown command" with no
+// clue why. Warn loudly up front; never block setup on it (offline is fine).
+function warnIfStale() {
+  try {
+    const r = spawnSync('npm', ['view', 'claude-rpc', 'version'], {
+      encoding: 'utf8', timeout: 4000,
+      shell: process.platform === 'win32',   // npm is npm.cmd on Windows
+    });
+    const latest = (r.stdout || '').trim();
+    if (!latest || latest === VERSION) return;
+    const num = (v) => v.split('.').map((n) => parseInt(n, 10) || 0);
+    const [l, v] = [num(latest), num(VERSION)];
+    const newer = l[0] !== v[0] ? l[0] > v[0] : l[1] !== v[1] ? l[1] > v[1] : l[2] > v[2];
+    if (newer) {
+      console.warn(`  ! you're running v${VERSION} but v${latest} is published — npx may have served a stale cache.`);
+      console.warn(`    for the newest version, stop here and re-run:  npx claude-rpc@latest setup`);
+    }
+  } catch { /* offline or npm missing — a version check must never block setup */ }
+}
+
 export async function install({ exePath, withStartup = true } = {}) {
+  warnIfStale();
   if (IS_NPX) {
     if (!promoteNpxToGlobal()) {
       console.error('\n  ✗ Global install failed. Run this once, then you\'re set:');

@@ -110,7 +110,7 @@ function box(title, lines, minWidth = 64) {
   const termWidth = process.stdout.columns || 100;
   const maxAllowed = Math.max(40, termWidth - 2);
   const width = Math.min(maxAllowed, Math.max(minWidth, longest + 4, title.length + 8));
-  const top    = `${c.gray}┌─ ${c.reset}${c.bold}${title}${c.reset} ${c.gray}${'─'.repeat(Math.max(0, width - 4 - title.length))}┐${c.reset}`;
+  const top    = `${c.gray}┌─ ${c.reset}${c.bold}${title}${c.reset} ${c.gray}${'─'.repeat(Math.max(0, width - 5 - title.length))}┐${c.reset}`;
   const bottom = `${c.gray}└${'─'.repeat(width - 2)}┘${c.reset}`;
   console.log(top);
   for (const raw of lines) {
@@ -1060,16 +1060,46 @@ function readFlag(argv, name) {
 
 function profileStatus() {
   const p = (loadConfig().profile) || {};
+  const handleOk = lb.isValidHandle(p.handle);
+  const boardUrl = handleOk ? `https://claude-rpc.vercel.app/u/${encodeURIComponent(p.handle)}` : '';
+
   console.log('');
-  console.log(`  ${c.bold}claude-rpc profile${c.reset}  ${c.dim}— public leaderboard identity${c.reset}`);
+  console.log(`  ${c.bold}${c.magenta}◆ profile${c.reset}  ${c.dim}— public leaderboard identity${c.reset}`);
   console.log('');
-  console.log(`  state:    ${p.enabled ? `${c.green}on${c.reset}` : `${c.dim}off${c.reset}`}`);
-  console.log(`  handle:   ${p.handle ? c.cyan + p.handle + c.reset : c.dim + '(unset)' + c.reset}`);
-  console.log(`  name:     ${p.displayName ? p.displayName : c.dim + '(unset)' + c.reset}`);
-  console.log(`  github:   ${p.githubUser ? `${p.githubUser} ${c.dim}(verify to earn ✓)${c.reset}` : c.dim + '(unset — unverified)' + c.reset}`);
+
+  const githubLine = p.githubUser
+    ? `${p.githubUser}${p.verified ? `  ${c.green}✓ verified${c.reset}` : `  ${c.dim}(unverified)${c.reset}`}`
+    : `${c.dim}—${c.reset}`;
+  box('profile', [
+    pair('state',  p.enabled ? `${c.green}● publishing${c.reset}` : `${c.dim}○ off${c.reset}`, ''),
+    pair('handle', handleOk ? `${c.cyan}${p.handle}${c.reset}` : `${c.dim}(unset)${c.reset}`, ''),
+    pair('name',   p.displayName || `${c.dim}—${c.reset}`, ''),
+    pair('github', githubLine, ''),
+    ...(p.enabled && handleOk ? [pair('board', boardUrl, c.cyan)] : []),
+  ]);
   console.log('');
-  if (!p.handle) console.log(`  ${c.dim}set one with:${c.reset} claude-rpc profile set --handle <name> [--name "..."] [--github <user>]`);
-  else if (!p.enabled) console.log(`  ${c.dim}publish to the board with:${c.reset} claude-rpc profile on`);
+
+  // Setup checklist — same shape every time, so the user always sees where
+  // they are and the exact next command. This is the screen the daemon's
+  // breadcrumbs point back to.
+  const steps = [
+    { done: handleOk,    label: 'set a handle',      cmd: 'claude-rpc profile set --handle <name>', note: p.handle },
+    { done: !!p.enabled, label: 'enable publishing', cmd: 'claude-rpc profile on',                  note: 'daemon republishes automatically' },
+    { done: !!p.verified, label: 'verify on GitHub', cmd: 'claude-rpc profile verify',              note: p.githubUser ? `@${p.githubUser}` : '' },
+  ];
+  if (steps.every((s) => s.done)) {
+    console.log(`  ${c.green}✓${c.reset} all set — you're live at ${c.cyan}${boardUrl}${c.reset}`);
+  } else {
+    const nextIdx = steps.findIndex((s) => !s.done);
+    box('next steps', steps.map((s, i) => {
+      const mark = s.done ? `${c.green}✓${c.reset}` : (i === nextIdx ? `${c.yellow}○${c.reset}` : `${c.dim}○${c.reset}`);
+      const label = s.done ? `${c.dim}${s.label}${c.reset}` : `${c.bold}${s.label}${c.reset}`;
+      const tail = s.done
+        ? `${c.dim}${s.note || 'done'}${c.reset}`
+        : `${c.cyan}${s.cmd}${c.reset}${i === nextIdx ? `  ${c.dim}← next${c.reset}` : ''}`;
+      return `${mark} ${i + 1}. ${label}${' '.repeat(Math.max(1, 20 - s.label.length))}${tail}`;
+    }));
+  }
   console.log('');
 }
 
@@ -1094,6 +1124,9 @@ function profileSet(argv) {
       if (!u) return fail(`invalid GitHub username: ${rawGh}`, { code: EX_USER_ERROR });
       next.githubUser = u;
     }
+    // The ✓ belongs to the account that was verified — switching accounts
+    // means re-verifying.
+    if (next.githubUser !== (userCfg.profile || {}).githubUser) delete next.verified;
   }
 
   userCfg.profile = next;
@@ -1127,7 +1160,7 @@ function profileEnable(on) {
   console.log(`${c.green}✓${c.reset} leaderboard publishing ${on ? 'enabled' : 'disabled'}`);
   if (on) {
     console.log(`  ${c.dim}publish now with ${c.reset}${c.cyan}claude-rpc profile publish${c.reset}${c.dim} (or wait for the next daemon flush).${c.reset}`);
-    console.log(`  ${c.dim}earn the ✓ with ${c.reset}${c.cyan}claude-rpc profile verify${c.reset}${c.dim}.${c.reset}`);
+    profileStatus();
   }
 }
 
@@ -1158,10 +1191,12 @@ async function profileVerify() {
   const cfg = loadConfig();
   const profile = cfg.profile || {};
   const community = cfg.community || {};
+  // No --github required up front: the worker treats it as a hint only and
+  // takes the authoritative identity from whoever owns the proof gist —
+  // and publishing that gist already requires gh auth, so the account is
+  // known by the time it matters.
   if (!profile.githubUser) {
-    return fail('set a GitHub username first', {
-      hint: 'claude-rpc profile set --github <user>', code: EX_BAD_STATE,
-    });
+    console.log(`${c.dim}no --github set — your verified identity will be the account that owns the proof gist.${c.reset}`);
   }
   if (!community.instanceId) {
     return fail('enable the profile first', { hint: 'claude-rpc profile on', code: EX_BAD_STATE });
@@ -1186,7 +1221,7 @@ async function profileVerify() {
       await flushProfile(cfg);
     }
     console.log(`${c.dim}requesting a verification token…${c.reset}`);
-    const start = await post('/verify/start', { instanceId: community.instanceId, githubUser: profile.githubUser });
+    const start = await post('/verify/start', { instanceId: community.instanceId, githubUser: profile.githubUser || null });
     if (!start.json?.token) return fail(`verify/start failed: ${start.json?.error || start.status}`, { code: EX_SYS_ERROR });
     const token = start.json.token;
 
@@ -1206,13 +1241,11 @@ async function profileVerify() {
     const check = await post('/verify/check', { instanceId: community.instanceId, gistId: gist.id });
     if (check.json?.verified) {
       const who = check.json.githubUser || gist.owner || profile.githubUser;
-      // Persist the authoritative owner so the local profile + future publishes
-      // match what got verified.
-      if (who && who !== profile.githubUser) {
-        const userCfg = readJson(CONFIG_PATH, {});
-        userCfg.profile = { ...(userCfg.profile || {}), githubUser: who };
-        writeFileSync(CONFIG_PATH, JSON.stringify(userCfg, null, 2));
-      }
+      // Persist the authoritative owner + a local verified marker so the
+      // profile checklist and future publishes match what got verified.
+      const userCfg = readJson(CONFIG_PATH, {});
+      userCfg.profile = { ...(userCfg.profile || {}), ...(who ? { githubUser: who } : {}), verified: true };
+      writeFileSync(CONFIG_PATH, JSON.stringify(userCfg, null, 2));
       console.log(`${c.green}✓${c.reset} verified as @${who} — you'll show the ✓ on the board.`);
       if (who && profile.githubUser && who.toLowerCase() !== profile.githubUser.toLowerCase()) {
         console.log(`  ${c.dim}(your gist is owned by @${who}, so the profile now uses that account.)${c.reset}`);
@@ -1579,8 +1612,11 @@ const packagedDefault = IS_PACKAGED && !cmd;
         // click with no args" install-and-start flow.
         overview();
       } else {
-        fail(`unknown command: ${cmd}`,
-          { hint: 'run `claude-rpc --help` for the full list', code: EX_USER_ERROR });
+        // Version in the error line is deliberate: the #1 cause of "unknown
+        // command" in the wild is a stale global install resolving instead of
+        // the version the user read the docs for. Make the skew visible.
+        fail(`unknown command: ${cmd}  (claude-rpc v${VERSION})`,
+          { hint: 'run `claude-rpc --help` for the full list — if this command should exist, update first: npm install -g claude-rpc@latest', code: EX_USER_ERROR });
       }
     }
   }
