@@ -114,6 +114,23 @@ test('server: every documented route returns 200 with sane content', async (t) =
     const r = await fetchJson(PORT, '/totally-not-a-route');
     assert.equal(r.status, 404);
   }
+
+  // Malformed percent-encoding must return 400, not crash the server.
+  {
+    const r = await fetchJson(PORT, '/api/project/%');
+    assert.equal(r.status, 400, 'malformed /api/project/% returns 400');
+    assert.deepEqual(JSON.parse(r.body), { error: 'bad request' });
+  }
+  {
+    const r = await fetchJson(PORT, '/api/day/%');
+    assert.equal(r.status, 400, 'malformed /api/day/% returns 400');
+    assert.deepEqual(JSON.parse(r.body), { error: 'bad request' });
+  }
+  // Verify server is still alive after the bad requests.
+  {
+    const r = await fetchJson(PORT, '/api/state');
+    assert.equal(r.status, 200, 'server still alive after malformed requests');
+  }
 });
 
 // Direct unit test of the data-shape helpers, separate from the HTTP

@@ -7,7 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-const { SYM_OK, SYM_FAIL, SYM_WARN, SYM_INFO, EX_OK, EX_USER_ERROR, EX_SYS_ERROR, EX_BAD_STATE, ok, info, warn, check, c } =
+const { SYM_OK, SYM_FAIL, SYM_WARN, SYM_INFO, EX_OK, EX_USER_ERROR, EX_SYS_ERROR, EX_BAD_STATE, ok, info, warn, check, c, tailLines } =
   await import('../src/ui.js');
 
 test('symbol constants are non-empty', () => {
@@ -72,4 +72,42 @@ test('check routes pass/fail/warn and prints hint only on non-pass', () => {
   const fail = capture(() => check('two', 'fail', 'detail', 'fix it'));
   assert.match(fail.out, /two/);
   assert.match(fail.out, /fix it/);
+});
+
+// tailLines — regression tests for the trailing-newline bug (issue #14)
+test('tailLines: file ending with newline returns correct lines', () => {
+  const raw = 'a\nb\nc\n';
+  assert.deepEqual(tailLines(raw), ['a', 'b', 'c']);
+});
+
+test('tailLines: file without trailing newline preserves last line (regression)', () => {
+  const raw = 'a\nb\nc';
+  assert.deepEqual(tailLines(raw), ['a', 'b', 'c']);
+});
+
+test('tailLines: respects n limit with trailing newline', () => {
+  const raw = Array.from({ length: 40 }, (_, i) => `line${i}`).join('\n') + '\n';
+  const result = tailLines(raw);
+  assert.equal(result.length, 30);
+  assert.equal(result[0], 'line10');
+  assert.equal(result[29], 'line39');
+});
+
+test('tailLines: respects n limit without trailing newline', () => {
+  const raw = Array.from({ length: 40 }, (_, i) => `line${i}`).join('\n');
+  const result = tailLines(raw);
+  assert.equal(result.length, 30);
+  assert.equal(result[29], 'line39');
+});
+
+test('tailLines: empty string returns empty array', () => {
+  assert.deepEqual(tailLines(''), []);
+});
+
+test('tailLines: single line with newline', () => {
+  assert.deepEqual(tailLines('only\n'), ['only']);
+});
+
+test('tailLines: single line without newline', () => {
+  assert.deepEqual(tailLines('only'), ['only']);
 });

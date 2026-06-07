@@ -3,6 +3,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const { spawn, spawnSync } = require('node:child_process');
 const os = require('node:os');
+const resolveRpcPort = require('./port.js');
 
 // Lazy-require electron-updater so dev mode (where the dep may not be
 // installed yet) doesn't crash on import. It's only meaningful in a
@@ -103,14 +104,25 @@ function defaultUserConfigPath() {
 
 function findConfigPath() {
   const exeDir = path.dirname(process.execPath);
-  const candidates = [
-    path.join(process.cwd(), 'config.json'),
-    path.join(exeDir, 'config.json'),
-    path.join(exeDir, '..', 'config.json'),
-    path.resolve(__dirname, '..', 'config.json'),
-    path.resolve(__dirname, '..', '..', 'config.json'),
-    defaultUserConfigPath(),
-  ];
+  const userConfig = defaultUserConfigPath();
+  // In packaged mode the user-config dir is what the CLI reads; probe it first
+  // so a stray cwd/config.json can't shadow it and make saves appear to do
+  // nothing. In dev mode the original order is preserved so `electron .` from
+  // the repo root still picks up the local config.json for iteration.
+  const candidates = app.isPackaged
+    ? [
+        userConfig,
+        path.join(exeDir, 'config.json'),
+        path.join(exeDir, '..', 'config.json'),
+      ]
+    : [
+        path.join(process.cwd(), 'config.json'),
+        path.join(exeDir, 'config.json'),
+        path.join(exeDir, '..', 'config.json'),
+        path.resolve(__dirname, '..', 'config.json'),
+        path.resolve(__dirname, '..', '..', 'config.json'),
+        userConfig,
+      ];
   for (const c of candidates) {
     try { if (fs.existsSync(c) && fs.statSync(c).isFile()) return c; } catch {}
   }
@@ -208,7 +220,7 @@ async function rebuildTrayMenu() {
     { label: 'Open settings', click: () => showWindow() },
     { label: 'Open web dashboard', click: async () => {
       await runCli(['serve'], { detached: true });
-      shell.openExternal(`http://127.0.0.1:${process.env.CLAUDE_RPC_PORT || 47474}`);
+      shell.openExternal(`http://127.0.0.1:${resolveRpcPort()}`);
     } },
     { type: 'separator' },
     { label: 'Start daemon',   enabled: !running, click: async () => { await runCli(['start'], { detached: true }); setTimeout(rebuildTrayMenu, 800); } },
@@ -578,6 +590,8 @@ ipcMain.handle('start-serve', async () => {
   serveChild.unref();
   return { ok: true };
 });
+
+ipcMain.handle('get-rpc-port', () => resolveRpcPort());
 
 ipcMain.handle('open-external', async (_, url) => {
   // Only ever hand web URLs to the OS — a compromised renderer must not be

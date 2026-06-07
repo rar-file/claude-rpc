@@ -437,7 +437,7 @@ function collectTiming(into) {
     const key = row.dataset.key;
     const mul = Number(row.dataset.mul) || 1;
     const raw = row.querySelector('input').value;
-    if (raw === '') continue;
+    if (raw === '') { delete into[key]; continue; }
     const n = Number(raw);
     if (Number.isFinite(n) && n > 0) into[key] = Math.round(n * mul);
   }
@@ -489,7 +489,8 @@ async function refreshLog() {
 
 // ── Stats tab ────────────────────────────────────────────────────────────────
 async function ensureServeRunning() {
-  const url = 'http://127.0.0.1:47474';
+  const port = await window.api.getRpcPort();
+  const url = `http://127.0.0.1:${port}`;
   $('statsUrl').textContent = url;
   if (serveProc) {
     $('statsIframe').src = url;
@@ -500,7 +501,8 @@ async function ensureServeRunning() {
   setTimeout(() => { $('statsIframe').src = url; }, 600);
 }
 $('statsOpenExternal').addEventListener('click', async () => {
-  await window.api.openExternal('http://127.0.0.1:47474');
+  const port = await window.api.getRpcPort();
+  await window.api.openExternal(`http://127.0.0.1:${port}`);
 });
 
 async function exportData(format) {
