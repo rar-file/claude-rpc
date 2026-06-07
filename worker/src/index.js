@@ -300,6 +300,13 @@ const GH_API                = 'https://api.github.com';
 const PF_KEY     = (id) => `pf:${id}`;
 const HANDLE_KEY = (h)  => `handle:${h}`;
 const VERIFY_KEY = (id) => `verify:${id}`;
+// A single KV blob keyed `board:index` holds { [instanceId]: boardEntry } for
+// every profile ever written. handleLeaderboard reads this one blob and ranks
+// in-memory — ordering is by score, not by lexicographic pf: key order — so an
+// attacker cannot crowd out real users by minting low-sorting instanceIds.
+// Unverified pf: entries also get a 90-day TTL so squatted profiles expire.
+const BOARD_INDEX_KEY           = 'board:index';
+const PF_UNVERIFIED_TTL_SECONDS = 90 * 24 * 60 * 60;
 
 // Server-side identity normalizers. Mirrors src/leaderboard.js; the worker is a
 // separate package so it can't import that module — keep the rules in sync.
@@ -353,6 +360,26 @@ async function getProfile(env, id) {
   try { return JSON.parse(raw); } catch { return null; }
 }
 
+async function getBoardIndex(env) {
+  const raw = await env.TOTALS.get(BOARD_INDEX_KEY);
+  if (!raw) return {};
+  try { return JSON.parse(raw); } catch { return {}; }
+}
+
+// Lightweight summary kept inside board:index — everything handleLeaderboard needs.
+function boardEntry(p) {
+  return {
+    handle:      p.handle,
+    displayName: p.displayName || null,
+    githubUser:  p.githubUser  || null,
+    verified:    !!p.verified,
+    tokens:      p.tokens   || 0,
+    sessions:    p.sessions || 0,
+    activeMs:    p.activeMs || 0,
+    streak:      p.streak   || 0,
+  };
+}
+
 function publicProfile(p) {
   return {
     handle: p.handle, displayName: p.displayName || null, githubUser: p.githubUser || null,
@@ -401,8 +428,19 @@ export async function handleProfile(request, env) {
     createdAt:   prev.createdAt || now,
     updatedAt:   now,
   };
-  await env.TOTALS.put(PF_KEY(body.instanceId), JSON.stringify(next));
+  // Unverified profiles get a 90-day TTL so squatted entries expire automatically;
+  // verified profiles are permanent.
+  const pfOpts = next.verified ? {} : { expirationTtl: PF_UNVERIFIED_TTL_SECONDS };
+  await env.TOTALS.put(PF_KEY(body.instanceId), JSON.stringify(next), pfOpts);
   await env.TOTALS.put(HANDLE_KEY(handle), body.instanceId);
+
+  // Update the score-ordered index. Best-effort read-modify-write (same race
+  // tolerance as addInt — acceptable for a vanity leaderboard).
+  try {
+    const index = await getBoardIndex(env);
+    index[body.instanceId] = boardEntry(next);
+    await env.TOTALS.put(BOARD_INDEX_KEY, JSON.stringify(index));
+  } catch { /* best-effort */ }
 
   return new Response(JSON.stringify({ ok: true, profile: publicProfile(next) }), {
     headers: { ...CORS, 'Content-Type': 'application/json' },
@@ -428,18 +466,14 @@ export async function handleLeaderboard(url, env) {
   const key = allowed.has(metric) ? metric.replace('activems', 'activeMs') : 'tokens';
   const limit = Math.min(BOARD_MAX, Math.max(1, Math.floor(Number(url.searchParams.get('limit')) || 50)));
 
-  const rows = [];
+  let rows = [];
   try {
-    // Bound the fan-out: every listed key costs a KV get, instanceIds are
-    // attacker-mintable, and Workers cap subrequests at 1000 per request —
-    // an uncapped list() (default 1000 keys) would blow that budget and
-    // 500 sequential gets is already the practical ceiling per hit.
-    const { keys } = await env.TOTALS.list({ prefix: 'pf:', limit: 500 });
-    for (const { name } of keys) {
-      const p = await getProfile(env, name.slice(3));
-      if (p && p.handle) rows.push(publicProfile(p));
-    }
-  } catch { /* list unsupported / empty → [] */ }
+    // Read the maintained board:index instead of listing pf: keys.
+    // Ranking is by score, not by lexicographic KV key order, so an attacker
+    // cannot crowd out real users by minting low-sorting instanceIds.
+    const index = await getBoardIndex(env);
+    rows = Object.values(index).filter((e) => e && e.handle);
+  } catch { /* empty → [] */ }
 
   // Hybrid ranking: verified first, then by metric. Unverified token counts are
   // capped for ranking so a fake entry can't top the board.
@@ -545,8 +579,15 @@ export async function handleVerifyCheck(request, env, fetchImpl = fetch) {
   if (!prof) return jsonError(409, 'create your profile first (POST /profile)');
   prof.verified = true;
   prof.githubUser = matchedOwner; // authoritative: whoever actually owns the gist
+  // Verified profiles are permanent — no TTL.
   await env.TOTALS.put(PF_KEY(body.instanceId), JSON.stringify(prof));
   try { await env.TOTALS.delete(VERIFY_KEY(body.instanceId)); } catch { /* best-effort */ }
+  // Reflect verification in the board index immediately.
+  try {
+    const index = await getBoardIndex(env);
+    index[body.instanceId] = boardEntry(prof);
+    await env.TOTALS.put(BOARD_INDEX_KEY, JSON.stringify(index));
+  } catch { /* best-effort */ }
   return new Response(JSON.stringify({ ok: true, verified: true, githubUser: matchedOwner }), {
     headers: { ...CORS, 'Content-Type': 'application/json' },
   });

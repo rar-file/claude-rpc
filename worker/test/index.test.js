@@ -371,15 +371,94 @@ test('handleProfile: handle uniqueness is enforced (409)', async () => {
 
 test('handleLeaderboard: verified ranks first, then by metric', async () => {
   const env = makeEnv();
-  await env.TOTALS.put('pf:11111111-1111-1111-1111-111111111111',
-    JSON.stringify({ handle: 'whale', verified: false, tokens: 9_999_999_999, sessions: 1 }));
-  await env.TOTALS.put('pf:22222222-2222-2222-2222-222222222222',
-    JSON.stringify({ handle: 'realdev', verified: true, tokens: 5000, sessions: 10 }));
+  // Populate board:index directly (the source of truth for ranking).
+  await env.TOTALS.put('board:index', JSON.stringify({
+    '11111111-1111-1111-1111-111111111111': { handle: 'whale', verified: false, tokens: 9_999_999_999, sessions: 1, activeMs: 0, streak: 0, displayName: null, githubUser: null },
+    '22222222-2222-2222-2222-222222222222': { handle: 'realdev', verified: true, tokens: 5000, sessions: 10, activeMs: 0, streak: 0, displayName: null, githubUser: null },
+  }));
   const res = await handleLeaderboard(new URL('http://localhost/leaderboard?metric=tokens'), env);
   const j = await res.json();
   assert.equal(j.leaderboard[0].handle, 'realdev'); // verified wins despite far fewer tokens
   assert.equal(j.leaderboard[0].rank, 1);
   assert.equal(j.leaderboard[1].handle, 'whale');
+});
+
+test('handleLeaderboard: score-based ranking is immune to low-sorting instanceId squatting', async () => {
+  // Attacker mints 5 low-sorting IDs (all zeros → sorts before any real UUID).
+  // Real user has high tokens but a later-sorting ID.
+  const index = {};
+  for (let i = 1; i <= 5; i++) {
+    const id = `00000000-0000-0000-0000-${String(i).padStart(12, '0')}`;
+    index[id] = { handle: `fake${i}`, verified: false, tokens: 0, sessions: 0, activeMs: 0, streak: 0, displayName: null, githubUser: null };
+  }
+  index['ffffffff-ffff-ffff-ffff-ffffffffffff'] = {
+    handle: 'realuser', verified: false, tokens: 1_000_000, sessions: 50,
+    activeMs: 100000, streak: 30, displayName: null, githubUser: null,
+  };
+  const env = makeEnv();
+  await env.TOTALS.put('board:index', JSON.stringify(index));
+  const res = await handleLeaderboard(new URL('http://localhost/leaderboard'), env);
+  const j = await res.json();
+  assert.equal(j.leaderboard[0].handle, 'realuser', 'real user ranks #1 regardless of key order');
+  assert.equal(j.leaderboard[0].rank, 1);
+});
+
+test('handleProfile: updates board:index on each write', async () => {
+  const env = makeEnv();
+  await handleProfile(profileRequest(profileBody), env);
+  const raw = await env.TOTALS.get('board:index');
+  assert.ok(raw, 'board:index written');
+  const index = JSON.parse(raw);
+  assert.ok(index[profileBody.instanceId], 'entry for instanceId present');
+  assert.equal(index[profileBody.instanceId].handle, 'archer');
+  assert.equal(index[profileBody.instanceId].tokens, 1000);
+  assert.equal(index[profileBody.instanceId].verified, false);
+});
+
+test('handleProfile: unverified pf: key gets a TTL; verified pf: key does not', async () => {
+  const env = makeEnv();
+  // Unverified write.
+  await handleProfile(profileRequest(profileBody), env);
+  const pfKey = `pf:${profileBody.instanceId}`;
+  assert.ok(env.TOTALS.store.get(pfKey).ttl > 0, 'unverified profile has a TTL');
+
+  // Verify the profile.
+  await env.TOTALS.put(`verify:${profileBody.instanceId}`,
+    JSON.stringify({ githubUser: 'octocat', token: 'vrf_ttltest', ts: Date.now() }));
+  const fakeFetch = async (url) => {
+    if (url.endsWith('/gists/def456')) {
+      return { ok: true, json: async () => ({ owner: { login: 'octocat' }, files: { 'p.txt': { content: 'vrf_ttltest' } } }) };
+    }
+    return { ok: false };
+  };
+  const req = new Request('http://localhost/verify/check', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ instanceId: profileBody.instanceId, gistId: 'def456' }),
+  });
+  await handleVerifyCheck(req, env, fakeFetch);
+  assert.equal(env.TOTALS.store.get(pfKey).ttl, null, 'verified profile has no TTL');
+});
+
+test('handleVerifyCheck: updates board:index with verified=true', async () => {
+  const env = makeEnv();
+  await handleProfile(profileRequest(profileBody), env);
+  await env.TOTALS.put(`verify:${profileBody.instanceId}`,
+    JSON.stringify({ githubUser: 'octocat', token: 'vrf_idxtest', ts: Date.now() }));
+  // gist ID must be hex only (safeGistId enforces /^[0-9a-f]{6,64}$/i).
+  const fakeFetch = async (url) => {
+    if (url.endsWith('/gists/abc789def012')) {
+      return { ok: true, json: async () => ({ owner: { login: 'octocat' }, files: { 'p.txt': { content: 'vrf_idxtest' } } }) };
+    }
+    return { ok: false };
+  };
+  const req = new Request('http://localhost/verify/check', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ instanceId: profileBody.instanceId, gistId: 'abc789def012' }),
+  });
+  await handleVerifyCheck(req, env, fakeFetch);
+  const index = JSON.parse(await env.TOTALS.get('board:index'));
+  assert.equal(index[profileBody.instanceId].verified, true, 'index reflects verified=true');
+  assert.equal(index[profileBody.instanceId].githubUser, 'octocat');
 });
 
 test('handleVerifyStart: issues a vrf_ token for a valid github user', async () => {
