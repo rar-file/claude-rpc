@@ -25,7 +25,7 @@ import { addPrivateCwd, removePrivateCwd, listPrivateCwds, resolveVisibility } f
 import { loadConfig, hasUserConfig } from './config.js';
 import * as lb from './leaderboard.js';
 import { VERSION } from './version.js';
-import { fail, EX_USER_ERROR, EX_BAD_STATE, EX_SYS_ERROR } from './ui.js';
+import { fail, tailLines, EX_USER_ERROR, EX_BAD_STATE, EX_SYS_ERROR } from './ui.js';
 import { randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline';
 import { basename } from 'node:path';
@@ -1293,8 +1293,7 @@ function tailLog() {
     return;
   }
   // Print the last ~30 lines, then follow.
-  const raw = readFileSync(LOG_PATH, 'utf8').split('\n');
-  const tail = raw.slice(-31, -1);
+  const tail = tailLines(readFileSync(LOG_PATH, 'utf8'));
   for (const line of tail) process.stdout.write(line + '\n');
   let lastSize = readFileSync(LOG_PATH).length;
   console.log(`${c.dim}-- tailing ${LOG_PATH} (Ctrl-C to stop) --${c.reset}`);

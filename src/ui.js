@@ -72,6 +72,16 @@ export function fail(label, { hint = 'run `claude-rpc doctor` for a full diagnos
   process.exit(code);
 }
 
+// Return the last n lines of a log file's raw text, trimming the trailing
+// empty element that split('\n') produces when the file ends with a newline.
+// When the file lacks a trailing newline the last element is the last real
+// line — the old raw.slice(-31,-1) pattern silently dropped it.
+export function tailLines(raw, n = 30) {
+  const lines = raw.split('\n');
+  if (lines.at(-1) === '') lines.pop();
+  return lines.slice(-n);
+}
+
 // Compatibility with doctor.js's existing API. Same `check(label, status,
 // detail, hint)` signature; doctor.js can switch its private copy out for
 // this without behavior change.
