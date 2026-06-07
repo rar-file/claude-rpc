@@ -314,6 +314,8 @@ npm run build:exe         # SEA single-file binary for the current OS
 
 Tests are `node --test` with zero deps. The CI pipeline ([release.yml](.github/workflows/release.yml)) runs the suite (plus the Cloudflare Worker's own tests) across Node 18/20/22 and gates the matrix build and the npm publish behind it. Every pure/logic module in `src/*.js` is unit-tested, including the MCP transport and the SVG renderers; the long-running daemon, the TUI, and the CLI dispatcher are covered by integration and manual smoke testing rather than unit tests.
 
+Where the project is headed (and what it will deliberately never do) lives in [`ROADMAP.md`](ROADMAP.md).
+
 ## license
 
 [MIT](LICENSE) © Archer Simmons
