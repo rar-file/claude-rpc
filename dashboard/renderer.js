@@ -437,7 +437,7 @@ function collectTiming(into) {
     const key = row.dataset.key;
     const mul = Number(row.dataset.mul) || 1;
     const raw = row.querySelector('input').value;
-    if (raw === '') continue;
+    if (raw === '') { delete into[key]; continue; }
     const n = Number(raw);
     if (Number.isFinite(n) && n > 0) into[key] = Math.round(n * mul);
   }
