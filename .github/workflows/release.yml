@@ -181,7 +181,7 @@ jobs:
             exit 1
           fi
 
-      # The package has a single runtime dep and no build step — `npm publish`
+      # The package has zero runtime dependencies and no build step — `npm publish`
       # only needs the files listed in package.json's `files` field. No
       # `npm install` required before publishing.
       #
