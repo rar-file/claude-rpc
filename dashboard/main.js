@@ -104,14 +104,25 @@ function defaultUserConfigPath() {
 
 function findConfigPath() {
   const exeDir = path.dirname(process.execPath);
-  const candidates = [
-    path.join(process.cwd(), 'config.json'),
-    path.join(exeDir, 'config.json'),
-    path.join(exeDir, '..', 'config.json'),
-    path.resolve(__dirname, '..', 'config.json'),
-    path.resolve(__dirname, '..', '..', 'config.json'),
-    defaultUserConfigPath(),
-  ];
+  const userConfig = defaultUserConfigPath();
+  // In packaged mode the user-config dir is what the CLI reads; probe it first
+  // so a stray cwd/config.json can't shadow it and make saves appear to do
+  // nothing. In dev mode the original order is preserved so `electron .` from
+  // the repo root still picks up the local config.json for iteration.
+  const candidates = app.isPackaged
+    ? [
+        userConfig,
+        path.join(exeDir, 'config.json'),
+        path.join(exeDir, '..', 'config.json'),
+      ]
+    : [
+        path.join(process.cwd(), 'config.json'),
+        path.join(exeDir, 'config.json'),
+        path.join(exeDir, '..', 'config.json'),
+        path.resolve(__dirname, '..', 'config.json'),
+        path.resolve(__dirname, '..', '..', 'config.json'),
+        userConfig,
+      ];
   for (const c of candidates) {
     try { if (fs.existsSync(c) && fs.statSync(c).isFile()) return c; } catch {}
   }
