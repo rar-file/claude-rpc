@@ -489,7 +489,8 @@ async function refreshLog() {
 
 // ── Stats tab ────────────────────────────────────────────────────────────────
 async function ensureServeRunning() {
-  const url = 'http://127.0.0.1:47474';
+  const port = await window.api.getRpcPort();
+  const url = `http://127.0.0.1:${port}`;
   $('statsUrl').textContent = url;
   if (serveProc) {
     $('statsIframe').src = url;
@@ -500,7 +501,8 @@ async function ensureServeRunning() {
   setTimeout(() => { $('statsIframe').src = url; }, 600);
 }
 $('statsOpenExternal').addEventListener('click', async () => {
-  await window.api.openExternal('http://127.0.0.1:47474');
+  const port = await window.api.getRpcPort();
+  await window.api.openExternal(`http://127.0.0.1:${port}`);
 });
 
 async function exportData(format) {

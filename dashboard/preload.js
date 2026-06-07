@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('api', {
   exportData:    (format) => ipcRenderer.invoke('export-data', format),
   listWorkspaces: () => ipcRenderer.invoke('list-workspaces'),
   setWorkspaceVisibility: (cwd, level) => ipcRenderer.invoke('set-workspace-visibility', { cwd, level }),
+  getRpcPort:    () => ipcRenderer.invoke('get-rpc-port'),
   openExternal:  (url) => ipcRenderer.invoke('open-external', url),
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
   onUpdateEvent:   (handler) => {

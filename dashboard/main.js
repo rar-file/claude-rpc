@@ -3,6 +3,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const { spawn, spawnSync } = require('node:child_process');
 const os = require('node:os');
+const resolveRpcPort = require('./port.js');
 
 // Lazy-require electron-updater so dev mode (where the dep may not be
 // installed yet) doesn't crash on import. It's only meaningful in a
@@ -208,7 +209,7 @@ async function rebuildTrayMenu() {
     { label: 'Open settings', click: () => showWindow() },
     { label: 'Open web dashboard', click: async () => {
       await runCli(['serve'], { detached: true });
-      shell.openExternal(`http://127.0.0.1:${process.env.CLAUDE_RPC_PORT || 47474}`);
+      shell.openExternal(`http://127.0.0.1:${resolveRpcPort()}`);
     } },
     { type: 'separator' },
     { label: 'Start daemon',   enabled: !running, click: async () => { await runCli(['start'], { detached: true }); setTimeout(rebuildTrayMenu, 800); } },
@@ -578,6 +579,8 @@ ipcMain.handle('start-serve', async () => {
   serveChild.unref();
   return { ok: true };
 });
+
+ipcMain.handle('get-rpc-port', () => resolveRpcPort());
 
 ipcMain.handle('open-external', async (_, url) => {
   // Only ever hand web URLs to the OS — a compromised renderer must not be
