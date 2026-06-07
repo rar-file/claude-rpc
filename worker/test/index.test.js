@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 
 const { validateReport, handleReport, handleBadge, handleJson, handleRef, handleRefs,
   validateProfile, handleProfile, handleLeaderboard, handleVerifyStart, handleVerifyCheck,
-  handleProfileGet } = await import('../src/index.js');
+  handleProfileGet, pruneBoardIndex } = await import('../src/index.js');
 const worker = (await import('../src/index.js')).default;
 
 function makeKv() {
@@ -401,6 +401,35 @@ test('handleLeaderboard: score-based ranking is immune to low-sorting instanceId
   const j = await res.json();
   assert.equal(j.leaderboard[0].handle, 'realuser', 'real user ranks #1 regardless of key order');
   assert.equal(j.leaderboard[0].rank, 1);
+});
+
+test('pruneBoardIndex: drops stale unverified entries, keeps verified and fresh ones', () => {
+  const now = Date.now();
+  const STALE = now - 91 * 24 * 60 * 60 * 1000; // older than the 90-day pf: TTL
+  const index = {
+    'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa': { handle: 'staleunv', verified: false, updatedAt: STALE },
+    'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb': { handle: 'oldveri',  verified: true,  updatedAt: STALE },
+    'cccccccc-cccc-cccc-cccc-cccccccccccc': { handle: 'freshunv', verified: false, updatedAt: now },
+    'dddddddd-dddd-dddd-dddd-dddddddddddd': null, // corrupt entry → dropped
+  };
+  pruneBoardIndex(index, now);
+  assert.deepEqual(Object.keys(index).sort(), [
+    'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+    'cccccccc-cccc-cccc-cccc-cccccccccccc',
+  ], 'stale unverified + corrupt entries pruned; verified and fresh kept');
+});
+
+test('handleProfile: write prunes stale unverified index entries (no unbounded bloat)', async () => {
+  const env = makeEnv();
+  const STALE = Date.now() - 91 * 24 * 60 * 60 * 1000;
+  await env.TOTALS.put('board:index', JSON.stringify({
+    '99999999-9999-9999-9999-999999999999': { handle: 'squatter', verified: false, tokens: 0, updatedAt: STALE },
+  }));
+  await handleProfile(profileRequest(profileBody), env);
+  const index = JSON.parse(await env.TOTALS.get('board:index'));
+  assert.ok(!index['99999999-9999-9999-9999-999999999999'], 'stale squatter entry pruned on write');
+  assert.ok(index[profileBody.instanceId], 'new entry present');
+  assert.ok(index[profileBody.instanceId].updatedAt > 0, 'entries carry updatedAt for future pruning');
 });
 
 test('handleProfile: updates board:index on each write', async () => {

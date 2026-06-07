@@ -377,7 +377,21 @@ function boardEntry(p) {
     sessions:    p.sessions || 0,
     activeMs:    p.activeMs || 0,
     streak:      p.streak   || 0,
+    updatedAt:   p.updatedAt || Date.now(),
   };
+}
+
+// Mirror the pf: TTL inside the index: unverified pf: keys expire after 90
+// days, but their index entries would otherwise live forever — which turns
+// the (fixed) eviction attack into a slow bloat attack on the single
+// board:index blob. Drop unverified entries whose last write is older than
+// the pf: TTL; verified profiles are permanent in both places.
+export function pruneBoardIndex(index, now = Date.now()) {
+  const cutoff = now - PF_UNVERIFIED_TTL_SECONDS * 1000;
+  for (const [id, e] of Object.entries(index)) {
+    if (!e || (!e.verified && (e.updatedAt || 0) < cutoff)) delete index[id];
+  }
+  return index;
 }
 
 function publicProfile(p) {
@@ -435,9 +449,10 @@ export async function handleProfile(request, env) {
   await env.TOTALS.put(HANDLE_KEY(handle), body.instanceId);
 
   // Update the score-ordered index. Best-effort read-modify-write (same race
-  // tolerance as addInt — acceptable for a vanity leaderboard).
+  // tolerance as addInt — acceptable for a vanity leaderboard). Pruning on
+  // every write keeps the blob bounded without a scheduled job.
   try {
-    const index = await getBoardIndex(env);
+    const index = pruneBoardIndex(await getBoardIndex(env));
     index[body.instanceId] = boardEntry(next);
     await env.TOTALS.put(BOARD_INDEX_KEY, JSON.stringify(index));
   } catch { /* best-effort */ }
@@ -584,7 +599,7 @@ export async function handleVerifyCheck(request, env, fetchImpl = fetch) {
   try { await env.TOTALS.delete(VERIFY_KEY(body.instanceId)); } catch { /* best-effort */ }
   // Reflect verification in the board index immediately.
   try {
-    const index = await getBoardIndex(env);
+    const index = pruneBoardIndex(await getBoardIndex(env));
     index[body.instanceId] = boardEntry(prof);
     await env.TOTALS.put(BOARD_INDEX_KEY, JSON.stringify(index));
   } catch { /* best-effort */ }
