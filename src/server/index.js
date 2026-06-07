@@ -30,6 +30,10 @@ function parseUrl(rawUrl) {
   return { path: url.pathname, query: Object.fromEntries(url.searchParams) };
 }
 
+function safeDecode(s) {
+  try { return decodeURIComponent(s); } catch { return null; }
+}
+
 // Loopback-only Host allowlist. Binding to 127.0.0.1 blocks the LAN, but not
 // DNS rebinding: a malicious page can point its own hostname at 127.0.0.1 and
 // become "same-origin" with this server, then read /api/export.json. Rejecting
@@ -64,7 +68,8 @@ const server = createServer((req, res) => {
   // Project drilldown. Path-prefix dispatch (the project name is in the
   // URL itself, not in a query string).
   if (req.method === 'GET' && path.startsWith('/api/project/')) {
-    const name = decodeURIComponent(path.slice('/api/project/'.length));
+    const name = safeDecode(path.slice('/api/project/'.length));
+    if (name === null) { res.writeHead(400, JSON_HEADERS).end(JSON.stringify({ error: 'bad request' })); return; }
     const result = projectDrilldown(name);
     res.writeHead(result ? 200 : 404, JSON_HEADERS);
     res.end(JSON.stringify(result || { error: 'not found' }));
@@ -73,7 +78,8 @@ const server = createServer((req, res) => {
 
   // Day detail. Same pattern — day key in the URL path.
   if (req.method === 'GET' && path.startsWith('/api/day/')) {
-    const day = decodeURIComponent(path.slice('/api/day/'.length));
+    const day = safeDecode(path.slice('/api/day/'.length));
+    if (day === null) { res.writeHead(400, JSON_HEADERS).end(JSON.stringify({ error: 'bad request' })); return; }
     const result = dayDetail(day);
     res.writeHead(result ? 200 : 404, JSON_HEADERS);
     res.end(JSON.stringify(result || { error: 'not found' }));
