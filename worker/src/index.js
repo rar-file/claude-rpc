@@ -436,8 +436,14 @@ export async function handleLeaderboard(url, env) {
     // 500 sequential gets is already the practical ceiling per hit.
     const { keys } = await env.TOTALS.list({ prefix: 'pf:', limit: 500 });
     for (const { name } of keys) {
-      const p = await getProfile(env, name.slice(3));
-      if (p && p.handle) rows.push(publicProfile(p));
+      const instanceId = name.slice(3);
+      const p = await getProfile(env, instanceId);
+      // Repair: two concurrent publishes with the same handle both pass the
+      // pre-write owner check (KV has no CAS). Drop rows whose handle no longer
+      // maps back to this instanceId — handle:<h> is authoritative.
+      if (p && p.handle && await env.TOTALS.get(HANDLE_KEY(p.handle)) === instanceId) {
+        rows.push(publicProfile(p));
+      }
     }
   } catch { /* list unsupported / empty → [] */ }
 

@@ -375,11 +375,31 @@ test('handleLeaderboard: verified ranks first, then by metric', async () => {
     JSON.stringify({ handle: 'whale', verified: false, tokens: 9_999_999_999, sessions: 1 }));
   await env.TOTALS.put('pf:22222222-2222-2222-2222-222222222222',
     JSON.stringify({ handle: 'realdev', verified: true, tokens: 5000, sessions: 10 }));
+  // handle:<h> entries are required for the ownership repair check.
+  await env.TOTALS.put('handle:whale',   '11111111-1111-1111-1111-111111111111');
+  await env.TOTALS.put('handle:realdev', '22222222-2222-2222-2222-222222222222');
   const res = await handleLeaderboard(new URL('http://localhost/leaderboard?metric=tokens'), env);
   const j = await res.json();
   assert.equal(j.leaderboard[0].handle, 'realdev'); // verified wins despite far fewer tokens
   assert.equal(j.leaderboard[0].rank, 1);
   assert.equal(j.leaderboard[1].handle, 'whale');
+});
+
+test('handleLeaderboard: drops pf: rows where handle was claimed by a later concurrent write', async () => {
+  // Regression for the non-atomic check-then-write race in handleProfile.
+  // Both instances passed the 409 check (owner===null at read time), then both
+  // wrote their pf: entry. Only the winner's handle:<h> write persists.
+  const env = makeEnv();
+  const idWinner = 'aaaaaaaa-1111-1111-1111-111111111111';
+  const idLoser  = 'bbbbbbbb-2222-2222-2222-222222222222';
+  await env.TOTALS.put('pf:' + idWinner, JSON.stringify({ handle: 'clash', verified: false, tokens: 100, sessions: 1, activeMs: 0, streak: 0 }));
+  await env.TOTALS.put('pf:' + idLoser,  JSON.stringify({ handle: 'clash', verified: false, tokens: 200, sessions: 2, activeMs: 0, streak: 0 }));
+  await env.TOTALS.put('handle:clash', idWinner); // winner's write landed last
+  const res = await handleLeaderboard(new URL('http://localhost/leaderboard'), env);
+  const j = await res.json();
+  const clashRows = j.leaderboard.filter((r) => r.handle === 'clash');
+  assert.equal(clashRows.length, 1, 'exactly one row for a contested handle');
+  assert.equal(clashRows[0].tokens, 100, 'the winner (handle:<h> owner) is shown');
 });
 
 test('handleVerifyStart: issues a vrf_ token for a valid github user', async () => {
