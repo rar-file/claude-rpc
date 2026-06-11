@@ -847,12 +847,18 @@ function cleanSquadName(input) {
   return n ? n.slice(0, SQUAD_NAME_MAX) : null;
 }
 
-// Invite codes avoid ambiguous characters (0/O, 1/I/L).
+// Invite codes avoid ambiguous characters (0/O, 1/I/L). Same global-crypto
+// guard as randomHex: the Math.random fallback only exists for the Node 18
+// test floor (no global crypto) — the Workers runtime always takes WebCrypto.
 const CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
 function newInviteCode() {
-  const bytes = crypto.getRandomValues(new Uint8Array(6));
   let s = '';
-  for (const b of bytes) s += CODE_ALPHABET[b % CODE_ALPHABET.length];
+  const g = globalThis.crypto;
+  if (g?.getRandomValues) {
+    for (const b of g.getRandomValues(new Uint8Array(6))) s += CODE_ALPHABET[b % CODE_ALPHABET.length];
+  } else {
+    for (let i = 0; i < 6; i++) s += CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)];
+  }
   return `SQ-${s}`;
 }
 

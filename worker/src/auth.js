@@ -14,6 +14,14 @@
 const te = new TextEncoder();
 const td = new TextDecoder();
 
+// WebCrypto everywhere: the Workers runtime (and Node 19+) expose a global
+// `crypto`; the Node 18 test floor doesn't. The dynamic import only ever
+// evaluates in that Node-18 case — workers never reach it.
+async function subtleCrypto() {
+  if (globalThis.crypto?.subtle) return globalThis.crypto.subtle;
+  return (await import('node:crypto')).webcrypto.subtle;
+}
+
 function b64url(bytes) {
   let s = '';
   for (const b of new Uint8Array(bytes)) s += String.fromCharCode(b);
@@ -29,10 +37,11 @@ function b64urlDecode(s) {
 }
 
 async function hmacSign(secret, data) {
-  const key = await crypto.subtle.importKey(
+  const subtle = await subtleCrypto();
+  const key = await subtle.importKey(
     'raw', te.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'],
   );
-  return new Uint8Array(await crypto.subtle.sign('HMAC', key, te.encode(data)));
+  return new Uint8Array(await subtle.sign('HMAC', key, te.encode(data)));
 }
 
 // Constant-time string equality — both inputs are same-alphabet base64url.
