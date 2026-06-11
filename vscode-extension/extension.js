@@ -13,6 +13,7 @@ const vscode = require('vscode');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const cp = require('node:child_process');
 const core = require('./status-core.js');
 
 const STATE_DIR = path.join(os.tmpdir(), 'claude-rpc');
@@ -40,6 +41,35 @@ function daemonRunning() {
     process.kill(pid, 0);
     return true;
   } catch { return false; }
+}
+
+// Is the claude-rpc CLI on PATH? Cached for a minute — it's consulted on
+// every render to decide between the live view and the setup prompt, and
+// to pick `claude-rpc …` vs `npx claude-rpc@latest …` for terminal actions.
+let cliCache = { ts: 0, ok: false };
+function cliAvailable() {
+  if (Date.now() - cliCache.ts < 60_000) return cliCache.ok;
+  let ok = false;
+  try {
+    cp.execFileSync(process.platform === 'win32' ? 'where' : 'which', ['claude-rpc'],
+      { stdio: 'ignore', timeout: 1500 });
+    ok = true;
+  } catch { /* not installed (or `which` itself missing) — treat as absent */ }
+  cliCache = { ts: Date.now(), ok };
+  return ok;
+}
+
+// Terminal command for CLI actions — falls back to npx when the global
+// install is absent, so every menu action works on a marketplace-only setup.
+function cliCmd(args) {
+  return (cliAvailable() ? 'claude-rpc ' : 'npx claude-rpc@latest ') + args;
+}
+
+// Setup is needed when claude-rpc has left no trace at all: no live state,
+// no lifetime aggregate, and no CLI on PATH. Any one of those existing means
+// the pairing works (e.g. CLI uninstalled but old stats remain → show them).
+function setupNeeded() {
+  return !fs.existsSync(STATE_PATH) && !fs.existsSync(AGG_PATH) && !cliAvailable();
 }
 
 // aggregate.json can be MBs — only re-read when its mtime moves.
@@ -73,9 +103,11 @@ function activate(context) {
 
   function render() {
     const cfg = vscode.workspace.getConfiguration('claudeRpc');
+    const needsSetup = setupNeeded();
     const view = core.buildView(readJson(STATE_PATH), readAggregate(), pausedUntil(), {
       showTokens: cfg.get('showTokens', true),
       hideWhenStale: cfg.get('hideWhenStale', false),
+      setupNeeded: needsSetup,
     });
     if (view.hidden) { item.hide(); return; }
     item.text = `$(${view.icon}) ${view.label}`;
@@ -84,7 +116,7 @@ function activate(context) {
       : undefined;
     const md = new vscode.MarkdownString(
       view.tooltipLines.join('  \n')
-      + `\n\nDaemon: ${daemonRunning() ? '● running' : '○ not running'}`
+      + (needsSetup ? '' : `\n\nDaemon: ${daemonRunning() ? '● running' : '○ not running'}`)
       + '\n\n[Menu](command:claudeRpc.menu) · [Dashboard](command:claudeRpc.openDashboard)',
     );
     md.isTrusted = true;
@@ -171,11 +203,29 @@ function activate(context) {
     if (start) {
       const term = vscode.window.createTerminal('claude-rpc dashboard');
       term.show();
-      term.sendText('claude-rpc serve');
+      term.sendText(cliCmd('serve'));
     }
   }
 
+  function runInTerminal(name, command) {
+    const term = vscode.window.createTerminal(name);
+    term.show();
+    term.sendText(command);
+  }
+
   async function menuCmd() {
+    // Marketplace-only install (no CLI, no state): the menu IS the onboarding.
+    if (setupNeeded()) {
+      const items = [
+        { label: '$(rocket) Set up claude-rpc (one command)', detail: 'npx claude-rpc@latest setup — installs, wires Claude Code\'s hooks, starts the Discord daemon', act: () => runInTerminal('claude-rpc setup', 'npx claude-rpc@latest setup') },
+        { label: '$(globe) What is claude-rpc?', act: () => vscode.env.openExternal(vscode.Uri.parse('https://claude-rpc.vercel.app/?ref=vscode')) },
+        { label: '$(refresh) Refresh', act: render },
+      ];
+      const pick = await vscode.window.showQuickPick(items, { placeHolder: 'Claude RPC — companion CLI not detected' });
+      if (pick) await pick.act();
+      return;
+    }
+
     const paused = pausedUntil();
     const daemon = daemonRunning();
     const items = [];
@@ -185,11 +235,7 @@ function activate(context) {
     if (!daemon) {
       items.push({
         label: '$(play) Start the claude-rpc daemon',
-        act: () => {
-          const term = vscode.window.createTerminal('claude-rpc');
-          term.show();
-          term.sendText('claude-rpc start');
-        },
+        act: () => runInTerminal('claude-rpc', cliCmd('start')),
       });
     }
     items.push({ label: '$(refresh) Refresh', act: render });

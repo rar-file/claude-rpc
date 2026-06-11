@@ -113,3 +113,14 @@ test('projectName: basename of either path flavor', () => {
   assert.equal(projectName('C:\\Users\\u\\code\\my-app'), 'my-app');
   assert.equal(projectName(''), '');
 });
+
+test('buildView: setupNeeded renders the onboarding prompt regardless of state', () => {
+  const v = buildView(null, null, 0, { now: NOW, setupNeeded: true });
+  assert.equal(v.status, 'setup');
+  assert.equal(v.icon, 'rocket');
+  assert.match(v.label, /Set up claude-rpc/);
+  assert.equal(v.warning, false);
+  assert.ok(v.tooltipLines.some((l) => /npx claude-rpc@latest setup/.test(l)));
+  // hideWhenStale also hides the setup prompt (the "leave me alone" setting).
+  assert.equal(buildView(null, null, 0, { now: NOW, setupNeeded: true, hideWhenStale: true }).hidden, true);
+});

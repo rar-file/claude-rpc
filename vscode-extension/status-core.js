@@ -108,6 +108,26 @@ const SHIP_VERB = {
 function buildView(state, aggregate, pausedUntil, opts = {}) {
   const now = opts.now ?? Date.now();
   const showTokens = opts.showTokens !== false;
+
+  // Marketplace installs without the CLI: no state files have ever existed
+  // and `claude-rpc` isn't on PATH. Surface a setup prompt instead of a
+  // dead "Away" item with actions that can't work.
+  if (opts.setupNeeded) {
+    return {
+      status: 'setup',
+      icon: 'rocket',
+      label: 'Set up claude-rpc',
+      warning: false,
+      hidden: opts.hideWhenStale === true,
+      tooltipLines: [
+        '**Claude RPC** — companion CLI not detected',
+        'This extension reads state files written by the `claude-rpc` CLI (the npm package that wires Claude Code\'s hooks and drives the Discord card).',
+        '',
+        'Click for one-command setup: `npx claude-rpc@latest setup`',
+      ],
+    };
+  }
+
   const status = resolveStatus(state, { now, ...opts });
   const proj = projectName(state?.cwd);
   const tokens = state?.tokens

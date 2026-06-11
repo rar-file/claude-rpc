@@ -57,6 +57,7 @@ const IP_RATE_KEY        = (ip, win) => `rate:ip:${ip}:${win}`;
 // tied to a person. Stored as `ref:<source>`.
 const REF_SOURCES = new Set([
   'discord',     // the presence-card button
+  'vscode',      // the VS Code extension's onboarding menu
   'wrapped',     // Claude Wrapped share
   'card',        // poster / calendar / profile / session card footers
   'badge',       // README badge click-through
