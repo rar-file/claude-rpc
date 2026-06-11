@@ -67,6 +67,12 @@
   tr.unverified td.who::after { content: " · unverified"; color: var(--ink-faint); font-weight: 400; font-size: 0.78rem; font-family: var(--font-mono); }
   .top1 td.rank { color: var(--rust-3); }
 
+  .account { margin: 18px 0 0; font-family: var(--font-mono); font-size: 0.8rem; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .acct-btn { font-family: var(--font-mono); font-size: 0.78rem; font-weight: 700; padding: 7px 12px;
+    border: 1.5px solid var(--ink); background: var(--paper-2); color: var(--ink); cursor: pointer; text-decoration: none; display: inline-block; }
+  .acct-btn.dim { opacity: 0.6; }
+  .acct-who { font-weight: 700; }
+  .sq-chip { display: inline-block; border: 1.5px solid var(--ink); background: var(--paper); padding: 6px 10px; margin-right: 6px; text-decoration: none; color: var(--ink); }
   .note { color: var(--ink-faint); font-size: 0.82rem; margin-top: 16px; max-width: 64ch; }
   .cta { margin-top: 40px; font-family: var(--font-mono); background: var(--ink); color: var(--paper); padding: 16px 20px; display: inline-block; }
   .cta .ps1 { color: var(--rust); }
@@ -80,6 +86,16 @@
     <h1>who's building most.</h1>
     <p class="lead">Ranked across everyone running <a href="/">claude-rpc</a> with a public profile. <strong>Verified</strong> profiles (a GitHub identity, proved via a public gist) rank first and show a&nbsp;<span class="badge">✓</span>; unverified entries are capped and greyed. Join with <code>claude-rpc profile on</code>.</p>
     <div class="live"><span class="dot"></span> <span id="updated">loading the board&hellip;</span></div>
+
+    <div class="account" id="account">
+      <a class="acct-btn" id="loginLink" href="#">log in with GitHub →</a>
+      <div id="acctIn" hidden>
+        <span class="acct-who">@<span id="acctGh"></span></span>
+        <span id="mySquads"></span>
+        <button class="acct-btn" id="createSquad">+ new squad</button>
+        <button class="acct-btn dim" id="logoutBtn" title="forget this browser session">log out</button>
+      </div>
+    </div>
 
     <div class="tabs" id="tabs">
       <button class="tab" data-metric="tokens" aria-pressed="true">tokens</button>
@@ -169,6 +185,66 @@
     load();
   });
   load();
+
+  // ── Account / squads ────────────────────────────────────────────────────
+  // Session token arrives in the URL hash after the GitHub OAuth round-trip,
+  // is stowed in localStorage, and only ever carries a public GitHub login.
+  function captureToken() {
+    const m = location.hash.match(/token=([^&]+)/);
+    if (m) {
+      localStorage.setItem('crpcTok', decodeURIComponent(m[1]));
+      const g = location.hash.match(/gh=([^&]+)/);
+      if (g) localStorage.setItem('crpcGh', decodeURIComponent(g[1]));
+      history.replaceState(null, '', location.pathname + location.search);
+    }
+    return localStorage.getItem('crpcTok');
+  }
+
+  async function initAccount() {
+    const token = captureToken();
+    const loginLink = document.getElementById('loginLink');
+    loginLink.href = `${WORKER}/auth/login?return=/leaderboard`;
+    if (!token) return;
+    const auth = { Authorization: 'Bearer ' + token };
+    let me = null;
+    try { me = await fetch(`${WORKER}/auth/me`, { headers: auth }).then((r) => r.ok ? r.json() : null); } catch { /* worker hiccup */ }
+    if (!me) { localStorage.removeItem('crpcTok'); return; } // expired → show login
+    loginLink.hidden = true;
+    document.getElementById('acctGh').textContent = me.githubUser;
+    document.getElementById('acctIn').hidden = false;
+
+    if (me.linked) {
+      try {
+        const mine = await fetch(`${WORKER}/squads/mine`, { method: 'POST', headers: auth }).then((r) => r.json());
+        document.getElementById('mySquads').innerHTML = (mine.squads || [])
+          .map((s) => `<a class="sq-chip" href="/squad/${esc(s.id)}">${esc(s.name)} (${s.members})</a>`)
+          .join('');
+      } catch { /* chips are sugar */ }
+    }
+
+    document.getElementById('createSquad').onclick = async () => {
+      if (!me.linked) {
+        alert('Link your claude-rpc profile first:\n  claude-rpc profile set --handle you\n  claude-rpc profile on\n  claude-rpc profile verify\nthen reload this page.');
+        return;
+      }
+      const name = prompt('Squad name?', '');
+      if (!name) return;
+      const r = await fetch(`${WORKER}/squad/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...auth },
+        body: JSON.stringify({ name }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (r.ok && j.squad) location.href = `/squad/${j.squad.id}`;
+      else alert(j.error || 'could not create the squad — try again');
+    };
+    document.getElementById('logoutBtn').onclick = () => {
+      localStorage.removeItem('crpcTok');
+      localStorage.removeItem('crpcGh');
+      location.reload();
+    };
+  }
+  initAccount();
 </script>
 </body>
 </html>

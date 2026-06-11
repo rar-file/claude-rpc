@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>claude-rpc — squad</title>
+<meta name="description" content="A claude-rpc squad: a private Claude Code mini-leaderboard with friends. Weekly resets, fresh race every Monday." />
+<meta property="og:site_name" content="claude-rpc" />
+<meta property="og:title" content="claude-rpc — squad" />
+<meta property="og:description" content="A private Claude Code leaderboard with friends. Weekly resets — fresh race every Monday." />
+<meta property="og:type" content="website" />
+<meta property="og:image" content="https://claude-rpc.vercel.app/img/og.png" />
+<meta name="twitter:card" content="summary_large_image" />
+<link rel="icon" href="https://cdn.qualit.ly/clawd-working-building.gif" />
+<style>
+  :root {
+    --paper: #f4ede0; --paper-2: #ebe2d2; --ink: #2b2722; --ink-mute: #6b6357;
+    --ink-faint: #9a9183; --rust: #d97757; --rust-3: #b8552f; --grass: #5a7d4f;
+    --shadow: 6px 6px 0 rgba(43,39,34,0.12);
+    --font-disp: "Space Grotesk","Inter Tight",system-ui,sans-serif;
+    --font-mono: "JetBrains Mono",ui-monospace,monospace;
+    --font-body: -apple-system,BlinkMacSystemFont,"Inter",system-ui,sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-body);
+    background-image: radial-gradient(rgba(43,39,34,0.04) 1px, transparent 1px); background-size: 22px 22px;
+    min-height: 100vh; display: flex; flex-direction: column; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 64px 24px; width: 100%; flex: 1; }
+  a { color: var(--rust-3); }
+  .kicker { font-family: var(--font-mono); font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.18em; color: var(--rust-3); }
+  h1 { font-family: var(--font-disp); font-size: clamp(1.8rem, 5vw, 2.8rem); margin: 8px 0 6px; line-height: 1.05; }
+  .sub { color: var(--ink-mute); font-family: var(--font-mono); font-size: 0.86rem; }
+  .tabs { display: flex; gap: 8px; margin: 28px 0 16px; }
+  .tab { font-family: var(--font-mono); font-size: 0.78rem; font-weight: 700; padding: 8px 14px;
+    border: 1.5px solid var(--ink); background: var(--paper-2); cursor: pointer; color: var(--ink); }
+  .tab[aria-pressed="true"] { background: var(--rust); color: #fff; box-shadow: var(--shadow); }
+  table { width: 100%; border-collapse: collapse; border: 1.5px solid var(--ink); background: var(--paper-2); box-shadow: var(--shadow); }
+  th, td { text-align: left; padding: 12px 14px; border-bottom: 1px solid rgba(43,39,34,0.12); }
+  th { font-family: var(--font-mono); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-mute); }
+  tr:last-child td { border-bottom: none; }
+  td.rank { font-family: var(--font-disp); font-weight: 700; width: 2.4rem; color: var(--ink-faint); }
+  td.who { font-weight: 600; }
+  td.val { font-family: var(--font-mono); text-align: right; white-space: nowrap; }
+  .badge { color: var(--grass); font-weight: 700; margin-left: 6px; }
+  .crown { margin-left: 6px; font-size: 0.85em; }
+  .top1 td.rank { color: var(--rust-3); }
+  .panel { border: 1.5px solid var(--ink); background: var(--paper-2); box-shadow: var(--shadow); padding: 20px 22px; margin: 22px 0; }
+  .panel h3 { margin: 0 0 8px; font-family: var(--font-disp); }
+  .btn { display: inline-block; font-family: var(--font-mono); font-weight: 700; font-size: 0.86rem;
+    border: 1.5px solid var(--ink); background: var(--rust); color: #fff; padding: 10px 18px;
+    cursor: pointer; box-shadow: var(--shadow); text-decoration: none; }
+  .btn.alt { background: var(--paper); color: var(--ink); }
+  .btn:disabled { opacity: 0.5; cursor: default; }
+  .code { font-family: var(--font-mono); background: var(--ink); color: var(--paper); padding: 4px 10px; letter-spacing: 0.08em; }
+  .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+  .note { color: var(--ink-faint); font-size: 0.82rem; margin-top: 16px; max-width: 62ch; }
+  .err { color: var(--rust-3); font-family: var(--font-mono); font-size: 0.86rem; margin: 14px 0; }
+  .steps { font-family: var(--font-mono); font-size: 0.84rem; background: var(--paper); border: 1.5px solid var(--ink); padding: 14px 18px; }
+  .steps div { margin: 4px 0; }
+  .ps1 { color: var(--rust-3); }
+  footer { border-top: 1.5px solid var(--ink); padding: 20px 24px; font-family: var(--font-mono); font-size: 0.76rem; color: var(--ink-mute); display: flex; gap: 18px; justify-content: center; flex-wrap: wrap; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+  <main class="wrap">
+    <span class="kicker" id="kicker">squad</span>
+    <h1 id="title">loading&hellip;</h1>
+    <div class="sub" id="sub"></div>
+
+    <!-- view mode -->
+    <section id="view" hidden>
+      <div class="tabs">
+        <button class="tab" data-tab="week" aria-pressed="true">this week</button>
+        <button class="tab" data-tab="life" aria-pressed="false">lifetime</button>
+      </div>
+      <table>
+        <thead><tr><th>#</th><th>who</th><th style="text-align:right">tokens</th><th style="text-align:right">hours</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <div class="panel" id="memberPanel" hidden>
+        <h3>invite your crew</h3>
+        <div>send them this link — they join in one click:</div>
+        <div class="row">
+          <span class="code" id="inviteLink">…</span>
+          <button class="btn alt" id="copyInvite">copy</button>
+          <button class="btn alt" id="leaveBtn">leave squad</button>
+        </div>
+      </div>
+      <p class="note">Weekly scores reset every Monday 00:00 UTC. Numbers are each member's self-reported claude-rpc totals — it's a race between friends, not an audited benchmark.</p>
+    </section>
+
+    <!-- join mode -->
+    <section id="join" hidden>
+      <div class="panel">
+        <h3 id="joinHeading">join this squad</h3>
+        <div id="joinWho" class="sub" style="margin-bottom:10px"></div>
+
+        <div id="joinLogin" hidden>
+          <div style="margin-bottom:12px">You'll need a GitHub login — it links to your claude-rpc profile.</div>
+          <a class="btn" id="loginBtn" href="#">log in with GitHub →</a>
+        </div>
+
+        <div id="joinReady" hidden>
+          <div style="margin-bottom:12px">Logged in as <strong id="joinGh"></strong> — ready to race.</div>
+          <button class="btn" id="joinBtn">join the squad →</button>
+        </div>
+
+        <div id="joinSetup" hidden>
+          <div style="margin-bottom:12px">Logged in as <strong id="setupGh"></strong>, but no claude-rpc profile is linked to that GitHub account yet. Three commands in your terminal:</div>
+          <div class="steps">
+            <div><span class="ps1">$</span> npx claude-rpc@latest setup</div>
+            <div><span class="ps1">$</span> claude-rpc profile set --handle you && claude-rpc profile on</div>
+            <div><span class="ps1">$</span> claude-rpc profile verify</div>
+          </div>
+          <div class="row"><button class="btn alt" id="retryLink">done — check again</button></div>
+        </div>
+      </div>
+      <p class="note">claude-rpc is the open-source Discord presence + stats layer for Claude Code. The squad races on stats its daemon publishes. <a href="/?ref=vscode">What is claude-rpc?</a></p>
+    </section>
+
+    <div class="err" id="err" hidden></div>
+  </main>
+
+  <footer>
+    <a href="/">home</a>
+    <a href="/leaderboard">leaderboard</a>
+    <a href="https://github.com/rar-file/claude-rpc">github</a>
+  </footer>
+
+<script>
+  const WORKER = localStorage.getItem('crpcWorkerOverride') || 'https://claude-rpc-totals.claude-rpc.workers.dev';
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+  const fmt = (n) => { n = +n || 0;
+    if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
+    if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+    if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
+    return String(Math.round(n)); };
+  const hours = (ms) => ((+ms || 0) / 3600000).toFixed(1) + 'h';
+
+  // Capture a fresh session token from the OAuth redirect hash, then scrub it
+  // from the URL/history. Token lives in localStorage; it carries only a
+  // GitHub login and expires server-side after 7 days.
+  function captureToken() {
+    const m = location.hash.match(/token=([^&]+)/);
+    if (m) {
+      localStorage.setItem('crpcTok', decodeURIComponent(m[1]));
+      const g = location.hash.match(/gh=([^&]+)/);
+      if (g) localStorage.setItem('crpcGh', decodeURIComponent(g[1]));
+      history.replaceState(null, '', location.pathname + location.search);
+    }
+    return localStorage.getItem('crpcTok');
+  }
+  const token = captureToken();
+  const authHeaders = token ? { Authorization: 'Bearer ' + token } : {};
+
+  function showErr(msg) {
+    document.getElementById('title').textContent = 'hm.';
+    const el = document.getElementById('err');
+    el.textContent = msg;
+    el.hidden = false;
+  }
+
+  // /squad/join/<code> → join mode · /squad/<id> → view mode
+  const path = location.pathname;
+  const joinMatch = path.match(/\/squad\/join\/([^/?#]+)/);
+  const viewMatch = path.match(/\/squad\/([0-9a-f]{12})(?:$|[/?#])/);
+
+  // ── view mode ────────────────────────────────────────────────────────────
+  let standings = [];
+  let tab = 'week';
+  function renderRows() {
+    const rows = document.getElementById('rows');
+    rows.innerHTML = standings.map((r) => {
+      const name = r.displayName || ('@' + r.handle);
+      const badge = r.verified ? '<span class="badge" title="GitHub-verified">✓</span>' : '';
+      const crown = r.owner ? '<span class="crown" title="squad owner">♛</span>' : '';
+      const tok = tab === 'week' ? r.weekTokens : r.tokens;
+      const ms = tab === 'week' ? r.weekActiveMs : r.activeMs;
+      return `<tr class="${r.rank === 1 ? 'top1' : ''}"><td class="rank">${r.rank}</td>` +
+        `<td class="who"><a href="/u/${encodeURIComponent(r.handle)}" style="color:inherit">${esc(name)}</a>${badge}${crown}</td>` +
+        `<td class="val">${fmt(tok)}</td><td class="val">${hours(ms)}</td></tr>`;
+    }).join('') || '<tr><td colspan="4" style="text-align:center;color:var(--ink-mute);padding:26px">nobody here yet</td></tr>';
+  }
+
+  async function loadView(id) {
+    const res = await fetch(`${WORKER}/squad?id=${encodeURIComponent(id)}`);
+    if (!res.ok) return showErr('No squad here — it may have dissolved, or the link is wrong.');
+    const j = await res.json();
+    document.getElementById('title').textContent = j.squad.name;
+    document.getElementById('sub').textContent =
+      `${j.squad.members} member${j.squad.members === 1 ? '' : 's'} · week ${j.squad.week} · resets monday 00:00 utc`;
+    document.title = `${j.squad.name} — claude-rpc squad`;
+    standings = j.standings;
+    renderRows();
+    document.getElementById('view').hidden = false;
+
+    // Member affordances (invite link + leave) only if this browser's login
+    // maps to a member of THIS squad.
+    if (token) {
+      try {
+        const mine = await fetch(`${WORKER}/squads/mine`, { method: 'POST', headers: authHeaders }).then((r) => r.json());
+        const me = (mine.squads || []).find((s) => s.id === j.squad.id);
+        if (me) {
+          const link = `${location.origin}/squad/join/${me.code}`;
+          document.getElementById('inviteLink').textContent = link;
+          document.getElementById('memberPanel').hidden = false;
+          document.getElementById('copyInvite').onclick = async () => {
+            try { await navigator.clipboard.writeText(link); } catch { /* clipboard denied */ }
+            document.getElementById('copyInvite').textContent = 'copied!';
+            setTimeout(() => { document.getElementById('copyInvite').textContent = 'copy'; }, 1400);
+          };
+          document.getElementById('leaveBtn').onclick = async () => {
+            if (!confirm(`Leave "${j.squad.name}"?`)) return;
+            await fetch(`${WORKER}/squad/leave`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', ...authHeaders },
+              body: JSON.stringify({ squadId: j.squad.id }),
+            });
+            location.href = '/leaderboard';
+          };
+        }
+      } catch { /* member panel is optional sugar */ }
+    }
+  }
+
+  document.querySelector('.tabs')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('.tab');
+    if (!btn) return;
+    tab = btn.dataset.tab;
+    for (const t of document.querySelectorAll('.tab')) t.setAttribute('aria-pressed', String(t === btn));
+    renderRows();
+  });
+
+  // ── join mode ────────────────────────────────────────────────────────────
+  async function loadJoin(code) {
+    document.getElementById('kicker').textContent = 'squad invite';
+    const res = await fetch(`${WORKER}/squad/bycode?code=${encodeURIComponent(code)}`);
+    if (!res.ok) return showErr('This invite isn\'t valid anymore — ask your friend for a fresh code.');
+    const j = await res.json();
+    document.getElementById('title').textContent = j.squad.name;
+    document.getElementById('sub').textContent = `${j.squad.members} member${j.squad.members === 1 ? '' : 's'} racing weekly`;
+    document.getElementById('join').hidden = false;
+
+    const loginBtn = document.getElementById('loginBtn');
+    loginBtn.href = `${WORKER}/auth/login?return=${encodeURIComponent(location.pathname)}`;
+
+    if (!token) { document.getElementById('joinLogin').hidden = false; return; }
+
+    async function checkLink() {
+      const me = await fetch(`${WORKER}/auth/me`, { headers: authHeaders }).then((r) => r.ok ? r.json() : null);
+      if (!me) { // expired session
+        localStorage.removeItem('crpcTok');
+        document.getElementById('joinLogin').hidden = false;
+        return;
+      }
+      if (me.linked) {
+        document.getElementById('joinGh').textContent = '@' + me.githubUser;
+        document.getElementById('joinSetup').hidden = true;
+        document.getElementById('joinReady').hidden = false;
+      } else {
+        document.getElementById('setupGh').textContent = '@' + me.githubUser;
+        document.getElementById('joinSetup').hidden = false;
+      }
+    }
+    await checkLink();
+    document.getElementById('retryLink').onclick = checkLink;
+
+    document.getElementById('joinBtn').onclick = async () => {
+      const btn = document.getElementById('joinBtn');
+      btn.disabled = true;
+      const r = await fetch(`${WORKER}/squad/join`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify({ code }),
+      });
+      const out = await r.json().catch(() => ({}));
+      if (r.ok && out.squad) { location.href = `/squad/${out.squad.id}`; return; }
+      btn.disabled = false;
+      showErr(out.error || 'join failed — try again');
+    };
+  }
+
+  if (joinMatch) loadJoin(decodeURIComponent(joinMatch[1]));
+  else if (viewMatch) loadView(viewMatch[1]);
+  else showErr('No squad in the URL. Make one: claude-rpc squad create "the night shift" — or from the leaderboard page once you\'re logged in.');
+</script>
+</body>
+</html>

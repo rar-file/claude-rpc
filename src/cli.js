@@ -12,7 +12,7 @@ if (process.platform === 'win32' && process.stdout.isTTY) {
 }
 import { DAEMON_SCRIPT, PID_PATH, STATE_PATH, LOG_PATH, AGGREGATE_PATH, CONFIG_PATH, IS_PACKAGED, IS_NPX, EXE_PATH, CANONICAL_EXE } from './paths.js';
 import { readState } from './state.js';
-import { buildVars, fillTemplate, humanProject, humanTool, applyIdle, framePasses } from './format.js';
+import { buildVars, fillTemplate, humanProject, humanTool, applyIdle, framePasses, fmtNum } from './format.js';
 import { scan, readAggregate, findLiveSessions, dayKey, weekKey } from './scanner.js';
 import { runHookCli } from './hook.js';
 import { install as runInstall, uninstall as runUninstall, isInstalled, migrateConfig, installHooks, ensureCanonicalExe, installMcp, uninstallMcp, mcpServerCommand } from './install.js';
@@ -1005,6 +1005,124 @@ async function doExport(argv) {
   }
 }
 
+// ── Squads — private mini-leaderboards (terminal parity for the web UI) ───
+//
+// `claude-rpc squad create <name>` → invite code + link
+// `claude-rpc squad join <code>`
+// `claude-rpc squad` / `squad status`  → standings for every squad you're in
+// `claude-rpc squad leave [id]`
+// The web flow (claude-rpc.vercel.app + GitHub login) drives the same worker
+// endpoints; the CLI authenticates with the community instanceId it already has.
+
+function squadAuth() {
+  const cfg = loadConfig();
+  const endpoint = (cfg.community?.endpoint || '').replace(/\/+$/, '');
+  const instanceId = cfg.community?.instanceId;
+  if (!endpoint) fail('no community endpoint configured', { code: EX_BAD_STATE });
+  if (!instanceId) {
+    fail('squads need an identity', {
+      hint: 'run `claude-rpc profile set --handle <name> && claude-rpc profile on` first',
+      code: EX_BAD_STATE,
+    });
+  }
+  const post = async (path, body) => {
+    const res = await fetch(endpoint + path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ instanceId, ...body }),
+    });
+    return { status: res.status, json: await res.json().catch(() => ({})) };
+  };
+  const get = async (path) => {
+    const res = await fetch(endpoint + path);
+    return { status: res.status, json: await res.json().catch(() => ({})) };
+  };
+  return { cfg, endpoint, instanceId, post, get };
+}
+
+function squadPageUrl(id) { return `https://claude-rpc.vercel.app/squad/${id}`; }
+
+function printSquadInvite(squad) {
+  console.log('');
+  console.log(`  ${c.green}✓${c.reset} squad ${c.bold}${squad.name}${c.reset}`);
+  console.log(`    ${c.dim}invite code:${c.reset} ${c.cyan}${squad.code}${c.reset}`);
+  console.log(`    ${c.dim}standings:  ${c.reset} ${c.cyan}${squadPageUrl(squad.id)}${c.reset}`);
+  console.log('');
+  console.log(`  ${c.dim}send your crew this:${c.reset}`);
+  console.log(`    join my Claude Code squad "${squad.name}" — npx claude-rpc@latest setup, then:`);
+  console.log(`    ${c.cyan}claude-rpc squad join ${squad.code}${c.reset}  ${c.dim}(or join in the browser: ${squadPageUrl(squad.id)})${c.reset}`);
+  console.log('');
+}
+
+async function squadStatus({ post, get }) {
+  const mine = await post('/squads/mine', {});
+  if (!mine.json?.squads) return fail(`could not load squads: ${mine.json?.error || mine.status}`, { code: EX_SYS_ERROR });
+  if (!mine.json.squads.length) {
+    console.log('');
+    console.log(`  ${c.dim}no squads yet — start one:${c.reset} ${c.cyan}claude-rpc squad create "the night shift"${c.reset}`);
+    console.log('');
+    return;
+  }
+  for (const s of mine.json.squads) {
+    const r = await get(`/squad?id=${encodeURIComponent(s.id)}`);
+    const standings = r.json?.standings || [];
+    const lines = standings.map((row) => {
+      const who = `${row.displayName || '@' + row.handle}${row.verified ? ' ✓' : ''}${row.owner ? ` ${c.dim}(owner)${c.reset}` : ''}`;
+      return `${c.bold}#${row.rank}${c.reset} ${who.padEnd(28)} ${c.cyan}${fmtNum(row.weekTokens)}${c.reset} ${c.dim}this week${c.reset} · ${fmtNum(row.tokens)} ${c.dim}lifetime${c.reset}`;
+    });
+    lines.push('');
+    lines.push(`${c.dim}week ${r.json?.squad?.week || ''} · invite ${c.reset}${c.cyan}${s.code}${c.reset}${c.dim} · ${squadPageUrl(s.id)}${c.reset}`);
+    box(`${s.name} (${s.members})`, lines, 70);
+    console.log('');
+  }
+}
+
+async function doSquadCmd(argv) {
+  const sub = (argv[0] || 'status').toLowerCase();
+  const ctx = squadAuth();
+  if (sub === 'status' || sub === '') return squadStatus(ctx);
+  if (sub === 'create') {
+    const name = argv.slice(1).join(' ').trim();
+    if (!name) return fail('usage: claude-rpc squad create <name>', { code: EX_USER_ERROR });
+    const r = await ctx.post('/squad/create', { name });
+    if (r.status !== 200) return fail(`create failed: ${r.json?.error || r.status}`, { code: EX_SYS_ERROR });
+    return printSquadInvite(r.json.squad);
+  }
+  if (sub === 'join') {
+    const code = (argv[1] || '').trim();
+    if (!code) return fail('usage: claude-rpc squad join SQ-XXXXXX', { code: EX_USER_ERROR });
+    const r = await ctx.post('/squad/join', { code });
+    if (r.status !== 200) return fail(`join failed: ${r.json?.error || r.status}`, { code: EX_SYS_ERROR });
+    const s = r.json.squad;
+    console.log(`${c.green}✓${c.reset} ${s.alreadyMember ? 'already in' : 'joined'} ${c.bold}${s.name}${c.reset} (${s.members} member${s.members === 1 ? '' : 's'})`);
+    console.log(`  ${c.dim}standings: ${squadPageUrl(s.id)}  ·  claude-rpc squad${c.reset}`);
+    return;
+  }
+  if (sub === 'leave') {
+    const mine = await ctx.post('/squads/mine', {});
+    const squads = mine.json?.squads || [];
+    if (!squads.length) return fail('you are not in any squads', { code: EX_BAD_STATE });
+    let target = null;
+    const wanted = (argv[1] || '').toLowerCase();
+    if (wanted) target = squads.find((s) => s.id === wanted || s.name.toLowerCase() === wanted);
+    else if (squads.length === 1) target = squads[0];
+    if (!target) {
+      return fail(squads.length > 1 && !wanted ? 'you are in several squads — name one' : `no squad matching "${argv[1]}"`, {
+        hint: `claude-rpc squad leave <id|name> — yours: ${squads.map((s) => `${s.name} (${s.id})`).join(', ')}`,
+        code: EX_USER_ERROR,
+      });
+    }
+    const r = await ctx.post('/squad/leave', { squadId: target.id });
+    if (r.status !== 200) return fail(`leave failed: ${r.json?.error || r.status}`, { code: EX_SYS_ERROR });
+    console.log(`${c.green}✓${c.reset} left ${c.bold}${target.name}${c.reset}${r.json.dissolved ? ` ${c.dim}(last member — squad dissolved)${c.reset}` : ''}`);
+    return;
+  }
+  fail(`unknown squad subcommand: ${sub}`, {
+    hint: 'try: squad [status|create <name>|join <code>|leave [id]]',
+    code: EX_USER_ERROR,
+  });
+}
+
 // ── Community totals ─────────────────────────────────────────────────────
 //
 // `claude-rpc community`         → show current state + endpoint
@@ -1488,6 +1606,7 @@ function help() {
     ['privacy',   'Show resolved visibility for the current directory'],
     ['community', 'Opt in/out of anonymous community totals (on|off|status|report)'],
     ['profile',   'Public leaderboard identity (status|set|on|off|publish|verify)'],
+    ['squad',     'Private mini-leaderboards with friends (create|join|leave|status)'],
     ['doctor',    'Run a diagnostic checklist — common-failure triage (--fix to auto-repair)'],
     ['tail',      'Tail the daemon log file'],
     ['daemon',    'Run daemon in foreground (debug)'],
@@ -1600,6 +1719,7 @@ const packagedDefault = IS_PACKAGED && !cmd;
     case 'privacy':   doPrivacy(); break;
     case 'community': await doCommunity(process.argv.slice(3)); break;
     case 'profile':   await doProfile(process.argv.slice(3)); break;
+    case 'squad':     await doSquadCmd(process.argv.slice(3)); break;
     case 'doctor': {
       const { runDoctor, fixPlan } = await import('./doctor.js');
       const fix = process.argv.includes('--fix');

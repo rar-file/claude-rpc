@@ -13,3 +13,13 @@ preview_urls = false
 [[kv_namespaces]]
 binding = "TOTALS"
 id = "6ca3b87cd4cc46469008d28558701dac"
+
+# Web login (GitHub OAuth). GITHUB_CLIENT_ID is public; the two secrets are
+# set out-of-band:
+#   wrangler secret put GITHUB_CLIENT_SECRET   (from the GitHub OAuth app)
+#   wrangler secret put SESSION_SECRET         (any long random string)
+# Register the OAuth app's callback URL as:
+#   https://claude-rpc-totals.claude-rpc.workers.dev/auth/callback
+[vars]
+GITHUB_CLIENT_ID = ""
+SITE_ORIGIN = "https://claude-rpc.vercel.app"

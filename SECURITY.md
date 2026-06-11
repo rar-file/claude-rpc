@@ -124,7 +124,25 @@ Publishes a badge SVG to *your own* GitHub gist via the `gh` CLI or a
 `gist.github.com`. Never runs unattended, never on install, never from the
 daemon.
 
-### 3c. Presence GIF assets — Discord-side only
+### 3c. Squads & web login — opt-in, profile-derived
+
+**Source:** `worker/src/index.js` (+ `worker/src/auth.js`), `src/cli.js`
+(`squad` command), `site/squad.html`. Squads are private mini-leaderboards
+that regroup stats you **already publish** via the opt-in profile — joining
+one sends nothing new from your machine; the worker derives weekly standings
+from the same clamped lifetime totals the public board uses.
+
+"Log in with GitHub" on the website is plain OAuth (no scopes — public
+identity only; we never see email or repos). Sessions are stateless signed
+tokens holding **only your public GitHub login**, stored in your browser's
+localStorage and expiring after 7 days. The browser never receives an
+`instanceId` — that remains the CLI's local credential; the worker resolves
+GitHub login → profile via the link your own gist verification created.
+Worker-side storage adds: `gh:<login>` → profile link, `squad:*` membership
+records, and weekly baseline snapshots (auto-expiring). Leaving your last
+squad deletes its record.
+
+### 3d. Presence GIF assets — Discord-side only
 
 `default-config.js` references `https://cdn.qualit.ly/clawd-*.gif`. These URLs
 are handed to Discord as image keys; **Discord's** client fetches them to render

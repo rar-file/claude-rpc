@@ -7,6 +7,16 @@
 //   GET  /leaderboard    — top-N profiles (verified-first ranking)
 //   POST /verify/start   — begin GitHub gist verification (issues a token)
 //   POST /verify/check   — confirm the token appears in a public gist → ✓
+//   GET  /auth/login     — start the GitHub OAuth dance (web login)
+//   GET  /auth/callback  — OAuth redirect target → session token → site
+//   GET  /auth/me        — who am I + linked profile (Bearer session)
+//   POST /squad/create   — make a private mini-leaderboard (squad)
+//   POST /squad/join     — join via invite code
+//   POST /squad/leave    — leave (ownership transfers / squad dissolves)
+//   POST /squad/update   — owner tools: rename, regenerate code, remove member
+//   POST /squads/mine    — list my squads (Bearer session or instanceId)
+//   GET  /squad?id=      — public standings (weekly + lifetime)
+//   GET  /squad/bycode?code= — minimal preview for the join page
 //   GET  /sessions.svg   — shields-style badge for the README
 //   GET  /tokens.svg     — same, for tokens
 //   GET  /total.json     — JSON for arbitrary consumers / dashboards
@@ -18,12 +28,20 @@
 //   total:sessions       integer string, running sum
 //   total:tokens         integer string, running sum
 //   seen:<instanceId>    last-seen counters, 30d TTL (dedup window)
+//   gh:<login>           GitHub login → verified instanceId (web login link)
+//   squad:<id> / sqcode:<code> / sqmember:<instanceId> / sqbase:<id>:<week>
 //
-// No PII is persisted. Cloudflare's request log retains IPs briefly for
-// abuse mitigation — that's a Cloudflare property, not something this
-// worker writes. The CLI ships consent text that names both layers.
+// No PII is persisted beyond public GitHub logins users explicitly verify.
+// Cloudflare's request log retains IPs briefly for abuse mitigation — that's
+// a Cloudflare property, not something this worker writes. The CLI ships
+// consent text that names both layers.
+//
+// Web sessions are stateless signed tokens (see auth.js) holding only a
+// GitHub login. The browser NEVER sees an instanceId — that stays the CLI's
+// credential; bearer-authed requests resolve to it server-side via gh:<login>.
 
 import { renderBadge, fmtNum } from './badge.js';
+import { mintToken, verifyToken, SESSION_TTL_MS, STATE_TTL_MS } from './auth.js';
 
 const SCHEMA_VERSION = 1;
 const MAX_DELTA_SESSIONS = 100_000;       // per single report — bigger gets rejected
@@ -633,6 +651,10 @@ export async function handleVerifyCheck(request, env, fetchImpl = fetch) {
   prof.githubUser = matchedOwner; // authoritative: whoever actually owns the gist
   // Verified profiles are permanent — no TTL.
   await env.TOTALS.put(PF_KEY(body.instanceId), JSON.stringify(prof));
+  // Reverse index for web login: a GitHub OAuth session for this login now
+  // resolves to this profile. Last verification wins if one account verifies
+  // multiple installs — the freshest machine is the one you meant.
+  try { await env.TOTALS.put(GH_KEY(matchedOwner), body.instanceId); } catch { /* best-effort */ }
   try { await env.TOTALS.delete(VERIFY_KEY(body.instanceId)); } catch { /* best-effort */ }
   // Reflect verification in the board index immediately.
   try {
@@ -648,8 +670,413 @@ export async function handleVerifyCheck(request, env, fetchImpl = fetch) {
 function jsonError(status, message) {
   return new Response(JSON.stringify({ ok: false, error: message }), {
     status,
-    headers: { 'Content-Type': 'application/json' },
+    headers: { ...CORS, 'Content-Type': 'application/json' },
   });
+}
+
+function jsonOk(body, cacheControl = 'no-store') {
+  return new Response(JSON.stringify({ schemaVersion: SCHEMA_VERSION, ...body, ts: Date.now() }), {
+    headers: { ...CORS, 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': cacheControl },
+  });
+}
+
+// ── Web login (GitHub OAuth) ─────────────────────────────────────────────
+//
+// The gist-verification flow already proves which GitHub account owns which
+// profile, so "log in with GitHub" needs no accounts of its own: OAuth tells
+// us the login, gh:<login> tells us the profile. Sessions are stateless
+// signed tokens (auth.js) carrying ONLY the public GitHub login.
+
+const GH_KEY = (login) => `gh:${String(login).toLowerCase()}`;
+const DEFAULT_SITE_ORIGIN = 'https://claude-rpc.vercel.app';
+
+function siteOrigin(env) {
+  return (env.SITE_ORIGIN || DEFAULT_SITE_ORIGIN).replace(/\/+$/, '');
+}
+
+// Resolve a GitHub login to its verified instanceId. The gh: index is written
+// at verification time; profiles verified BEFORE that index existed get a
+// lazy backfill from board:index (which carries githubUser for every
+// verified entry and is permanent for verified profiles).
+async function resolveGithubInstance(env, login) {
+  if (!normGithub(login)) return null;
+  const direct = await env.TOTALS.get(GH_KEY(login));
+  if (direct) return direct;
+  try {
+    const index = await getBoardIndex(env);
+    const want = String(login).toLowerCase();
+    for (const [id, e] of Object.entries(index)) {
+      if (e && e.verified && String(e.githubUser || '').toLowerCase() === want) {
+        await env.TOTALS.put(GH_KEY(login), id);
+        return id;
+      }
+    }
+  } catch { /* board unreadable → unlinked */ }
+  return null;
+}
+
+export async function handleAuthLogin(url, env) {
+  if (!env.GITHUB_CLIENT_ID || !env.SESSION_SECRET) {
+    return jsonError(503, 'web login is not configured on this deployment');
+  }
+  // Open-redirect guard: the post-login return target must be a same-site
+  // path, never a full URL.
+  let ret = url.searchParams.get('return') || '/leaderboard';
+  if (!/^\/[\w\-/.]*$/.test(ret)) ret = '/leaderboard';
+  const state = await mintToken('state', { ret }, env.SESSION_SECRET, STATE_TTL_MS);
+  const gh = new URL('https://github.com/login/oauth/authorize');
+  gh.searchParams.set('client_id', env.GITHUB_CLIENT_ID);
+  gh.searchParams.set('redirect_uri', `${url.origin}/auth/callback`);
+  gh.searchParams.set('state', state);
+  // No scopes: public identity only — we never see email or repos.
+  return Response.redirect(gh.toString(), 302);
+}
+
+export async function handleAuthCallback(url, env, fetchImpl = fetch) {
+  if (!env.GITHUB_CLIENT_ID || !env.GITHUB_CLIENT_SECRET || !env.SESSION_SECRET) {
+    return jsonError(503, 'web login is not configured on this deployment');
+  }
+  const state = await verifyToken(url.searchParams.get('state'), 'state', env.SESSION_SECRET);
+  if (!state) return jsonError(400, 'login expired or tampered — start again');
+  const code = url.searchParams.get('code');
+  if (!code) return jsonError(400, 'missing OAuth code');
+
+  let login = null;
+  try {
+    const tokRes = await fetchImpl('https://github.com/login/oauth/access_token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'User-Agent': 'claude-rpc-worker' },
+      body: JSON.stringify({ client_id: env.GITHUB_CLIENT_ID, client_secret: env.GITHUB_CLIENT_SECRET, code }),
+    });
+    const tok = tokRes.ok ? await tokRes.json() : null;
+    if (tok?.access_token) {
+      const userRes = await fetchImpl('https://api.github.com/user', {
+        headers: { Authorization: `Bearer ${tok.access_token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'claude-rpc-worker' },
+      });
+      if (userRes.ok) login = (await userRes.json())?.login || null;
+    }
+  } catch { /* github hiccup → login stays null */ }
+  if (!normGithub(login)) return jsonError(502, 'GitHub login failed — try again');
+
+  // Backfill the profile link now so /auth/me is instant for old verifications.
+  await resolveGithubInstance(env, login);
+
+  const session = await mintToken('sess', { gh: login }, env.SESSION_SECRET, SESSION_TTL_MS);
+  const dest = `${siteOrigin(env)}${state.ret}#token=${encodeURIComponent(session)}&gh=${encodeURIComponent(login)}`;
+  return Response.redirect(dest, 302);
+}
+
+// Bearer → GitHub login, or null. Shared by /auth/me and the squad routes.
+async function sessionLogin(request, env) {
+  const m = (request.headers.get('Authorization') || '').match(/^Bearer\s+(.+)$/i);
+  if (!m || !env.SESSION_SECRET) return null;
+  const payload = await verifyToken(m[1], 'sess', env.SESSION_SECRET);
+  return payload ? payload.gh : null;
+}
+
+export async function handleAuthMe(request, env) {
+  const login = await sessionLogin(request, env);
+  if (!login) return jsonError(401, 'not logged in');
+  const instanceId = await resolveGithubInstance(env, login);
+  const prof = instanceId ? await getProfile(env, instanceId) : null;
+  return jsonOk({
+    githubUser: login,
+    linked: !!prof,
+    profile: prof ? publicProfile(prof) : null,
+  });
+}
+
+// Resolve "who is making this request" to an instanceId. Two credentials:
+//   web — Bearer session → GitHub login → gh:<login> index
+//   CLI — body.instanceId (the same secret UUID the profile routes trust)
+// Both converge so every squad is co-ownable from either surface.
+async function resolveMemberId(request, env, body) {
+  const login = await sessionLogin(request, env);
+  if (login) {
+    const id = await resolveGithubInstance(env, login);
+    if (!id) {
+      return { error: jsonError(403, 'no verified claude-rpc profile is linked to this GitHub account — run `claude-rpc profile verify` once, then log in again') };
+    }
+    return { instanceId: id, via: 'session' };
+  }
+  if (body && isUuidish(body.instanceId)) return { instanceId: body.instanceId, via: 'instance' };
+  return { error: jsonError(401, 'authentication required') };
+}
+
+// ── Squads — private mini-leaderboards with weekly resets ────────────────
+//
+// A squad is a handful of people who know each other racing on weekly
+// deltas. Weekly scores need no cron: the first standings read of a new ISO
+// week snapshots every member's current lifetime totals as that week's
+// baseline; score = current − baseline. Numbers are the same self-reported,
+// clamped totals the public board uses — among friends, social accountability
+// is the verification.
+
+const SQUAD_KEY = (id) => `squad:${id}`;
+const SQUAD_CODE_KEY = (code) => `sqcode:${code}`;
+const SQUAD_MEMBER_KEY = (id) => `sqmember:${id}`;
+const SQUAD_BASE_KEY = (id, week) => `sqbase:${id}:${week}`;
+const SQUAD_MAX_MEMBERS = 20;
+const SQUAD_MAX_PER_USER = 5;
+const SQUAD_BASE_TTL_SECONDS = 35 * 24 * 60 * 60; // outlives its week comfortably
+const SQUAD_NAME_MAX = 40;
+
+// ISO week key in UTC ("2026-W24"). The reset moment is Monday 00:00 UTC for
+// everyone — a fixed global tick beats per-user timezones for a shared race.
+export function isoWeekKeyUTC(ts = Date.now()) {
+  const d = new Date(ts);
+  const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  t.setUTCDate(t.getUTCDate() - ((t.getUTCDay() + 6) % 7) + 3); // Thursday of this week
+  const firstThu = new Date(Date.UTC(t.getUTCFullYear(), 0, 4));
+  const week = 1 + Math.round(((t - firstThu) / 86_400_000 - 3 + ((firstThu.getUTCDay() + 6) % 7)) / 7);
+  return `${t.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
+}
+
+function cleanSquadName(input) {
+  const n = cleanName(input);
+  return n ? n.slice(0, SQUAD_NAME_MAX) : null;
+}
+
+// Invite codes avoid ambiguous characters (0/O, 1/I/L).
+const CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
+function newInviteCode() {
+  const bytes = crypto.getRandomValues(new Uint8Array(6));
+  let s = '';
+  for (const b of bytes) s += CODE_ALPHABET[b % CODE_ALPHABET.length];
+  return `SQ-${s}`;
+}
+
+function normCode(input) {
+  const c = String(input || '').trim().toUpperCase();
+  return /^SQ-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$/.test(c) ? c : null;
+}
+
+async function readJsonKey(env, key, fallback) {
+  const raw = await env.TOTALS.get(key);
+  if (!raw) return fallback;
+  try { return JSON.parse(raw); } catch { return fallback; }
+}
+
+async function getSquad(env, id) {
+  if (!/^[0-9a-f]{12}$/.test(String(id || ''))) return null;
+  return readJsonKey(env, SQUAD_KEY(id), null);
+}
+
+async function memberSquadIds(env, instanceId) {
+  const ids = await readJsonKey(env, SQUAD_MEMBER_KEY(instanceId), []);
+  return Array.isArray(ids) ? ids : [];
+}
+
+async function writeMemberSquads(env, instanceId, ids) {
+  if (ids.length) await env.TOTALS.put(SQUAD_MEMBER_KEY(instanceId), JSON.stringify(ids));
+  else await env.TOTALS.delete(SQUAD_MEMBER_KEY(instanceId));
+}
+
+function baselineEntry(p) {
+  return { tokens: p?.tokens || 0, sessions: p?.sessions || 0, activeMs: p?.activeMs || 0 };
+}
+
+export async function handleSquadCreate(request, env) {
+  let body;
+  try { body = await request.json(); } catch { return jsonError(400, 'invalid JSON'); }
+  if (!(await ipRateOk(env, clientIp(request)))) return jsonError(429, 'rate limited (ip)');
+  const who = await resolveMemberId(request, env, body);
+  if (who.error) return who.error;
+  // Creation is the spammable op, so it gets its own per-instance window.
+  // Join deliberately has no per-instance limiter — "create then immediately
+  // join a friend's squad" is a normal interactive minute; possession of an
+  // invite code plus the membership caps already bound join volume.
+  if (!(await rateOk(env, who.instanceId, 'squad-create'))) return jsonError(429, 'rate limited');
+
+  const name = cleanSquadName(body.name);
+  if (!name) return jsonError(400, 'squad name required (1–40 printable chars)');
+  const prof = await getProfile(env, who.instanceId);
+  if (!prof) return jsonError(409, 'publish a profile first (claude-rpc profile on)');
+  const mine = await memberSquadIds(env, who.instanceId);
+  if (mine.length >= SQUAD_MAX_PER_USER) return jsonError(409, `you're already in ${SQUAD_MAX_PER_USER} squads — leave one first`);
+
+  const id = randomHex().slice(0, 12);
+  const code = newInviteCode();
+  const squad = { id, name, code, ownerId: who.instanceId, members: [who.instanceId], createdAt: Date.now() };
+  await env.TOTALS.put(SQUAD_KEY(id), JSON.stringify(squad));
+  await env.TOTALS.put(SQUAD_CODE_KEY(code), id);
+  await writeMemberSquads(env, who.instanceId, [...mine, id]);
+  return jsonOk({ ok: true, squad: { id, name, code, members: 1, owner: true } });
+}
+
+export async function handleSquadJoin(request, env) {
+  let body;
+  try { body = await request.json(); } catch { return jsonError(400, 'invalid JSON'); }
+  if (!(await ipRateOk(env, clientIp(request)))) return jsonError(429, 'rate limited (ip)');
+  const who = await resolveMemberId(request, env, body);
+  if (who.error) return who.error;
+
+  const code = normCode(body.code);
+  if (!code) return jsonError(400, 'invite code invalid — looks like SQ-XXXXXX');
+  const id = await env.TOTALS.get(SQUAD_CODE_KEY(code));
+  const squad = id ? await getSquad(env, id) : null;
+  if (!squad || squad.code !== code) return jsonError(404, 'no squad for that code — ask for a fresh invite');
+  if (squad.members.includes(who.instanceId)) {
+    return jsonOk({ ok: true, squad: { id: squad.id, name: squad.name, members: squad.members.length, alreadyMember: true } });
+  }
+  const prof = await getProfile(env, who.instanceId);
+  if (!prof) return jsonError(409, 'publish a profile first (claude-rpc profile on)');
+  if (squad.members.length >= SQUAD_MAX_MEMBERS) return jsonError(409, 'squad is full');
+  const mine = await memberSquadIds(env, who.instanceId);
+  if (mine.length >= SQUAD_MAX_PER_USER) return jsonError(409, `you're already in ${SQUAD_MAX_PER_USER} squads — leave one first`);
+
+  squad.members.push(who.instanceId);
+  await env.TOTALS.put(SQUAD_KEY(squad.id), JSON.stringify(squad));
+  await writeMemberSquads(env, who.instanceId, [...mine, squad.id]);
+  // Mid-week joiner: anchor their baseline at join time so they race from 0,
+  // not from negative-infinity or their whole lifetime total.
+  try {
+    const week = isoWeekKeyUTC();
+    const baseKey = SQUAD_BASE_KEY(squad.id, week);
+    const base = await readJsonKey(env, baseKey, null);
+    if (base && !base[who.instanceId]) {
+      base[who.instanceId] = baselineEntry(prof);
+      await env.TOTALS.put(baseKey, JSON.stringify(base), { expirationTtl: SQUAD_BASE_TTL_SECONDS });
+    }
+  } catch { /* baseline forms on next standings read */ }
+  return jsonOk({ ok: true, squad: { id: squad.id, name: squad.name, members: squad.members.length } });
+}
+
+export async function handleSquadLeave(request, env) {
+  let body;
+  try { body = await request.json(); } catch { return jsonError(400, 'invalid JSON'); }
+  const who = await resolveMemberId(request, env, body);
+  if (who.error) return who.error;
+  const squad = await getSquad(env, body.squadId);
+  if (!squad || !squad.members.includes(who.instanceId)) return jsonError(404, 'not a member of that squad');
+
+  squad.members = squad.members.filter((m) => m !== who.instanceId);
+  const mine = (await memberSquadIds(env, who.instanceId)).filter((s) => s !== squad.id);
+  await writeMemberSquads(env, who.instanceId, mine);
+
+  if (squad.members.length === 0) {
+    await env.TOTALS.delete(SQUAD_KEY(squad.id));
+    await env.TOTALS.delete(SQUAD_CODE_KEY(squad.code));
+    return jsonOk({ ok: true, dissolved: true });
+  }
+  // Owner walked: the longest-standing remaining member inherits.
+  if (squad.ownerId === who.instanceId) squad.ownerId = squad.members[0];
+  await env.TOTALS.put(SQUAD_KEY(squad.id), JSON.stringify(squad));
+  return jsonOk({ ok: true, left: true });
+}
+
+export async function handleSquadUpdate(request, env) {
+  let body;
+  try { body = await request.json(); } catch { return jsonError(400, 'invalid JSON'); }
+  const who = await resolveMemberId(request, env, body);
+  if (who.error) return who.error;
+  const squad = await getSquad(env, body.squadId);
+  if (!squad) return jsonError(404, 'no such squad');
+  if (squad.ownerId !== who.instanceId) return jsonError(403, 'owner only');
+
+  if (body.name !== undefined) {
+    const name = cleanSquadName(body.name);
+    if (!name) return jsonError(400, 'squad name invalid');
+    squad.name = name;
+  }
+  if (body.regenCode) {
+    await env.TOTALS.delete(SQUAD_CODE_KEY(squad.code));
+    squad.code = newInviteCode();
+    await env.TOTALS.put(SQUAD_CODE_KEY(squad.code), squad.id);
+  }
+  if (body.removeMember) {
+    const handle = normHandle(body.removeMember);
+    const target = handle ? await env.TOTALS.get(HANDLE_KEY(handle)) : null;
+    if (!target || !squad.members.includes(target)) return jsonError(404, 'no such member');
+    if (target === squad.ownerId) return jsonError(400, 'owner can leave, not self-remove');
+    squad.members = squad.members.filter((m) => m !== target);
+    const theirs = (await memberSquadIds(env, target)).filter((s) => s !== squad.id);
+    await writeMemberSquads(env, target, theirs);
+  }
+  await env.TOTALS.put(SQUAD_KEY(squad.id), JSON.stringify(squad));
+  return jsonOk({ ok: true, squad: { id: squad.id, name: squad.name, code: squad.code, members: squad.members.length } });
+}
+
+export async function handleSquadsMine(request, env) {
+  let body = null;
+  try { body = await request.json(); } catch { /* bearer-only callers send no body */ }
+  const who = await resolveMemberId(request, env, body);
+  if (who.error) return who.error;
+  const ids = await memberSquadIds(env, who.instanceId);
+  const squads = [];
+  for (const id of ids) {
+    const s = await getSquad(env, id);
+    if (!s || !s.members.includes(who.instanceId)) continue; // index drift — heal below
+    squads.push({ id: s.id, name: s.name, code: s.code, members: s.members.length, owner: s.ownerId === who.instanceId });
+  }
+  if (squads.length !== ids.length) {
+    try { await writeMemberSquads(env, who.instanceId, squads.map((s) => s.id)); } catch { /* heal next time */ }
+  }
+  return jsonOk({ squads });
+}
+
+// Public standings. Knowing the (unguessable) id grants viewing; the invite
+// code never appears here. Weekly baseline forms lazily on the first read of
+// a new week.
+export async function handleSquadGet(url, env) {
+  const squad = await getSquad(env, url.searchParams.get('id'));
+  if (!squad) return jsonError(404, 'no such squad');
+
+  const profiles = new Map();
+  for (const m of squad.members) {
+    const p = await getProfile(env, m);
+    if (p) profiles.set(m, p);
+  }
+  // Lazy prune: members whose profile expired (unverified 90d TTL) drop out.
+  if (profiles.size !== squad.members.length) {
+    squad.members = squad.members.filter((m) => profiles.has(m));
+    try {
+      if (squad.members.length === 0) {
+        await env.TOTALS.delete(SQUAD_KEY(squad.id));
+        await env.TOTALS.delete(SQUAD_CODE_KEY(squad.code));
+        return jsonError(404, 'no such squad');
+      }
+      if (!profiles.has(squad.ownerId)) squad.ownerId = squad.members[0];
+      await env.TOTALS.put(SQUAD_KEY(squad.id), JSON.stringify(squad));
+    } catch { /* prune retries next read */ }
+  }
+
+  const week = isoWeekKeyUTC();
+  const baseKey = SQUAD_BASE_KEY(squad.id, week);
+  let base = await readJsonKey(env, baseKey, null);
+  if (!base) {
+    base = {};
+    for (const [m, p] of profiles) base[m] = baselineEntry(p);
+    try { await env.TOTALS.put(baseKey, JSON.stringify(base), { expirationTtl: SQUAD_BASE_TTL_SECONDS }); } catch { /* re-derives next read */ }
+  }
+
+  const standings = [...profiles.entries()].map(([m, p]) => {
+    const b = base[m] || baselineEntry(p); // joined after snapshot → race from join point
+    return {
+      ...publicProfile(p),
+      owner: m === squad.ownerId,
+      weekTokens: Math.max(0, (p.tokens || 0) - (b.tokens || 0)),
+      weekSessions: Math.max(0, (p.sessions || 0) - (b.sessions || 0)),
+      weekActiveMs: Math.max(0, (p.activeMs || 0) - (b.activeMs || 0)),
+    };
+  }).sort((a, b) => b.weekTokens - a.weekTokens || b.tokens - a.tokens);
+  standings.forEach((row, i) => { row.rank = i + 1; });
+
+  return jsonOk({
+    squad: { id: squad.id, name: squad.name, members: standings.length, week, createdAt: squad.createdAt },
+    standings,
+  }, 'public, max-age=30');
+}
+
+// Join-page preview: enough to render "you're joining <name> (n members)",
+// nothing more. Possessing the code already grants membership, so this leaks
+// nothing the holder couldn't get by joining.
+export async function handleSquadByCode(url, env) {
+  const code = normCode(url.searchParams.get('code'));
+  const id = code ? await env.TOTALS.get(SQUAD_CODE_KEY(code)) : null;
+  const squad = id ? await getSquad(env, id) : null;
+  if (!squad || squad.code !== code) return jsonError(404, 'no squad for that code');
+  return jsonOk({ squad: { id: squad.id, name: squad.name, members: squad.members.length } });
 }
 
 // ── Entry point ────────────────────────────────────────────────────────
@@ -657,6 +1084,51 @@ function jsonError(status, message) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+
+    // Preflight for the browser-facing authed routes (Bearer token, no cookies
+    // — so permissive CORS carries no CSRF risk; the data is public anyway).
+    if (request.method === 'OPTIONS') {
+      return new Response(null, {
+        status: 204,
+        headers: {
+          ...CORS,
+          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'authorization, content-type',
+          'Access-Control-Max-Age': '86400',
+        },
+      });
+    }
+
+    if (request.method === 'GET' && url.pathname === '/auth/login') {
+      return handleAuthLogin(url, env);
+    }
+    if (request.method === 'GET' && url.pathname === '/auth/callback') {
+      return handleAuthCallback(url, env);
+    }
+    if (request.method === 'GET' && url.pathname === '/auth/me') {
+      return handleAuthMe(request, env);
+    }
+    if (request.method === 'POST' && url.pathname === '/squad/create') {
+      return handleSquadCreate(request, env);
+    }
+    if (request.method === 'POST' && url.pathname === '/squad/join') {
+      return handleSquadJoin(request, env);
+    }
+    if (request.method === 'POST' && url.pathname === '/squad/leave') {
+      return handleSquadLeave(request, env);
+    }
+    if (request.method === 'POST' && url.pathname === '/squad/update') {
+      return handleSquadUpdate(request, env);
+    }
+    if (request.method === 'POST' && url.pathname === '/squads/mine') {
+      return handleSquadsMine(request, env);
+    }
+    if (request.method === 'GET' && url.pathname === '/squad/bycode') {
+      return handleSquadByCode(url, env);
+    }
+    if (request.method === 'GET' && url.pathname === '/squad') {
+      return handleSquadGet(url, env);
+    }
 
     if (request.method === 'POST' && url.pathname === '/report') {
       return handleReport(request, env);
