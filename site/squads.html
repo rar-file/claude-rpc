@@ -61,9 +61,15 @@
   .sq .spacer { flex: 1; }
   .crown { color: var(--rust-3); }
 
-  .steps { font-family: var(--font-mono); font-size: 0.84rem; background: var(--paper); border: 1.5px solid var(--ink); padding: 14px 18px; margin: 12px 0; }
-  .steps div { margin: 4px 0; }
+  .steps { font-family: var(--font-mono); font-size: 0.84rem; background: var(--paper); border: 1.5px solid var(--ink); padding: 8px 10px; margin: 12px 0; }
+  .cmd { margin: 2px 0; padding: 7px 8px; cursor: pointer; display: flex; gap: 8px; align-items: baseline; }
+  .cmd:hover { background: var(--paper-2); }
+  .cmd .copyhint { margin-left: auto; font-size: 0.7rem; color: var(--ink-faint); white-space: nowrap; }
+  .cmd.copied .copyhint { color: var(--grass); font-weight: 700; }
   .ps1 { color: var(--rust-3); }
+  .waiting { font-family: var(--font-mono); font-size: 0.78rem; color: var(--ink-mute); display: inline-flex; align-items: center; gap: 8px; }
+  .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--grass); animation: pulse 2s infinite; }
+  @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(90,125,79,.5)} 70%{box-shadow:0 0 0 8px rgba(90,125,79,0)} 100%{box-shadow:0 0 0 0 rgba(90,125,79,0)} }
   .err { color: var(--rust-3); font-family: var(--font-mono); font-size: 0.84rem; margin-top: 10px; min-height: 1.2em; }
   .note { color: var(--ink-faint); font-size: 0.82rem; margin-top: 18px; max-width: 60ch; }
   footer { border-top: 1.5px solid var(--ink); padding: 20px 24px; font-family: var(--font-mono); font-size: 0.76rem; color: var(--ink-mute); display: flex; gap: 18px; justify-content: center; flex-wrap: wrap; }
@@ -91,15 +97,14 @@
     <!-- state: logged in, profile not linked -->
     <section id="sUnlinked" hidden>
       <div class="panel">
-        <h3>almost — link your claude-rpc profile</h3>
-        <div style="color:var(--ink-mute); margin-bottom: 4px;">Your GitHub is logged in, but no claude-rpc profile is verified against it yet. Three commands in your terminal:</div>
-        <div class="steps">
-          <div><span class="ps1">$</span> npx claude-rpc@latest setup</div>
-          <div><span class="ps1">$</span> claude-rpc profile set --handle you && claude-rpc profile on</div>
-          <div><span class="ps1">$</span> claude-rpc profile verify</div>
+        <h3>almost — run these in your terminal</h3>
+        <div style="color:var(--ink-mute); margin-bottom: 10px;">Click a line to copy it. Already ran a step? Skip it.</div>
+        <div class="steps" id="linkCmds"></div>
+        <div class="row" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:10px">
+          <span class="waiting" id="linkWait"><span class="pulse"></span> waiting for the link — this page updates itself</span>
+          <button class="btn alt small" id="newCodeBtn" title="codes expire after 10 minutes">new code</button>
         </div>
-        <button class="btn alt" id="recheckBtn">done — check again</button>
-        <div class="err" id="recheckErr"></div>
+        <div class="err" id="linkErr"></div>
       </div>
     </section>
 
@@ -190,12 +195,47 @@
 
     if (!me.linked) {
       show('sUnlinked');
-      document.getElementById('recheckBtn').onclick = async () => {
-        const again = await fetch(`${WORKER}/auth/me`, { headers: auth }).then((r) => r.ok ? r.json() : null);
-        if (again?.linked) { location.reload(); return; }
-        document.getElementById('recheckErr').textContent =
-          'not linked yet — make sure `claude-rpc profile verify` succeeded, then try again.';
-      };
+      // Suggest their GitHub login as the handle — placeholder text gets
+      // copied verbatim, so make the copy-paste the right thing to run.
+      const handleSug = (me.githubUser || '').toLowerCase().replace(/[^a-z0-9-]+/g, '-')
+        .replace(/-+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32) || 'your-name';
+
+      let pairCode = null;
+      async function freshCode() {
+        try {
+          const r = await fetch(`${WORKER}/pair/start`, { method: 'POST', headers: auth }).then((x) => x.json());
+          pairCode = r.code || null;
+        } catch { pairCode = null; }
+      }
+      function renderCmds() {
+        const cmds = [
+          'npx claude-rpc@latest setup',
+          `claude-rpc profile set --handle ${handleSug} && claude-rpc profile on`,
+          pairCode ? `claude-rpc link ${pairCode}` : 'claude-rpc link <code unavailable — hit "new code">',
+        ];
+        const holder = document.getElementById('linkCmds');
+        holder.innerHTML = cmds.map((cc) =>
+          `<div class="cmd" data-c="${esc(cc)}"><span class="ps1">$</span><span>${esc(cc)}</span><span class="copyhint">click to copy</span></div>`,
+        ).join('');
+        for (const el of holder.querySelectorAll('.cmd')) {
+          el.onclick = async () => {
+            try { await navigator.clipboard.writeText(el.dataset.c); } catch { /* clipboard denied */ }
+            el.classList.add('copied');
+            el.querySelector('.copyhint').textContent = 'copied ✓';
+            setTimeout(() => { el.classList.remove('copied'); el.querySelector('.copyhint').textContent = 'click to copy'; }, 1600);
+          };
+        }
+      }
+      await freshCode();
+      renderCmds();
+      document.getElementById('newCodeBtn').onclick = async () => { await freshCode(); renderCmds(); };
+      // The page notices the `claude-rpc link` landing on its own.
+      const poll = setInterval(async () => {
+        try {
+          const again = await fetch(`${WORKER}/auth/me`, { headers: auth }).then((r) => r.ok ? r.json() : null);
+          if (again?.linked) { clearInterval(poll); location.reload(); }
+        } catch { /* next tick */ }
+      }, 4000);
       return;
     }
 

@@ -592,6 +592,19 @@ function safeGistId(id) {
   return typeof id === 'string' && /^[0-9a-f]{6,64}$/i.test(id) ? id : null;
 }
 
+// Headers for api.github.com. Unauthenticated calls share Cloudflare's egress
+// IPs with the whole platform — GitHub's 60/hr anonymous quota is effectively
+// always exhausted there, which made gist verification fail ~every time in
+// production. OAuth-app Basic auth (client_id:client_secret) lifts the quota
+// to the app's own 5000/hr without acting as any user.
+function ghApiHeaders(env) {
+  const h = { 'User-Agent': 'claude-rpc-worker', Accept: 'application/vnd.github+json' };
+  if (env?.GITHUB_CLIENT_ID && env?.GITHUB_CLIENT_SECRET) {
+    h.Authorization = 'Basic ' + btoa(`${env.GITHUB_CLIENT_ID}:${env.GITHUB_CLIENT_SECRET}`);
+  }
+  return h;
+}
+
 export async function handleVerifyCheck(request, env, fetchImpl = fetch) {
   let body;
   try { body = await request.json(); } catch { return jsonError(400, 'invalid JSON'); }
@@ -613,9 +626,7 @@ export async function handleVerifyCheck(request, env, fetchImpl = fetch) {
   try {
     const gid = safeGistId(body.gistId);
     if (gid) {
-      const res = await fetchImpl(`${GH_API}/gists/${gid}`, {
-        headers: { 'User-Agent': 'claude-rpc-worker', Accept: 'application/vnd.github+json' },
-      });
+      const res = await fetchImpl(`${GH_API}/gists/${gid}`, { headers: ghApiHeaders(env) });
       if (res.ok) {
         const g = await res.json();
         const owner = g.owner && g.owner.login;
@@ -626,16 +637,14 @@ export async function handleVerifyCheck(request, env, fetchImpl = fetch) {
       }
     } else if (pending.githubUser) {
       // Fallback (no gistId): scan the hinted user's public gists.
-      const listRes = await fetchImpl(`${GH_API}/users/${pending.githubUser}/gists?per_page=20`, {
-        headers: { 'User-Agent': 'claude-rpc-worker', Accept: 'application/vnd.github+json' },
-      });
+      const listRes = await fetchImpl(`${GH_API}/users/${pending.githubUser}/gists?per_page=20`, { headers: ghApiHeaders(env) });
       if (listRes.ok) {
         const gists = await listRes.json();
         let rawFetches = 0; // hard cap on outbound fetches — gists can have many files
         for (const g of (Array.isArray(gists) ? gists.slice(0, 20) : [])) {
           for (const f of Object.values(g.files || {})) {
             if (!f || !f.raw_url || ++rawFetches > 10) continue;
-            const rr = await fetchImpl(f.raw_url, { headers: { 'User-Agent': 'claude-rpc-worker' } });
+            const rr = await fetchImpl(f.raw_url, { headers: ghApiHeaders(env) });
             if (rr.ok && (await rr.text()).includes(pending.token)) { matchedOwner = pending.githubUser; break; }
           }
           if (matchedOwner || rawFetches > 10) break;
@@ -1069,6 +1078,57 @@ export async function handleSquadGet(url, env) {
   }, 'public, max-age=30');
 }
 
+// ── CLI ↔ web pairing ("link codes") ─────────────────────────────────────
+//
+// The no-gist verification path. A user logged into the site already proved
+// their GitHub identity via OAuth; their CLI already holds the profile's
+// secret instanceId. The page mints a short one-time code bound to the
+// GitHub session; `claude-rpc link <code>` claims it from the machine. Both
+// identities meet at the worker — a proof at least as strong as the public
+// gist dance, so it grants the same verified ✓.
+
+const PAIR_KEY = (code) => `pair:${code}`;
+const PAIR_TTL_SECONDS = 600;
+
+function normPairCode(input) {
+  const c = String(input || '').trim().toUpperCase().replace(/[^0-9A-Z]/g, '');
+  return /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$/.test(c) ? c : null;
+}
+
+export async function handlePairStart(request, env) {
+  const login = await sessionLogin(request, env);
+  if (!login) return jsonError(401, 'log in first');
+  if (!(await ipRateOk(env, clientIp(request)))) return jsonError(429, 'rate limited (ip)');
+  const code = newInviteCode().slice(3); // 6 chars, same unambiguous alphabet
+  await env.TOTALS.put(PAIR_KEY(code), login, { expirationTtl: PAIR_TTL_SECONDS });
+  return jsonOk({ ok: true, code, expiresInSec: PAIR_TTL_SECONDS });
+}
+
+export async function handlePairClaim(request, env) {
+  let body;
+  try { body = await request.json(); } catch { return jsonError(400, 'invalid JSON'); }
+  if (!isUuidish(body.instanceId)) return jsonError(400, 'instanceId must be a UUID');
+  if (!(await ipRateOk(env, clientIp(request)))) return jsonError(429, 'rate limited (ip)');
+  const code = normPairCode(body.code);
+  if (!code) return jsonError(400, 'link code looks wrong — it\'s the 6 characters from the squads page');
+  const login = await env.TOTALS.get(PAIR_KEY(code));
+  if (!login) return jsonError(404, 'code expired or unknown — grab a fresh one from claude-rpc.vercel.app/squads');
+  const prof = await getProfile(env, body.instanceId);
+  if (!prof) return jsonError(409, 'publish a profile first: claude-rpc profile on && claude-rpc profile publish');
+
+  prof.verified = true;
+  prof.githubUser = login;
+  await env.TOTALS.put(PF_KEY(body.instanceId), JSON.stringify(prof)); // verified → permanent
+  await env.TOTALS.put(GH_KEY(login), body.instanceId);
+  try { await env.TOTALS.delete(PAIR_KEY(code)); } catch { /* TTL covers it */ }
+  try {
+    const index = pruneBoardIndex(await getBoardIndex(env));
+    index[body.instanceId] = boardEntry(prof);
+    await env.TOTALS.put(BOARD_INDEX_KEY, JSON.stringify(index));
+  } catch { /* best-effort */ }
+  return jsonOk({ ok: true, githubUser: login, handle: prof.handle, verified: true });
+}
+
 // Join-page preview: enough to render "you're joining <name> (n members)",
 // nothing more. Possessing the code already grants membership, so this leaks
 // nothing the holder couldn't get by joining.
@@ -1123,6 +1183,12 @@ export default {
     }
     if (request.method === 'POST' && url.pathname === '/squads/mine') {
       return handleSquadsMine(request, env);
+    }
+    if (request.method === 'POST' && url.pathname === '/pair/start') {
+      return handlePairStart(request, env);
+    }
+    if (request.method === 'POST' && url.pathname === '/pair/claim') {
+      return handlePairClaim(request, env);
     }
     if (request.method === 'GET' && url.pathname === '/squad/bycode') {
       return handleSquadByCode(url, env);

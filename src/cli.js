@@ -1123,6 +1123,40 @@ async function doSquadCmd(argv) {
   });
 }
 
+// ── Link (CLI ↔ web pairing) ─────────────────────────────────────────────
+//
+// `claude-rpc link <code>` — the code comes from claude-rpc.vercel.app/squads
+// while logged in with GitHub. Claims it against this install's instanceId,
+// which verifies the profile (✓) and unlocks managing squads from the
+// browser. Replaces the gist dance for anyone who uses the website.
+
+async function doLink(argv) {
+  const code = (argv[0] || '').trim();
+  if (!code) {
+    fail('usage: claude-rpc link <code>', {
+      hint: 'log in at https://claude-rpc.vercel.app/squads — it shows you the code',
+      code: EX_USER_ERROR,
+    });
+  }
+  const ctx = squadAuth();
+  // Make sure the profile row exists server-side before claiming — same
+  // pre-publish profileVerify does, so link works on a fresh `profile on`.
+  if (lb.profileIsPublishable(ctx.cfg.profile || {})) {
+    const { flushProfile } = await import('./community.js');
+    await flushProfile(ctx.cfg);
+  }
+  const r = await ctx.post('/pair/claim', { code });
+  if (r.status !== 200) {
+    return fail(`link failed: ${r.json?.error || r.status}`, { code: EX_SYS_ERROR });
+  }
+  // Mirror the verified identity locally so `profile status` agrees.
+  const userCfg = readJson(CONFIG_PATH, {});
+  userCfg.profile = { ...(userCfg.profile || {}), githubUser: r.json.githubUser, verified: true };
+  writeFileSync(CONFIG_PATH, JSON.stringify(userCfg, null, 2));
+  console.log(`${c.green}✓${c.reset} linked as ${c.cyan}@${r.json.githubUser}${c.reset} — profile verified, squads unlocked in the browser.`);
+  console.log(`  ${c.dim}head back to https://claude-rpc.vercel.app/squads — it picks the link up automatically.${c.reset}`);
+}
+
 // ── Community totals ─────────────────────────────────────────────────────
 //
 // `claude-rpc community`         → show current state + endpoint
@@ -1607,6 +1641,7 @@ function help() {
     ['community', 'Opt in/out of anonymous community totals (on|off|status|report)'],
     ['profile',   'Public leaderboard identity (status|set|on|off|publish|verify)'],
     ['squad',     'Private mini-leaderboards with friends (create|join|leave|status)'],
+    ['link',      'Pair this install with your web login (code from /squads page)'],
     ['doctor',    'Run a diagnostic checklist — common-failure triage (--fix to auto-repair)'],
     ['tail',      'Tail the daemon log file'],
     ['daemon',    'Run daemon in foreground (debug)'],
@@ -1720,6 +1755,7 @@ const packagedDefault = IS_PACKAGED && !cmd;
     case 'community': await doCommunity(process.argv.slice(3)); break;
     case 'profile':   await doProfile(process.argv.slice(3)); break;
     case 'squad':     await doSquadCmd(process.argv.slice(3)); break;
+    case 'link':      await doLink(process.argv.slice(3)); break;
     case 'doctor': {
       const { runDoctor, fixPlan } = await import('./doctor.js');
       const fix = process.argv.includes('--fix');

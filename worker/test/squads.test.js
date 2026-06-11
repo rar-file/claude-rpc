@@ -305,3 +305,61 @@ test('bycode previews name + size, and bad codes 404 without information leaks',
   res = await handleSquadByCode(new URL('http://localhost/squad/bycode?code=SQ-222222'), env);
   assert.equal(res.status, 404);
 });
+
+// ── CLI ↔ web pairing (link codes) ───────────────────────────────────────
+
+const { handlePairStart, handlePairClaim } = await import('../src/index.js');
+
+test('pair: web session mints a code, CLI claim verifies the profile end-to-end', async () => {
+  const env = makeEnv();
+  await seedProfile(env, IDS.alice, 'alice');
+  const sess = await mintToken('sess', { gh: 'AliceGH' }, SECRET, 60_000);
+  const start = await handlePairStart(post('/pair/start', {}, { Authorization: `Bearer ${sess}` }), env);
+  assert.equal(start.status, 200);
+  const { code } = await start.json();
+  assert.match(code, /^[2-9A-HJKMNP-Z]{6}$/);
+
+  // CLI claims with lowercase + stray spaces — normalization handles it.
+  const claim = await handlePairClaim(post('/pair/claim', { instanceId: IDS.alice, code: ` ${code.toLowerCase()} ` }), env);
+  assert.equal(claim.status, 200, await claim.clone().text());
+  const j = await claim.json();
+  assert.equal(j.githubUser, 'AliceGH');
+  assert.equal(j.verified, true);
+
+  const prof = JSON.parse(env.TOTALS.store.get('pf:' + IDS.alice).value);
+  assert.equal(prof.verified, true, 'profile now carries the ✓');
+  assert.equal(prof.githubUser, 'AliceGH');
+  assert.equal(env.TOTALS.store.get('pf:' + IDS.alice).ttl, null, 'verified → permanent (no TTL)');
+  assert.equal(await env.TOTALS.get('gh:alicegh'), IDS.alice, 'web login now resolves to the profile');
+  assert.equal(await env.TOTALS.get('pair:' + code), null, 'code is one-time');
+});
+
+test('pair: claim without a profile, with a bad code, or unauthenticated start all fail cleanly', async () => {
+  const env = makeEnv();
+  let res = await handlePairStart(post('/pair/start', {}), env);
+  assert.equal(res.status, 401, 'no session → no code');
+
+  const sess = await mintToken('sess', { gh: 'someone' }, SECRET, 60_000);
+  const { code } = await (await handlePairStart(post('/pair/start', {}, { Authorization: `Bearer ${sess}` }), env)).json();
+  res = await handlePairClaim(post('/pair/claim', { instanceId: IDS.carol, code }), env);
+  assert.equal(res.status, 409, 'no published profile → instructive 409');
+  res = await handlePairClaim(post('/pair/claim', { instanceId: IDS.carol, code: 'AAAAAA' }), env);
+  assert.equal(res.status, 404, 'unknown code → 404');
+});
+
+test('verify/check sends authenticated GitHub API requests when app creds exist', async () => {
+  const env = makeEnv();
+  await seedProfile(env, IDS.bob, 'bob');
+  await handleVerifyStart(post('/verify/start', { instanceId: IDS.bob }), env);
+  const pending = JSON.parse(env.TOTALS.store.get('verify:' + IDS.bob).value);
+  let sawAuth = null;
+  const gistFetch = async (url, opts) => {
+    sawAuth = opts?.headers?.Authorization || null;
+    return new Response(JSON.stringify({
+      owner: { login: 'BobGH' },
+      files: { 'v.txt': { content: pending.token } },
+    }), { status: 200 });
+  };
+  await handleVerifyCheck(post('/verify/check', { instanceId: IDS.bob, gistId: 'abcdef123456' }), env, gistFetch);
+  assert.ok(sawAuth && sawAuth.startsWith('Basic '), 'OAuth-app Basic auth applied (shared-IP rate-limit fix)');
+});
