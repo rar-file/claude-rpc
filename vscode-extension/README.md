@@ -28,6 +28,7 @@ In remote / WSL setups the extension runs where Claude Code runs (`extensionKind
 | `claudeRpc.hideWhenStale` | `false` | Hide the item entirely when Claude Code isn't running |
 | `claudeRpc.showTokens` | `true` | Append the session token count to the label |
 | `claudeRpc.pollIntervalSec` | `3` | Fallback re-read cadence (watchers cover most changes) |
+| `claudeRpc.statusBarPriority` | `10000` | Placement weight — higher sits further left; default outranks other extensions |
 
 ## Build from source
 

@@ -2,7 +2,7 @@
   "name": "claude-rpc-vscode",
   "displayName": "Claude RPC — Claude Code Status",
   "description": "Live Claude Code status in the status bar — what Claude is doing (working / thinking / waiting on you), session tokens, and lifetime stats, read from claude-rpc's state files. Pause or resume the Discord card without leaving the editor. Tracks Claude Code only — never your editor activity.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "rar-file",
   "license": "MIT",
   "repository": {
@@ -43,6 +43,11 @@
           "default": 3,
           "minimum": 1,
           "description": "Fallback re-read cadence in seconds. File watchers catch most changes instantly; the poll also refreshes elapsed-time displays."
+        },
+        "claudeRpc.statusBarPriority": {
+          "type": "number",
+          "default": 10000,
+          "description": "Placement weight among left-aligned status bar items — higher appears further left. The default outranks virtually every other extension's item. Applies immediately."
         }
       }
     }

@@ -54,9 +54,22 @@ function readAggregate() {
 }
 
 function activate(context) {
-  const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-  item.command = 'claudeRpc.menu';
-  context.subscriptions.push(item);
+  // Priority decides left-to-right placement among left-aligned items —
+  // higher is further left. It's fixed at creation time, so a priority
+  // change from settings recreates the item.
+  let item = null;
+  let itemPriority = null;
+  function ensureItem() {
+    const priority = vscode.workspace.getConfiguration('claudeRpc').get('statusBarPriority', 10000);
+    if (item && itemPriority === priority) return;
+    const old = item;
+    item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, priority);
+    item.command = 'claudeRpc.menu';
+    itemPriority = priority;
+    if (old) old.dispose();
+  }
+  ensureItem();
+  context.subscriptions.push({ dispose: () => item?.dispose() });
 
   function render() {
     const cfg = vscode.workspace.getConfiguration('claudeRpc');
@@ -107,7 +120,7 @@ function activate(context) {
   }
   context.subscriptions.push({ dispose: () => { clearInterval(timer); for (const w of watchers.values()) { try { w.close(); } catch { /* noop */ } } } });
   context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => {
-    if (e.affectsConfiguration('claudeRpc')) { schedule(); render(); }
+    if (e.affectsConfiguration('claudeRpc')) { ensureItem(); schedule(); render(); }
   }));
 
   // ── Commands ─────────────────────────────────────────────────────────────
