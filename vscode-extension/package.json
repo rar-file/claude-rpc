@@ -1,0 +1,53 @@
+{
+  "name": "claude-rpc-vscode",
+  "displayName": "Claude RPC — Claude Code Status",
+  "description": "Live Claude Code status in the status bar — what Claude is doing (working / thinking / waiting on you), session tokens, and lifetime stats, read from claude-rpc's state files. Pause or resume the Discord card without leaving the editor. Tracks Claude Code only — never your editor activity.",
+  "version": "0.1.0",
+  "publisher": "rar-file",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rar-file/claude-rpc",
+    "directory": "vscode-extension"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "keywords": ["claude", "claude code", "discord", "rich presence", "status bar"],
+  "main": "./extension.js",
+  "extensionKind": ["workspace", "ui"],
+  "activationEvents": ["onStartupFinished"],
+  "contributes": {
+    "commands": [
+      { "command": "claudeRpc.menu", "title": "Claude RPC: Menu" },
+      { "command": "claudeRpc.pause", "title": "Claude RPC: Pause Discord Presence" },
+      { "command": "claudeRpc.resume", "title": "Claude RPC: Resume Discord Presence" },
+      { "command": "claudeRpc.openDashboard", "title": "Claude RPC: Open Dashboard" }
+    ],
+    "configuration": {
+      "title": "Claude RPC",
+      "properties": {
+        "claudeRpc.hideWhenStale": {
+          "type": "boolean",
+          "default": false,
+          "description": "Hide the status bar item entirely when Claude Code isn't running (default shows a dimmed 'Away' item)."
+        },
+        "claudeRpc.showTokens": {
+          "type": "boolean",
+          "default": true,
+          "description": "Append the session's running token count to the status bar label."
+        },
+        "claudeRpc.pollIntervalSec": {
+          "type": "number",
+          "default": 3,
+          "minimum": 1,
+          "description": "Fallback re-read cadence in seconds. File watchers catch most changes instantly; the poll also refreshes elapsed-time displays."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "package": "npx --yes @vscode/vsce package"
+  }
+}

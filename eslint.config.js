@@ -43,6 +43,20 @@ export default [
     },
   },
   {
+    // VS Code extension — CommonJS (the extension host's native module
+    // format; the folder's package.json has no "type" field on purpose).
+    files: ['vscode-extension/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 2023,
+      sourceType: 'commonjs',
+      globals: { ...globals.node },
+    },
+    rules: {
+      'no-empty': ['error', { allowEmptyCatch: true }],
+      'no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
+    },
+  },
+  {
     // Browser-side assets served by the dashboard web server.
     files: ['src/server/assets/**/*.client.js'],
     languageOptions: {

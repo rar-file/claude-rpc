@@ -2,6 +2,12 @@
 
 All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+**Added**
+
+- **VS Code extension** (`vscode-extension/`) — Claude Code's live status in the editor's status bar: working / thinking / **needs you** (highlighted when a permission prompt waits) / shipped / idle, with session tokens in the label and a hover card showing model, session stats, today's hours, and streak. Click for a menu: pause/resume the Discord card (writes the same `pause.json` marker as the CLI), open the dashboard (offers to start the server if it's down), start the daemon. It's a *viewer* over the existing state files — zero dependencies, no network surface, and it tracks **Claude Code only**, never your editor activity. Reads `state.json` directly, so it works even with the Discord daemon stopped. Build with `cd vscode-extension && npm run package`; not part of the npm package.
+
 ## [0.14.0] - 2026-06-11
 
 **Added**

@@ -39,3 +39,4 @@ NOTES.md
 
 # launch board local creds + queue (never commit)
 tools/launch-board/.data/
+*.vsix
