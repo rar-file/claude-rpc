@@ -21,5 +21,5 @@ id = "6ca3b87cd4cc46469008d28558701dac"
 # Register the OAuth app's callback URL as:
 #   https://claude-rpc-totals.claude-rpc.workers.dev/auth/callback
 [vars]
-GITHUB_CLIENT_ID = ""
+GITHUB_CLIENT_ID = "Ov23liFCtlBWX8BHepyh"
 SITE_ORIGIN = "https://claude-rpc.vercel.app"
