@@ -2,14 +2,13 @@
 
 All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.15.0] - 2026-06-12
 
 **Added**
 
 - **Squads — private mini-leaderboards with friends, with weekly resets.** `claude-rpc squad create "the night shift"` mints an invite code + link; friends join with `claude-rpc squad join SQ-XXXXXX` or **entirely in the browser**. Standings race on weekly deltas (reset Monday 00:00 UTC, lazily snapshotted — no cron) with lifetime alongside, at `claude-rpc.vercel.app/squad/<id>`. Capped (20 members, 5 squads each), code-gated, built on the stats profiles already publish — joining sends nothing new.
 - **`claude-rpc link <code>`** — one-command web pairing. The /squads page shows a one-time code while you're logged in with GitHub; claiming it from the CLI verifies your profile (same ✓ as the gist flow, proven more directly) and unlocks browser-side squad management. The setup panels generate copy-on-click commands with YOUR GitHub login pre-filled as the handle, and the page detects the link landing automatically.
-- **Web login.** "Log in with GitHub" on the site (no scopes — public identity only). The gist verification you already did doubles as account linking: the worker resolves your GitHub login to your profile, so squads can be created, joined, and managed without touching a terminal. Sessions are stateless signed tokens carrying only the public GitHub login; the browser never sees an instanceId. New worker routes: `/auth/login|callback|me`, `/squad/*`, `/squads/mine`. *(Needs `wrangler deploy` + GitHub OAuth app secrets — see worker/wrangler.toml.)*
-
+- **Web login.** "Log in with GitHub" on the site (no scopes — public identity only). The gist verification you already did doubles as account linking: the worker resolves your GitHub login to your profile, so squads can be created, joined, and managed without touching a terminal. Sessions are stateless signed tokens carrying only the public GitHub login; the browser never sees an instanceId. New worker routes: `/auth/login|callback|me`, `/squad/*`, `/squads/mine`.
 - **VS Code extension** (`vscode-extension/`) — Claude Code's live status in the editor's status bar: working / thinking / **needs you** (highlighted when a permission prompt waits) / shipped / idle, with session tokens in the label and a hover card showing model, session stats, today's hours, and streak. Click for a menu: pause/resume the Discord card (writes the same `pause.json` marker as the CLI), open the dashboard (offers to start the server if it's down), start the daemon. It's a *viewer* over the existing state files — zero dependencies, no network surface, and it tracks **Claude Code only**, never your editor activity. Reads `state.json` directly, so it works even with the Discord daemon stopped. Build with `cd vscode-extension && npm run package`; not part of the npm package.
 
 ## [0.14.0] - 2026-06-11
