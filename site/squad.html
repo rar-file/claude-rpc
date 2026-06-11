@@ -116,7 +116,7 @@
           <div class="row"><button class="btn alt" id="retryLink">done — check again</button></div>
         </div>
       </div>
-      <p class="note">claude-rpc is the open-source Discord presence + stats layer for Claude Code. The squad races on stats its daemon publishes. <a href="/?ref=vscode">What is claude-rpc?</a></p>
+      <p class="note">claude-rpc is the open-source Discord presence + stats layer for Claude Code. The squad races on stats its daemon publishes. <a href="/?ref=squad">What is claude-rpc?</a></p>
     </section>
 
     <div class="err" id="err" hidden></div>
@@ -203,21 +203,39 @@
         const me = (mine.squads || []).find((s) => s.id === j.squad.id);
         if (me) {
           const link = `${location.origin}/squad/join/${me.code}`;
+          const panel = document.getElementById('memberPanel');
           document.getElementById('inviteLink').textContent = link;
-          document.getElementById('memberPanel').hidden = false;
+          panel.hidden = false;
+          // Solo squad: the next move is inviting, not staring at a one-row
+          // table — lead with the invite panel.
+          if (j.squad.members === 1) {
+            panel.querySelector('h3').textContent = 'it\'s just you in here — send your crew the link';
+            const view = document.getElementById('view');
+            view.insertBefore(panel, view.firstElementChild);
+          }
           document.getElementById('copyInvite').onclick = async () => {
             try { await navigator.clipboard.writeText(link); } catch { /* clipboard denied */ }
-            document.getElementById('copyInvite').textContent = 'copied!';
+            document.getElementById('copyInvite').textContent = 'link copied!';
             setTimeout(() => { document.getElementById('copyInvite').textContent = 'copy'; }, 1400);
           };
-          document.getElementById('leaveBtn').onclick = async () => {
-            if (!confirm(`Leave "${j.squad.name}"?`)) return;
+          // Two-click leave — inline arm/confirm instead of a native dialog.
+          const leaveBtn = document.getElementById('leaveBtn');
+          let armed = null;
+          leaveBtn.onclick = async () => {
+            if (!armed) {
+              leaveBtn.textContent = 'really leave?';
+              armed = setTimeout(() => { armed = null; leaveBtn.textContent = 'leave squad'; }, 3000);
+              return;
+            }
+            clearTimeout(armed);
+            leaveBtn.disabled = true;
+            leaveBtn.textContent = 'leaving…';
             await fetch(`${WORKER}/squad/leave`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', ...authHeaders },
               body: JSON.stringify({ squadId: j.squad.id }),
             });
-            location.href = '/leaderboard';
+            location.href = '/squads';
           };
         }
       } catch { /* member panel is optional sugar */ }

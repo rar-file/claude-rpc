@@ -89,11 +89,10 @@
 
     <div class="account" id="account">
       <a class="acct-btn" id="loginLink" href="#">log in with GitHub →</a>
+      <a class="acct-btn" href="/squads">squads — race your friends →</a>
       <div id="acctIn" hidden>
         <span class="acct-who">@<span id="acctGh"></span></span>
         <span id="mySquads"></span>
-        <button class="acct-btn" id="createSquad">+ new squad</button>
-        <button class="acct-btn dim" id="logoutBtn" title="forget this browser session">log out</button>
       </div>
     </div>
 
@@ -221,28 +220,6 @@
           .join('');
       } catch { /* chips are sugar */ }
     }
-
-    document.getElementById('createSquad').onclick = async () => {
-      if (!me.linked) {
-        alert('Link your claude-rpc profile first:\n  claude-rpc profile set --handle you\n  claude-rpc profile on\n  claude-rpc profile verify\nthen reload this page.');
-        return;
-      }
-      const name = prompt('Squad name?', '');
-      if (!name) return;
-      const r = await fetch(`${WORKER}/squad/create`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...auth },
-        body: JSON.stringify({ name }),
-      });
-      const j = await r.json().catch(() => ({}));
-      if (r.ok && j.squad) location.href = `/squad/${j.squad.id}`;
-      else alert(j.error || 'could not create the squad — try again');
-    };
-    document.getElementById('logoutBtn').onclick = () => {
-      localStorage.removeItem('crpcTok');
-      localStorage.removeItem('crpcGh');
-      location.reload();
-    };
   }
   initAccount();
 </script>

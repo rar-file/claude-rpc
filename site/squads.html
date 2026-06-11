@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>claude-rpc — squads</title>
+<meta name="description" content="Squads: private Claude Code mini-leaderboards with friends. Weekly resets — fresh race every Monday." />
+<meta property="og:site_name" content="claude-rpc" />
+<meta property="og:title" content="claude-rpc — squads" />
+<meta property="og:description" content="Race your friends on Claude Code. Private squads, weekly resets, one invite link." />
+<meta property="og:type" content="website" />
+<meta property="og:image" content="https://claude-rpc.vercel.app/img/og.png" />
+<meta name="twitter:card" content="summary_large_image" />
+<link rel="icon" href="https://cdn.qualit.ly/clawd-working-building.gif" />
+<style>
+  :root {
+    --paper: #f4ede0; --paper-2: #ebe2d2; --ink: #2b2722; --ink-mute: #6b6357;
+    --ink-faint: #9a9183; --rust: #d97757; --rust-3: #b8552f; --grass: #5a7d4f;
+    --shadow: 6px 6px 0 rgba(43,39,34,0.12);
+    --font-disp: "Space Grotesk","Inter Tight",system-ui,sans-serif;
+    --font-mono: "JetBrains Mono",ui-monospace,monospace;
+    --font-body: -apple-system,BlinkMacSystemFont,"Inter",system-ui,sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-body);
+    background-image: radial-gradient(rgba(43,39,34,0.04) 1px, transparent 1px); background-size: 22px 22px;
+    min-height: 100vh; display: flex; flex-direction: column; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 64px 24px; width: 100%; flex: 1; }
+  a { color: var(--rust-3); }
+  .kicker { font-family: var(--font-mono); font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.18em; color: var(--rust-3); }
+  h1 { font-family: var(--font-disp); font-size: clamp(2rem, 5vw, 3rem); margin: 8px 0 6px; line-height: 1.05; }
+  .lead { color: var(--ink-mute); max-width: 56ch; font-size: 1.02rem; }
+  .who { font-family: var(--font-mono); font-size: 0.82rem; color: var(--ink-mute); margin-top: 8px; }
+  .who button { border: none; background: none; color: var(--rust-3); cursor: pointer; font: inherit; text-decoration: underline; padding: 0; }
+
+  .panel { border: 1.5px solid var(--ink); background: var(--paper-2); box-shadow: var(--shadow); padding: 22px 24px; margin: 26px 0; }
+  .panel h3 { margin: 0 0 10px; font-family: var(--font-disp); font-size: 1.15rem; }
+  .btn { display: inline-block; font-family: var(--font-mono); font-weight: 700; font-size: 0.88rem;
+    border: 1.5px solid var(--ink); background: var(--rust); color: #fff; padding: 11px 20px;
+    cursor: pointer; box-shadow: var(--shadow); text-decoration: none; }
+  .btn.alt { background: var(--paper); color: var(--ink); }
+  .btn.small { padding: 7px 12px; font-size: 0.78rem; box-shadow: none; }
+  .btn:disabled { opacity: 0.5; cursor: default; }
+
+  .steps3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin: 26px 0; }
+  @media (max-width: 560px) { .steps3 { grid-template-columns: 1fr; } }
+  .step { border: 1.5px solid var(--ink); background: var(--paper-2); padding: 16px; }
+  .step .n { font-family: var(--font-disp); font-weight: 700; color: var(--rust-3); font-size: 1.4rem; }
+  .step .t { font-weight: 600; margin: 6px 0 4px; }
+  .step .d { color: var(--ink-mute); font-size: 0.86rem; }
+
+  .createrow { display: flex; gap: 10px; flex-wrap: wrap; }
+  .createrow input { flex: 1; min-width: 200px; font-family: var(--font-mono); font-size: 0.95rem;
+    padding: 11px 14px; border: 1.5px solid var(--ink); background: var(--paper); color: var(--ink); }
+  .createrow input:focus { outline: 2px solid var(--rust); outline-offset: 1px; }
+
+  .sq { border: 1.5px solid var(--ink); background: var(--paper-2); box-shadow: var(--shadow);
+    padding: 18px 20px; margin: 14px 0; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+  .sq .name { font-family: var(--font-disp); font-weight: 700; font-size: 1.15rem; }
+  .sq .meta { font-family: var(--font-mono); font-size: 0.78rem; color: var(--ink-mute); }
+  .sq .spacer { flex: 1; }
+  .crown { color: var(--rust-3); }
+
+  .steps { font-family: var(--font-mono); font-size: 0.84rem; background: var(--paper); border: 1.5px solid var(--ink); padding: 14px 18px; margin: 12px 0; }
+  .steps div { margin: 4px 0; }
+  .ps1 { color: var(--rust-3); }
+  .err { color: var(--rust-3); font-family: var(--font-mono); font-size: 0.84rem; margin-top: 10px; min-height: 1.2em; }
+  .note { color: var(--ink-faint); font-size: 0.82rem; margin-top: 18px; max-width: 60ch; }
+  footer { border-top: 1.5px solid var(--ink); padding: 20px 24px; font-family: var(--font-mono); font-size: 0.76rem; color: var(--ink-mute); display: flex; gap: 18px; justify-content: center; flex-wrap: wrap; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+  <main class="wrap">
+    <span class="kicker">squads</span>
+    <h1>race your friends.</h1>
+    <p class="lead">A squad is a private leaderboard for your crew. Scores reset every Monday — so the race is always winnable, no matter whose lifetime total is scary.</p>
+    <div class="who" id="who" hidden>logged in as <strong id="whoGh"></strong> · <button id="logoutBtn">log out</button></div>
+
+    <!-- state: logged out -->
+    <section id="sLoggedOut" hidden>
+      <div class="steps3">
+        <div class="step"><div class="n">1</div><div class="t">log in</div><div class="d">GitHub, one click. It links to the claude-rpc profile you verified.</div></div>
+        <div class="step"><div class="n">2</div><div class="t">make a squad</div><div class="d">name it, get one invite link, send it to your crew.</div></div>
+        <div class="step"><div class="n">3</div><div class="t">race weekly</div><div class="d">fresh standings every Monday. Lifetime bragging rights on the side.</div></div>
+      </div>
+      <a class="btn" id="loginBtn" href="#">log in with GitHub →</a>
+      <p class="note">New here? claude-rpc is the open-source Discord presence + stats layer for <a href="/">Claude Code</a>. Squads race on the stats it tracks.</p>
+    </section>
+
+    <!-- state: logged in, profile not linked -->
+    <section id="sUnlinked" hidden>
+      <div class="panel">
+        <h3>almost — link your claude-rpc profile</h3>
+        <div style="color:var(--ink-mute); margin-bottom: 4px;">Your GitHub is logged in, but no claude-rpc profile is verified against it yet. Three commands in your terminal:</div>
+        <div class="steps">
+          <div><span class="ps1">$</span> npx claude-rpc@latest setup</div>
+          <div><span class="ps1">$</span> claude-rpc profile set --handle you && claude-rpc profile on</div>
+          <div><span class="ps1">$</span> claude-rpc profile verify</div>
+        </div>
+        <button class="btn alt" id="recheckBtn">done — check again</button>
+        <div class="err" id="recheckErr"></div>
+      </div>
+    </section>
+
+    <!-- state: logged in + linked -->
+    <section id="sReady" hidden>
+      <div class="panel">
+        <h3>start a squad</h3>
+        <div class="createrow">
+          <input id="nameInput" maxlength="40" placeholder="the night shift" autocomplete="off" />
+          <button class="btn" id="createBtn">create →</button>
+        </div>
+        <div class="err" id="createErr"></div>
+      </div>
+      <div id="mySquads"></div>
+      <p class="note" id="emptyNote" hidden>No squads yet — name one above and send the invite link it gives you. Terminal twin: <code>claude-rpc squad create "name"</code>.</p>
+    </section>
+
+    <div class="err" id="pageErr"></div>
+  </main>
+
+  <footer>
+    <a href="/">home</a>
+    <a href="/leaderboard">leaderboard</a>
+    <a href="https://github.com/rar-file/claude-rpc">github</a>
+  </footer>
+
+<script>
+  const WORKER = localStorage.getItem('crpcWorkerOverride') || 'https://claude-rpc-totals.claude-rpc.workers.dev';
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+
+  function captureToken() {
+    const m = location.hash.match(/token=([^&]+)/);
+    if (m) {
+      localStorage.setItem('crpcTok', decodeURIComponent(m[1]));
+      const g = location.hash.match(/gh=([^&]+)/);
+      if (g) localStorage.setItem('crpcGh', decodeURIComponent(g[1]));
+      history.replaceState(null, '', location.pathname + location.search);
+    }
+    return localStorage.getItem('crpcTok');
+  }
+
+  const show = (id) => { for (const s of ['sLoggedOut', 'sUnlinked', 'sReady']) document.getElementById(s).hidden = s !== id; };
+
+  async function renderSquads(auth) {
+    const holder = document.getElementById('mySquads');
+    let squads = [];
+    try {
+      const mine = await fetch(`${WORKER}/squads/mine`, { method: 'POST', headers: auth }).then((r) => r.json());
+      squads = mine.squads || [];
+    } catch { /* worker hiccup — leave empty */ }
+    document.getElementById('emptyNote').hidden = squads.length > 0;
+    holder.innerHTML = squads.map((s) => `
+      <div class="sq">
+        <div>
+          <div class="name">${s.owner ? '<span class="crown" title="you own this squad">♛</span> ' : ''}${esc(s.name)}</div>
+          <div class="meta">${s.members} member${s.members === 1 ? '' : 's'}</div>
+        </div>
+        <div class="spacer"></div>
+        <button class="btn alt small" data-copy="${esc(s.code)}">copy invite</button>
+        <a class="btn small" href="/squad/${esc(s.id)}">standings →</a>
+      </div>`).join('');
+    for (const btn of holder.querySelectorAll('[data-copy]')) {
+      btn.onclick = async () => {
+        const link = `${location.origin}/squad/join/${btn.dataset.copy}`;
+        try { await navigator.clipboard.writeText(link); } catch { /* clipboard denied */ }
+        const was = btn.textContent;
+        btn.textContent = 'link copied!';
+        setTimeout(() => { btn.textContent = was; }, 1400);
+      };
+    }
+  }
+
+  async function init() {
+    const token = captureToken();
+    document.getElementById('loginBtn').href = `${WORKER}/auth/login?return=/squads`;
+    if (!token) return show('sLoggedOut');
+    const auth = { Authorization: 'Bearer ' + token };
+
+    let me = null;
+    try { me = await fetch(`${WORKER}/auth/me`, { headers: auth }).then((r) => r.ok ? r.json() : null); } catch { /* retry below as logged out */ }
+    if (!me) { localStorage.removeItem('crpcTok'); return show('sLoggedOut'); }
+
+    document.getElementById('whoGh').textContent = '@' + me.githubUser;
+    document.getElementById('who').hidden = false;
+    document.getElementById('logoutBtn').onclick = () => {
+      localStorage.removeItem('crpcTok'); localStorage.removeItem('crpcGh'); location.reload();
+    };
+
+    if (!me.linked) {
+      show('sUnlinked');
+      document.getElementById('recheckBtn').onclick = async () => {
+        const again = await fetch(`${WORKER}/auth/me`, { headers: auth }).then((r) => r.ok ? r.json() : null);
+        if (again?.linked) { location.reload(); return; }
+        document.getElementById('recheckErr').textContent =
+          'not linked yet — make sure `claude-rpc profile verify` succeeded, then try again.';
+      };
+      return;
+    }
+
+    show('sReady');
+    renderSquads(auth);
+
+    const input = document.getElementById('nameInput');
+    const btn = document.getElementById('createBtn');
+    const err = document.getElementById('createErr');
+    async function create() {
+      const name = input.value.trim();
+      err.textContent = '';
+      if (!name) { err.textContent = 'give it a name first'; input.focus(); return; }
+      btn.disabled = true; btn.textContent = 'creating…';
+      try {
+        const r = await fetch(`${WORKER}/squad/create`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...auth },
+          body: JSON.stringify({ name }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (r.ok && j.squad) { location.href = `/squad/${j.squad.id}`; return; }
+        err.textContent = j.error || 'could not create the squad — try again';
+      } catch { err.textContent = 'network hiccup — try again'; }
+      btn.disabled = false; btn.textContent = 'create →';
+    }
+    btn.onclick = create;
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') create(); });
+  }
+  init();
+</script>
+</body>
+</html>
