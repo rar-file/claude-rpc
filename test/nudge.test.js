@@ -51,3 +51,26 @@ test('maybeNudge: shows once, then dedupes the same milestone', () => {
   const second = maybeNudge(agg, {}, { path });
   assert.equal(second, null, 'same milestone is not shown again');
 });
+
+// ── pickTodayMilestone — the local celebration line in `claude-rpc today` ──
+
+const { pickTodayMilestone } = await import('../src/nudge.js');
+
+test('pickTodayMilestone: token round numbers fire only on the crossing day', () => {
+  // 1.02B lifetime, 50M of it today → the 1B mark was crossed today.
+  const agg = { inputTokens: 1_020_000_000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+  assert.match(pickTodayMilestone(agg, 50_000_000), /crossed 1B lifetime tokens today/);
+  // Same total, tiny today-delta → crossed on a previous day → silent.
+  assert.equal(pickTodayMilestone(agg, 1_000_000), null);
+  // The LARGEST crossed mark wins when one big day crosses several.
+  const big = { inputTokens: 11_000_000_000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+  assert.match(pickTodayMilestone(big, 8_000_000_000), /crossed 10B lifetime tokens today/);
+});
+
+test('pickTodayMilestone: day anniversaries, token crossings take precedence', () => {
+  assert.match(pickTodayMilestone({ daysSinceFirst: 100 }, 0), /day 100 with claude/);
+  assert.equal(pickTodayMilestone({ daysSinceFirst: 99 }, 0), null);
+  const both = { inputTokens: 1_100_000_000, daysSinceFirst: 100 };
+  assert.match(pickTodayMilestone(both, 200_000_000), /tokens today/, 'token crossing outranks the anniversary');
+  assert.equal(pickTodayMilestone(null, 5), null);
+});

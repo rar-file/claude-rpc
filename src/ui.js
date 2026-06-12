@@ -81,6 +81,68 @@ export function fail(label, { hint = '', code = EX_USER_ERROR } = {}) {
   process.exit(code);
 }
 
+// ── Heat / sparkline / comparison primitives ──────────────────────────────
+//
+// Shared by the focused views (today / week / status / TUI). All of these
+// degrade to plain glyphs when colors are off, so piped output stays clean.
+
+// Intensity 0..1 → a 256-color ramp matching the site palette: calm green
+// for light activity, amber for solid, rust for hot. `tty` is overridable so
+// the ramp is unit-testable in a non-TTY test runner.
+const HEAT_RAMP = [
+  [0.25, '\x1b[38;5;65m'],  // sage — barely warm
+  [0.45, '\x1b[38;5;71m'],  // green — steady
+  [0.65, '\x1b[38;5;178m'], // amber — solid
+  [0.85, '\x1b[38;5;208m'], // orange — heavy
+  [Infinity, '\x1b[38;5;166m'], // rust — peak
+];
+export function heat(t, { tty = TTY } = {}) {
+  if (!tty) return '';
+  if (!(t > 0)) return c.dim;
+  for (const [ceil, color] of HEAT_RAMP) if (t < ceil) return color;
+  return HEAT_RAMP.at(-1)[1];
+}
+
+// Heat-colored sparkline of a numeric series (▁▂▃▄▅▆▇█), scaled to its own
+// max. Zero/empty input → ''. With colors off this is just the glyphs.
+const SPARK_CHARS = ' ▁▂▃▄▅▆▇█';
+export function sparkline(values, { tty = TTY } = {}) {
+  const max = Math.max(0, ...values.map((v) => v || 0));
+  if (!(max > 0)) return '';
+  const out = values.map((raw) => {
+    const v = raw || 0;
+    const idx = v > 0 ? Math.max(1, Math.min(8, Math.round((v / max) * 8))) : 0;
+    return `${heat(v / max, { tty })}${SPARK_CHARS[idx]}`;
+  }).join('');
+  return out + (tty ? c.reset : '');
+}
+
+// "▲ +18% vs 7-day avg" — current vs a baseline, colored by direction.
+// A quiet day isn't a failure, so down renders gray, not red. Returns ''
+// when the baseline is too small to compare against (fresh installs).
+export function fmtDelta(current, baseline, { vs = '' } = {}) {
+  if (!(baseline > 0)) return '';
+  const pct = Math.round(((current || 0) - baseline) / baseline * 100);
+  const tail = vs ? ` ${c.dim}${vs}${c.reset}` : '';
+  if (pct === 0) return `${c.dim}≈ ${vs || 'usual'}${c.reset}`;
+  const up = pct > 0;
+  const shown = Math.min(Math.abs(pct), 999); // a 40×-average day reads "+999%", not noise
+  return `${up ? c.green : c.gray}${up ? '▲' : '▼'} ${up ? '+' : '−'}${shown}%${c.reset}${tail}`;
+}
+
+// Percentile callout for a standout value among its history ("top 10% day").
+// Quiet unless there's real history to rank against and the value is high —
+// a callout on every middling day would train the eye to skip it.
+export function topPercentile(values, v, { min = 14 } = {}) {
+  const past = values.filter((x) => x > 0);
+  if (past.length < min || !(v > 0)) return '';
+  const rank = past.filter((x) => x <= v).length / past.length;
+  if (rank >= 1) return 'best day yet';
+  if (rank >= 0.9) return 'top 10% day';
+  if (rank >= 0.75) return 'top 25% day';
+  return '';
+}
+
 // Return the last n lines of a log file's raw text, trimming the trailing
 // empty element that split('\n') produces when the file ends with a newline.
 // When the file lacks a trailing newline the last element is the last real

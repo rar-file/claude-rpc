@@ -13,6 +13,7 @@ import { loadConfig } from './config.js';
 import { PID_PATH } from './paths.js';
 import { fmtCost } from './pricing.js';
 import { generateInsights } from './insights.js';
+import { heat } from './ui.js';
 
 // ── ANSI ────────────────────────────────────────────────────────────────────
 const ESC = '\x1b[';
@@ -74,10 +75,11 @@ function width()  { return Math.max(50, Math.min(120, process.stdout.columns || 
 function height() { return Math.max(20, process.stdout.rows || 24); }
 
 function rule(w) { return C.gray + '─'.repeat(w - 4) + C.reset; }
+// Heat-graded fill (same ramp as the CLI views) — intensity reads at a glance.
 function bar(value, max, w = 16) {
   if (!max || max <= 0) return ''.padEnd(w);
   const filled = Math.max(0, Math.min(w, Math.round((value / max) * w)));
-  return '█'.repeat(filled) + ' '.repeat(w - filled);
+  return `${heat(value / max) || C.magenta}${'█'.repeat(filled)}${C.reset}` + ' '.repeat(w - filled);
 }
 
 // Pad a (possibly ANSI-colored) line with spaces so its VISIBLE width hits n.
@@ -166,7 +168,7 @@ function tabToday(_, data) {
         const ms = agg.byHour?.[h]?.activeMs || 0;
         const idx = ms > 0 ? Math.max(1, Math.min(8, Math.round((ms / max) * 8))) : 0;
         const ch = heightChars[idx];
-        bars.push(h === v.peakHourNum ? `${C.magenta}${C.bold}${ch}${C.reset}` : `${C.green}${ch}${C.reset}`);
+        bars.push(h === v.peakHourNum ? `${C.bold}${heat(1)}${ch}${C.reset}` : `${heat(ms / max)}${ch}${C.reset}`);
       }
       out.push(bars.join(''));
       out.push(`${C.dim}00  03  06  09  12  15  18  21${C.reset}`);
@@ -212,7 +214,8 @@ function tabWeek(_, data) {
         const h = ms / 3_600_000;
         const hStr = h < 1 ? `${Math.round(h * 60)}m` : (h < 10 ? `${h.toFixed(1)}h` : `${Math.round(h)}h`);
         const prefix = isToday ? C.bold : '';
-        out.push(`${prefix}${label.padEnd(11)}${C.reset} ${C.magenta}${bar(ms, maxMs, 18)}${C.reset} ${C.cyan}${hStr.padStart(5)}${C.reset}${isToday ? `  ${C.dim}← today${C.reset}` : ''}`);
+        const peak = ms === maxMs && ms > 0 ? ` ${C.bold}${heat(1)}◆${C.reset}` : '';
+        out.push(`${prefix}${label.padEnd(11)}${C.reset} ${bar(ms, maxMs, 18)} ${C.cyan}${hStr.padStart(5)}${C.reset}${peak}${isToday ? `  ${C.dim}← today${C.reset}` : ''}`);
       }
     }
   }
@@ -267,7 +270,7 @@ function tabLifetime(_, data) {
       const h = p.activeMs / 3_600_000;
       const hStr = h < 1 ? `${Math.round(h * 60)}m` : (h < 10 ? `${h.toFixed(1)}h` : `${Math.round(h)}h`);
       const pretty = humanProject(name).slice(0, 18).padEnd(20);
-      out.push(`${pretty} ${C.magenta}${bar(p.activeMs, maxMs, 16)}${C.reset} ${C.cyan}${hStr.padStart(5)}${C.reset}`);
+      out.push(`${pretty} ${bar(p.activeMs, maxMs, 16)} ${C.cyan}${hStr.padStart(5)}${C.reset}`);
     }
   }
   return out;
@@ -291,7 +294,7 @@ function tabCost(_, data) {
     const max = byModel[0][1];
     for (const [m, val] of byModel) {
       const pretty = String(m).padEnd(20);
-      out.push(`${pretty} ${C.magenta}${bar(val, max, 18)}${C.reset} ${C.cyan}${fmtCost(val).padStart(8)}${C.reset}`);
+      out.push(`${pretty} ${bar(val, max, 18)} ${C.cyan}${fmtCost(val).padStart(8)}${C.reset}`);
     }
   }
 
@@ -330,7 +333,7 @@ function tabCode(_, data) {
     const max = langs[0][1].edits || 1;
     for (const [name, l] of langs) {
       const pretty = name.slice(0, 18).padEnd(20);
-      out.push(`${pretty} ${C.magenta}${bar(l.edits, max, 18)}${C.reset} ${C.cyan}${String(l.edits).padStart(6)}${C.reset}`);
+      out.push(`${pretty} ${bar(l.edits, max, 18)} ${C.cyan}${String(l.edits).padStart(6)}${C.reset}`);
     }
   }
 

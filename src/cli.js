@@ -18,7 +18,7 @@ import { runHookCli } from './hook.js';
 import { install as runInstall, uninstall as runUninstall, isInstalled, migrateConfig, installHooks, ensureCanonicalExe, installMcp, uninstallMcp, mcpServerCommand, setupOutro } from './install.js';
 import { startTui } from './tui.js';
 import { generateInsights } from './insights.js';
-import { maybeNudge } from './nudge.js';
+import { maybeNudge, pickTodayMilestone } from './nudge.js';
 import { badgeSvg } from './badge.js';
 import { fmtCost } from './pricing.js';
 import { addPrivateCwd, removePrivateCwd, listPrivateCwds, resolveVisibility } from './privacy.js';
@@ -26,7 +26,7 @@ import { parseDuration, setPause, clearPause, pauseUntil } from './pause.js';
 import { loadConfig, hasUserConfig } from './config.js';
 import * as lb from './leaderboard.js';
 import { VERSION } from './version.js';
-import { fail, tailLines, EX_USER_ERROR, EX_BAD_STATE, EX_SYS_ERROR } from './ui.js';
+import { fail, tailLines, heat, sparkline, fmtDelta, topPercentile, EX_USER_ERROR, EX_BAD_STATE, EX_SYS_ERROR } from './ui.js';
 import { randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline';
 import { basename } from 'node:path';
@@ -144,24 +144,24 @@ function shortPath(p) {
   return home && p.startsWith(home) ? '~' + p.slice(home.length) : p;
 }
 
-// 24-bar histogram of hour-of-day activity.
+// 24-bar histogram of hour-of-day activity, heat-graded per hour — the
+// peak hour literally glows (bold rust) instead of relying on a color swap.
 function renderHourHistogram(byHour, opts = {}) {
   const heightChars = ' ▁▂▃▄▅▆▇█';
   let max = 0;
   for (let h = 0; h < 24; h++) max = Math.max(max, byHour?.[h]?.activeMs || 0);
   if (max <= 0) return ['  (no hourly data yet)'];
-  const bars = [];
+  const colored = [];
   for (let h = 0; h < 24; h++) {
     const ms = byHour?.[h]?.activeMs || 0;
     const idx = ms > 0 ? Math.max(1, Math.min(8, Math.round((ms / max) * 8))) : 0;
-    bars.push(heightChars[idx]);
+    const ch = heightChars[idx];
+    colored.push(h === opts.peakHour ? `${c.bold}${heat(1)}${ch}${c.reset}` : `${heat(ms / max)}${ch}${c.reset}`);
   }
-  const peakH = opts.peakHour ?? bars.findIndex((b) => b === heightChars[Math.min(8, ...bars.map((_, i) => i).filter(() => true))]);
-  const colored = bars.map((ch, h) => h === opts.peakHour ? `${c.magenta}${c.bold}${ch}${c.reset}` : `${c.green}${ch}${c.reset}`).join('');
   // Hour labels under every 3rd hour.
   const labels = '00  03  06  09  12  15  18  21  ';
   return [
-    `  ${colored}`,
+    `  ${colored.join('')}`,
     `  ${c.dim}${labels}${c.reset}`,
   ];
 }
@@ -196,13 +196,14 @@ function renderHeatmap(byDay, days = 91) {
   }
   const cols = Math.ceil(cells.length / 7);
 
-  // Quantize: 0 / >0 / >15m / >1h / >3h
+  // Quantize: 0 / >0 / >15m / >1h / >3h — mapped onto the shared heat ramp
+  // so the heatmap, bars, and histograms all speak the same temperature.
   const shade = (ms) => {
     if (ms <= 0) return `${c.dim}·${c.reset}`;
-    if (ms < 15 * 60_000) return `${c.gray}▪${c.reset}`;
-    if (ms < 60 * 60_000) return `${c.green}▪${c.reset}`;
-    if (ms < 3 * 3600_000) return `${c.green}${c.bold}▪${c.reset}`;
-    return `${c.magenta}${c.bold}▪${c.reset}`;
+    if (ms < 15 * 60_000) return `${heat(0.2)}▪${c.reset}`;
+    if (ms < 60 * 60_000) return `${heat(0.5)}▪${c.reset}`;
+    if (ms < 3 * 3600_000) return `${heat(0.8)}▪${c.reset}`;
+    return `${c.bold}${heat(1)}▪${c.reset}`;
   };
 
   // Month labels along the top (where the month changes within the visible window).
@@ -234,7 +235,7 @@ function renderHeatmap(byDay, days = 91) {
   }
 
   // Footer legend.
-  const legend = `     ${c.dim}less${c.reset}  ${c.dim}·${c.reset} ${c.gray}▪${c.reset} ${c.green}▪${c.reset} ${c.green}${c.bold}▪${c.reset} ${c.magenta}${c.bold}▪${c.reset}  ${c.dim}more${c.reset}`;
+  const legend = `     ${c.dim}less${c.reset}  ${c.dim}·${c.reset} ${heat(0.2)}▪${c.reset} ${heat(0.5)}▪${c.reset} ${heat(0.8)}▪${c.reset} ${c.bold}${heat(1)}▪${c.reset}  ${c.dim}more${c.reset}`;
   lines.push('');
   lines.push(legend);
   return lines;
@@ -244,11 +245,69 @@ function pair(label, value, valueColor = c.cyan) {
   return `${c.dim}${label.padEnd(14)}${c.reset} ${valueColor}${value}${c.reset}`;
 }
 
-// ASCII bar for a value relative to max.
+// ASCII bar for a value relative to max. Fill color is heat-graded by the
+// ratio (calm green → amber → rust), so intensity reads at a glance; with
+// colors off it degrades to the same monochrome bar as before.
 function bar(val, max, width = 22) {
   if (!max || max <= 0) return '';
   const filled = Math.max(0, Math.min(width, Math.round((val / max) * width)));
-  return `${c.magenta}${'█'.repeat(filled)}${c.dim}${'░'.repeat(width - filled)}${c.reset}`;
+  return `${heat(val / max) || c.magenta}${'█'.repeat(filled)}${c.reset}${c.dim}${'░'.repeat(width - filled)}${c.reset}`;
+}
+
+// The last n calendar days of byDay entries (oldest → today), null where a
+// day has no activity. Date-stepped rather than ms arithmetic so DST shifts
+// can't skip or duplicate a day.
+function lastDays(byDay, n) {
+  const out = [];
+  const d = new Date();
+  d.setHours(12, 0, 0, 0); // noon — immune to DST midnight edges
+  d.setDate(d.getDate() - (n - 1));
+  for (let i = 0; i < n; i++) {
+    out.push(byDay?.[dayKey(d.getTime())] || null);
+    d.setDate(d.getDate() + 1);
+  }
+  return out;
+}
+
+const dayTokens = (d) => d
+  ? (d.inputTokens || 0) + (d.outputTokens || 0) + (d.cacheReadTokens || 0) + (d.cacheWriteTokens || 0)
+  : 0;
+
+// The `today` box, shared by `claude-rpc today` and `claude-rpc status`.
+// Each headline metric carries its own context — a ▲/▼ against the trailing
+// 7-day average (today excluded), a percentile callout on standout days, the
+// day's cost, and a 14-day sparkline — so the numbers answer "is that a lot?"
+// instead of making you remember.
+function todayBoxLines(vars, aggregate) {
+  const byDay = aggregate?.byDay || {};
+  const series = lastDays(byDay, 15);
+  const today = series.at(-1);
+  const prior7 = series.slice(-8, -1);
+  const avg = (xs) => xs.reduce((a, b) => a + b, 0) / (xs.length || 1);
+
+  const dActive  = fmtDelta(today?.activeMs || 0,     avg(prior7.map((d) => d?.activeMs || 0)), { vs: 'vs 7-day avg' });
+  const dPrompts = fmtDelta(today?.userMessages || 0, avg(prior7.map((d) => d?.userMessages || 0)));
+  const dTokens  = fmtDelta(dayTokens(today),         avg(prior7.map(dayTokens)));
+  const pctLabel = topPercentile(Object.values(byDay).map((d) => d?.activeMs || 0), today?.activeMs || 0);
+
+  const lines = [
+    pair('active',     `${c.bold}${c.green}${vars.todayHours}${c.reset}${dActive ? `  ${dActive}` : ''}${pctLabel ? `  ${c.magenta}· ${pctLabel}${c.reset}` : ''}`, ''),
+    pair('prompts',    `${c.yellow}${vars.todayPrompts}${c.reset}${dPrompts ? `  ${dPrompts}` : ''}`, ''),
+    pair('tool calls', vars.todayToolsFmt, c.yellow),
+    pair('sessions',   String(vars.todaySessions || 0)),
+    pair('tokens',     `${c.bold}${vars.todayTokensFmt}${c.reset}  ${c.dim}grand total${c.reset}${dTokens ? `  ${dTokens}` : ''}`, ''),
+    pair('  in+out',   vars.todayTokensRealFmt, c.gray),
+    pair('  cache',    vars.todayCacheTokensFmt, c.gray),
+  ];
+  if (today?.cost) {
+    lines.push(pair('cost', `${c.green}≈${fmtCost(today.cost)}${c.reset}  ${c.dim}+${(today.linesAdded || 0).toLocaleString()} lines today${c.reset}`, ''));
+  }
+  const spark = sparkline(series.slice(1).map((d) => d?.activeMs || 0));
+  if (spark) {
+    lines.push('');
+    lines.push(pair('last 14d', `${spark}  ${c.dim}← today${c.reset}`, ''));
+  }
+  return lines;
 }
 
 function showStatus() {
@@ -295,15 +354,7 @@ function showStatus() {
   }
 
   if (aggregate) {
-    box('today', [
-      pair('active',     `${c.bold}${c.green}${vars.todayHours}${c.reset}`, ''),
-      pair('prompts',    String(vars.todayPrompts), c.yellow),
-      pair('tool calls', vars.todayToolsFmt, c.yellow),
-      pair('sessions',   String(vars.todaySessions || 0)),
-      pair('tokens',     `${c.bold}${vars.todayTokensFmt}${c.reset}  ${c.dim}grand total${c.reset}`, ''),
-      pair('  in+out',   vars.todayTokensRealFmt, c.gray),
-      pair('  cache',    vars.todayCacheTokensFmt, c.gray),
-    ]);
+    box('today', todayBoxLines(vars, aggregate));
     console.log('');
 
     box('streak', [
@@ -446,16 +497,14 @@ function showToday() {
   console.log(`  ${c.bold}${c.magenta}◆ Today${c.reset}  ${c.dim}— ${new Date().toLocaleDateString()}${c.reset}`);
   console.log('');
 
-  box('today', [
-    pair('active',     `${c.bold}${c.green}${vars.todayHours}${c.reset}`, ''),
-    pair('prompts',    String(vars.todayPrompts), c.yellow),
-    pair('tool calls', vars.todayToolsFmt, c.yellow),
-    pair('sessions',   String(vars.todaySessions || 0)),
-    pair('tokens',     `${c.bold}${vars.todayTokensFmt}${c.reset}  ${c.dim}grand total${c.reset}`, ''),
-    pair('  in+out',   vars.todayTokensRealFmt, c.gray),
-    pair('  cache',    vars.todayCacheTokensFmt, c.gray),
-  ]);
+  box('today', todayBoxLines(vars, aggregate));
   console.log('');
+
+  // One quiet celebration line on milestone days (token round numbers
+  // crossed today, day-N anniversaries). The share nudge below owns streak
+  // records and round session/hour counts — no overlap.
+  const milestone = pickTodayMilestone(aggregate, dayTokens(lastDays(aggregate?.byDay, 1)[0]));
+  if (milestone) console.log(`  ${c.magenta}✶${c.reset}  ${c.bold}${milestone}${c.reset}\n`);
 
   if (aggregate?.byHour && Object.keys(aggregate.byHour).length) {
     box('when you code · hour of day', renderHourHistogram(aggregate.byHour, { peakHour: vars.peakHourNum }), 40);
@@ -481,12 +530,23 @@ function showWeek() {
   console.log(`  ${c.bold}${c.magenta}◆ This week${c.reset}  ${c.dim}— ${weekKey(Date.now())}${c.reset}`);
   console.log('');
 
+  // Week-over-week context: this week so far vs the whole of last week.
+  // Early in the week "▼" is expected — the vs label keeps that honest.
+  const prevRef = new Date();
+  prevRef.setHours(12, 0, 0, 0); // noon — immune to DST midnight edges
+  prevRef.setDate(prevRef.getDate() - 7);
+  const wkNow = aggregate?.byWeek?.[weekKey(Date.now())];
+  const wkPrev = aggregate?.byWeek?.[weekKey(prevRef.getTime())];
+  const dWkActive  = fmtDelta(wkNow?.activeMs || 0,     wkPrev?.activeMs || 0, { vs: 'vs last week' });
+  const dWkPrompts = fmtDelta(wkNow?.userMessages || 0, wkPrev?.userMessages || 0);
+  const dWkTokens  = fmtDelta(dayTokens(wkNow),         dayTokens(wkPrev));
+
   box('this week', [
-    pair('active',     `${c.bold}${c.green}${vars.weekHours}${c.reset}`, ''),
-    pair('prompts',    String(vars.weekPrompts), c.yellow),
+    pair('active',     `${c.bold}${c.green}${vars.weekHours}${c.reset}${dWkActive ? `  ${dWkActive}` : ''}`, ''),
+    pair('prompts',    `${c.yellow}${vars.weekPrompts}${c.reset}${dWkPrompts ? `  ${dWkPrompts}` : ''}`, ''),
     pair('tool calls', vars.weekToolsFmt, c.yellow),
     pair('sessions',   String(vars.weekSessions || 0)),
-    pair('tokens',     `${c.bold}${vars.weekTokensFmt}${c.reset}  ${c.dim}grand total${c.reset}`, ''),
+    pair('tokens',     `${c.bold}${vars.weekTokensFmt}${c.reset}  ${c.dim}grand total${c.reset}${dWkTokens ? `  ${dWkTokens}` : ''}`, ''),
   ]);
   console.log('');
 
@@ -513,7 +573,8 @@ function showWeek() {
       const h = ms / 3_600_000;
       const hStr = h < 1 ? `${Math.round(h * 60)}m` : (h < 10 ? `${h.toFixed(1)}h` : `${Math.round(h)}h`);
       const prefix = isToday ? `${c.bold}` : '';
-      return `${prefix}${label.padEnd(12)}${c.reset} ${bar(ms, maxMs)} ${c.cyan}${hStr.padStart(5)}${c.reset}${isToday ? ` ${c.dim}← today${c.reset}` : ''}`;
+      const peak = ms === maxMs && ms > 0 ? ` ${c.bold}${heat(1)}◆${c.reset}` : '';
+      return `${prefix}${label.padEnd(12)}${c.reset} ${bar(ms, maxMs)} ${c.cyan}${hStr.padStart(5)}${c.reset}${peak}${isToday ? ` ${c.dim}← today${c.reset}` : ''}`;
     });
     box('this week · daily breakdown', lines);
     console.log('');

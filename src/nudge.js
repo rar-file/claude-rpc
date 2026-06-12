@@ -63,6 +63,31 @@ export function pickShareNudge(agg) {
   return out[0];
 }
 
+// A quiet, local celebration line for `claude-rpc today`. Complements the
+// share nudges above — which own streak records and round session/hour
+// counts — without overlapping them: this detects lifetime-token round
+// numbers CROSSED TODAY (no state file needed — the crossing happened today
+// iff total ≥ mark and total − todayTokens < mark) and round "day N"
+// anniversaries (which are only true on the day itself). Returns one string
+// or null; the caller styles it.
+const TOKEN_MARKS = [1e9, 5e9, 1e10, 2.5e10, 5e10, 1e11, 2.5e11, 5e11, 1e12];
+const DAY_MARKS = new Set([50, 100, 200, 365, 500, 730, 1000]);
+const fmtTok = (n) => n >= 1e12 ? `${n / 1e12}T` : n >= 1e9 ? `${n / 1e9}B` : `${n / 1e6}M`;
+
+export function pickTodayMilestone(agg, todayTokens = 0) {
+  if (!agg || typeof agg !== 'object') return null;
+  const total = (agg.inputTokens || 0) + (agg.outputTokens || 0)
+    + (agg.cacheReadTokens || 0) + (agg.cacheWriteTokens || 0);
+  for (let i = TOKEN_MARKS.length - 1; i >= 0; i--) {
+    const mark = TOKEN_MARKS[i];
+    if (total >= mark && total - todayTokens < mark) {
+      return `crossed ${fmtTok(mark)} lifetime tokens today`;
+    }
+  }
+  if (DAY_MARKS.has(agg.daysSinceFirst || 0)) return `day ${agg.daysSinceFirst} with claude`;
+  return null;
+}
+
 function readLastKey(path = NUDGE_STATE) {
   try { return JSON.parse(readFileSync(path, 'utf8')).key || null; }
   catch { return null; }

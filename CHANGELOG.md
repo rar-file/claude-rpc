@@ -2,6 +2,14 @@
 
 All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.15.5] - 2026-06-12
+
+**Changed**
+
+- **Numbers now answer "is that a lot?" on their own.** `today` and `status` carry a ▲/▼ against your trailing 7-day average on active time, prompts, and tokens; standout days earn a percentile callout ("top 10% day", "best day yet"); the box gains today's estimated cost + lines added and a heat-colored 14-day sparkline. `week` compares against last week and marks the peak day with ◆. Down-arrows render gray, not red — a quiet day isn't a failure. All context lines disappear gracefully on fresh installs with no history to compare against.
+- **Every bar, histogram, and heatmap is heat-graded.** One shared intensity ramp (calm green → amber → rust, matching the site palette) colors the weekly breakdown, hour-of-day histogram (your peak hour glows), the 13-week activity heatmap, and every ranked bar chart in `status` and the TUI — replacing the uniform magenta/green. Degrades to the exact previous monochrome output with `NO_COLOR` or piped output.
+- **One milestone line on days that deserve it.** `today` prints a single ✶ line when you cross a round lifetime-token number that day (1B, 10B, …) or hit a day-N anniversary (50, 100, 365…). Complements the existing share nudges (which own streak records and round session/hour counts) without overlapping them.
+
 ## [0.15.4] - 2026-06-12
 
 **Added**
