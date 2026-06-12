@@ -2,6 +2,12 @@
 
 All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.15.2] - 2026-06-12
+
+**Changed**
+
+- **`setup` is loud when it works, one line when it doesn't.** A re-run where everything is already in place collapses to `✓ already set up — config current · hooks wired (8 events) · hook pipe verified` instead of re-printing the whole checklist; the closing "what now" block only renders when something changed; the npx→global promotion is skipped (silently) when the global bin is already this version, which also drops npm's install chatter; hooks only rewrite `~/.claude/settings.json` when the commands actually differ.
+
 ## [0.15.1] - 2026-06-12
 
 **Changed**

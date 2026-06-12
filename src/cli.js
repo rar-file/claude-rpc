@@ -1434,7 +1434,7 @@ function profileEnable(on) {
   userCfg.profile = next;
   writeFileSync(CONFIG_PATH, JSON.stringify(userCfg, null, 2));
   if (on) {
-    console.log(`  ${c.green}✓${c.reset}  leaderboard publishing enabled  ${c.dim}(live on the next daemon flush — or now: ${c.reset}${c.cyan}claude-rpc profile publish${c.reset}${c.dim})${c.reset}`);
+    console.log(`  ${c.green}✓${c.reset}  publishing enabled  ${c.dim}— board syncs on the next flush, or now: ${c.reset}${c.cyan}claude-rpc profile publish${c.reset}`);
     profileNextStep();
   } else {
     console.log(`  ${c.green}✓${c.reset}  leaderboard publishing disabled`);
@@ -1746,9 +1746,10 @@ const packagedDefault = IS_PACKAGED && !cmd;
     // to do everything. Non-Windows: addStartupEntry is a no-op + warning.
     case 'setup':
     case 'install': {
-      // runInstall prints the phased checklist and leaves the `daemon` phase
-      // open; the launch row lands there, then setupOutro closes the screen.
-      const target = await runInstall({ exePath: EXE_PATH || process.execPath });
+      // runInstall prints the phased checklist (or a one-line "already set
+      // up" on clean re-runs); the daemon row lands after it, then setupOutro
+      // closes the screen — only when something actually changed.
+      const { target, changed } = await runInstall({ exePath: EXE_PATH || process.execPath });
       // Slimmer first run: bring the daemon up now so the card appears
       // immediately, instead of making the user run a separate `start`.
       // Best-effort — a start hiccup must never make `setup` look failed.
@@ -1763,6 +1764,8 @@ const packagedDefault = IS_PACKAGED && !cmd;
             });
             child.unref();
             console.log(`  ${c.green}✓${c.reset}  ${'daemon launched'.padEnd(16)}${c.dim}log ${shortPath(LOG_PATH)}${c.reset}`);
+          } else {
+            console.log(`  ${c.cyan}·${c.reset}  ${'daemon running'.padEnd(16)}${c.dim}pid ${daemonPid()}${c.reset}`);
           }
         } else {
           startDaemon();
@@ -1771,11 +1774,13 @@ const packagedDefault = IS_PACKAGED && !cmd;
         console.log(`  ${c.yellow}!${c.reset}  ${'daemon start'.padEnd(16)}${c.dim}couldn't auto-start: ${e.message}${c.reset}`);
         console.log(`     ${c.gray}↳ run \`claude-rpc start\` when you're ready${c.reset}`);
       }
-      setupOutro(target);
+      setupOutro(target, changed);
       break;
     }
     case 'uninstall': await runUninstall(); break;
-    case 'upgrade-config': migrateConfig(); break;
+    case 'upgrade-config':
+      if (!migrateConfig()) console.log(`  ${c.green}✓${c.reset}  config already current — nothing to migrate`);
+      break;
     case 'start':     startDaemon(); break;
     case 'stop':      stopDaemon(); break;
     case 'restart':   restartDaemon(); break;
@@ -1869,7 +1874,7 @@ const packagedDefault = IS_PACKAGED && !cmd;
     default: {
       if (packagedDefault) {
         if (!isInstalled()) {
-          const target = await runInstall({ exePath: EXE_PATH || process.execPath });
+          const { target } = await runInstall({ exePath: EXE_PATH || process.execPath });
           startDaemon();
           setupOutro(target);
         } else {

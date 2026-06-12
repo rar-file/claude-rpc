@@ -26,13 +26,31 @@ const STARTUP_VALUE = 'ClaudeRPC';
 // the label column fixed-width so the detail column lines up across phases.
 // The same rows print standalone (doctor --fix, packaged refresh) and still
 // read fine outside the phased layout.
+//
+// Loud when something changes, near-silent when nothing does: a re-run where
+// everything is already in place collapses to ONE summary line instead of
+// re-printing the checklist. State-changing steps print rows (flushing their
+// pending phase header) and mark the run dirty; confirmations record a
+// `noop()` fact for the summary. Failures always print.
 const LABEL_W = 16;
+let pendingPhase = null;
+let runDirty = false;
+let noopFacts = [];
+
+function resetRun() { pendingPhase = null; runDirty = false; noopFacts = []; }
+function phase(title) { pendingPhase = title; }
 function step(sym, label, detail = '', log = console.log) {
+  if (pendingPhase) {
+    console.log(`\n  ${c.bold}${pendingPhase}${c.reset}`);
+    pendingPhase = null;
+  }
   log(`  ${sym}  ${label.padEnd(LABEL_W)}${detail ? `${c.dim}${detail}${c.reset}` : ''}`);
 }
-function phase(title) {
-  console.log(`\n  ${c.bold}${title}${c.reset}`);
+function dirtyStep(sym, label, detail = '', log = console.log) {
+  runDirty = true;
+  step(sym, label, detail, log);
 }
+function noop(fact) { noopFacts.push(fact); }
 
 const EVENTS = [
   'SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse',
@@ -56,6 +74,7 @@ function isOurHookCommand(cmd) {
 
 export function installHooks(exePath) {
   const settings = readJson(CLAUDE_SETTINGS, {});
+  const before = JSON.stringify(settings.hooks || {});
   settings.hooks = settings.hooks || {};
   // Three modes, three shapes:
   //   packaged → `"<exe>" hook <event>`         (canonical exe, no node)
@@ -82,8 +101,13 @@ export function installHooks(exePath) {
       bucket.push({ matcher: '', hooks: [{ type: 'command', command: wanted }] });
     }
   }
+  if (JSON.stringify(settings.hooks) === before) {
+    noop(`hooks wired (${EVENTS.length} events)`);
+    return false;
+  }
   writeJson(CLAUDE_SETTINGS, settings);
-  step(SYM_OK, 'hooks wired', `${EVENTS.length} events → ${CLAUDE_SETTINGS}`);
+  dirtyStep(SYM_OK, 'hooks wired', `${EVENTS.length} events → ${CLAUDE_SETTINGS}`);
+  return true;
 }
 
 export function uninstallHooks() {
@@ -119,7 +143,8 @@ export async function addStartupEntry(exePath) {
     '/d', `"${exePath}" daemon`,
     '/f',
   ]);
-  step(SYM_OK, 'startup entry', `HKCU\\…\\Run\\${STARTUP_VALUE} — daemon starts at login`);
+  if (runDirty) step(SYM_OK, 'startup entry', `HKCU\\…\\Run\\${STARTUP_VALUE} — daemon starts at login`);
+  else noop('startup entry present');
 }
 
 export async function removeStartupEntry() {
@@ -172,7 +197,7 @@ export function ensureCanonicalExe(currentExe) {
       const src = statSync(currentExe);
       const dst = statSync(CANONICAL_EXE);
       if (src.size === dst.size && Math.abs(src.mtimeMs - dst.mtimeMs) < 2000) {
-        step(SYM_OK, 'exe installed', `${CANONICAL_EXE} (unchanged)`);
+        noop('exe current');
         return CANONICAL_EXE;
       }
     } catch { /* stat failed — fall through to copy attempt */ }
@@ -189,7 +214,7 @@ export function ensureCanonicalExe(currentExe) {
     }
     copyFileSync(currentExe, CANONICAL_EXE);
     if (process.platform !== 'win32') chmodSync(CANONICAL_EXE, 0o755);
-    step(SYM_OK, 'exe installed', CANONICAL_EXE);
+    dirtyStep(SYM_OK, 'exe installed', CANONICAL_EXE);
     step(SYM_INFO, 'original copy', `${currentExe} — safe to delete`);
     sweepStaleCanonicalBackups();
     return CANONICAL_EXE;
@@ -211,7 +236,7 @@ export function seedConfig() {
       if (!existsSync(CONFIG_PATH) && existsSync(legacyPath)) {
         mkdirSync(USER_CONFIG_DIR, { recursive: true });
         copyFileSync(legacyPath, CONFIG_PATH);
-        step(SYM_OK, 'config migrated', CONFIG_PATH);
+        dirtyStep(SYM_OK, 'config migrated', CONFIG_PATH);
         step(SYM_INFO, 'legacy copy', `${legacyPath} — safe to delete on the next npm update`);
         return false;
       }
@@ -221,7 +246,7 @@ export function seedConfig() {
   }
 
   if (existsSync(CONFIG_PATH)) {
-    step(SYM_OK, 'config found', CONFIG_PATH);
+    noop('config current');
     return false;
   }
   mkdirSync(USER_CONFIG_DIR, { recursive: true });
@@ -233,7 +258,7 @@ export function seedConfig() {
     seeded.community.instanceId = randomUUID();
   }
   writeFileSync(CONFIG_PATH, JSON.stringify(seeded, null, 2));
-  step(SYM_OK, 'config seeded', CONFIG_PATH);
+  dirtyStep(SYM_OK, 'config seeded', CONFIG_PATH);
   if (seeded.community?.enabled && seeded.community.instanceId) {
     step(SYM_INFO, 'community', `anonymous totals on by default · opt out: ${c.reset}${c.cyan}claude-rpc community off`);
   }
@@ -370,12 +395,9 @@ export function migrateConfig({ silent = false } = {}) {
     if (changed) added.push('presence.buttons[] → CTA');
   }
 
-  if (added.length === 0) {
-    if (!silent) step(SYM_OK, 'config current', 'no new defaults to merge');
-    return false;
-  }
+  if (added.length === 0) return false;
   writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2));
-  if (!silent) step(SYM_OK, 'config migrated', `added: ${added.join(', ')}`);
+  if (!silent) dirtyStep(SYM_OK, 'config migrated', `added: ${added.join(', ')}`);
   return true;
 }
 
@@ -426,12 +448,29 @@ function verifyHookPipe(exePath) {
 // Best-effort + loud: a failed -g (perms, offline) returns false so the caller
 // can stop with the manual command rather than wire a dead hook.
 function promoteNpxToGlobal() {
-  step(SYM_INFO, 'npx detected', 'one-off cache — installing globally so hooks survive…');
+  // Already promoted on a previous run? The PATH-resolved bin answers fast.
+  try {
+    const v = spawnSync('claude-rpc', ['--version'], {
+      encoding: 'utf8', timeout: 4000, windowsHide: true,
+      shell: process.platform === 'win32',
+    });
+    if ((v.stdout || '').trim() === `claude-rpc ${VERSION}`) {
+      noop('global install current');
+      return true;
+    }
+  } catch { /* not installed yet — promote below */ }
   const r = spawnSync('npm', ['install', '-g', `claude-rpc@${VERSION}`], {
-    stdio: 'inherit',
+    encoding: 'utf8',
     shell: process.platform === 'win32',   // npm is npm.cmd on Windows
   });
-  return !r.error && r.status === 0;
+  if (r.error || r.status !== 0) {
+    // The piped npm chatter only matters when it failed.
+    if (r.stdout) process.stderr.write(r.stdout);
+    if (r.stderr) process.stderr.write(r.stderr);
+    return false;
+  }
+  dirtyStep(SYM_OK, 'installed globally', `claude-rpc@${VERSION} — hooks survive npx's throwaway cache`);
+  return true;
 }
 
 // Best-effort registry check. npx serves stale cached copies without
@@ -458,6 +497,7 @@ function warnIfStale() {
 }
 
 export async function install({ exePath, withStartup = true } = {}) {
+  resetRun();
   console.log('');
   console.log(`  ${c.bold}${c.magenta}◆ claude-rpc setup${c.reset}  ${c.dim}v${VERSION}${c.reset}`);
   warnIfStale();
@@ -490,11 +530,13 @@ export async function install({ exePath, withStartup = true } = {}) {
   // without verification is a lie — we caught broken-hook-path bugs
   // twice during v0.3.x because no one ran a real event after install.
   const probe = verifyHookPipe(target);
-  if (probe.ok) {
-    step(SYM_OK, 'hook verified', probe.detail);
-  } else {
+  if (!probe.ok) {
     step(SYM_FAIL, 'hook verify', probe.detail, console.warn);
     hintLine('run `claude-rpc doctor` for a full diagnostic', process.stderr);
+  } else if (runDirty) {
+    step(SYM_OK, 'hook verified', probe.detail);
+  } else {
+    noop('hook pipe verified');
   }
 
   // The CLI's setup case launches the daemon right after this returns, so its
@@ -504,17 +546,22 @@ export async function install({ exePath, withStartup = true } = {}) {
     if (process.platform === 'win32') {
       try { await addStartupEntry(target); }
       catch (e) { step(SYM_WARN, 'startup entry', `failed: ${e.message}`, console.warn); }
-    } else {
+    } else if (runDirty) {
       step(SYM_INFO, 'startup entry', 'skipped — login autostart is Windows-only');
     }
   }
-  return target;
+  // Nothing changed: the checklist above stayed silent, so say so in one line.
+  if (!runDirty && probe.ok) {
+    console.log(`  ${SYM_OK}  ${c.bold}already set up${c.reset}  ${c.dim}${noopFacts.join(' · ')}${c.reset}`);
+  }
+  return { target, changed: runDirty };
 }
 
 // The single closing block of `claude-rpc setup` — what to do now, where the
 // levers are. Printed by the CLI after the daemon launch so it always lands
 // last; doctor --fix re-runs install() without it.
-export function setupOutro(target) {
+export function setupOutro(target, changed = true) {
+  if (!changed) return;
   const point = (label, value, note = '') =>
     console.log(`     ${c.dim}→${c.reset}  ${c.dim}${label.padEnd(14)}${c.reset} ${c.cyan}${value}${c.reset}${note ? `  ${c.dim}${note}${c.reset}` : ''}`);
   console.log('');
