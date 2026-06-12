@@ -120,6 +120,16 @@
       </div>
       <div id="mySquads"></div>
       <p class="note" id="emptyNote" hidden>No squads yet — name one above and send the invite link it gives you. Terminal twin: <code>claude-rpc squad create "name"</code>.</p>
+      <button class="btn alt small" id="addMachineBtn" style="margin-top:14px">+ link another machine</button>
+      <div class="panel" id="addMachine" hidden>
+        <h3>link another machine</h3>
+        <div style="color:var(--ink-mute); margin-bottom: 10px;">Run these on any other computer — its stats merge into <strong id="mHandle"></strong> (one board row, totals summed) and it manages the same squads. Click a line to copy.</div>
+        <div class="steps" id="machineCmds"></div>
+        <div class="row" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:10px">
+          <span class="waiting"><span class="pulse"></span> code lasts 10 minutes</span>
+          <button class="btn alt small" id="machineNewCode">new code</button>
+        </div>
+      </div>
     </section>
 
     <div class="err" id="pageErr"></div>
@@ -241,6 +251,41 @@
 
     show('sReady');
     renderSquads(auth);
+
+    // Already-linked users adding machine #2 (or #3…): mint a pair code on
+    // demand — the worker merges any machine that claims it into this identity.
+    function renderCmdLines(holderId, cmds) {
+      const holder = document.getElementById(holderId);
+      holder.innerHTML = cmds.map((cc) =>
+        `<div class="cmd" data-c="${esc(cc)}"><span class="ps1">$</span><span>${esc(cc)}</span><span class="copyhint">click to copy</span></div>`,
+      ).join('');
+      for (const el of holder.querySelectorAll('.cmd')) {
+        el.onclick = async () => {
+          try { await navigator.clipboard.writeText(el.dataset.c); } catch { /* clipboard denied */ }
+          el.classList.add('copied');
+          el.querySelector('.copyhint').textContent = 'copied ✓';
+          setTimeout(() => { el.classList.remove('copied'); el.querySelector('.copyhint').textContent = 'click to copy'; }, 1600);
+        };
+      }
+    }
+    async function renderMachineCode() {
+      let code = null;
+      try {
+        const r = await fetch(`${WORKER}/pair/start`, { method: 'POST', headers: auth }).then((x) => x.json());
+        code = r.code || null;
+      } catch { /* worker hiccup */ }
+      renderCmdLines('machineCmds', [
+        'npx claude-rpc@latest setup',
+        code ? `claude-rpc link ${code}` : 'claude-rpc link <code unavailable — hit "new code">',
+      ]);
+    }
+    document.getElementById('addMachineBtn').onclick = async () => {
+      document.getElementById('addMachineBtn').hidden = true;
+      document.getElementById('addMachine').hidden = false;
+      document.getElementById('mHandle').textContent = '@' + ((me.profile && me.profile.handle) || me.githubUser);
+      await renderMachineCode();
+    };
+    document.getElementById('machineNewCode').onclick = renderMachineCode;
 
     const input = document.getElementById('nameInput');
     const btn = document.getElementById('createBtn');
