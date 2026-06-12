@@ -570,6 +570,7 @@ export function setupOutro(target, changed = true) {
   if (IS_PACKAGED) point('start daemon', `"${target}" daemon`, 'also runs automatically at login');
   else point('manage daemon', 'claude-rpc start · stop · status');
   point('config', CONFIG_PATH, 'a working Discord app is bundled — set clientId only to use your own');
+  point('other machine?', 'claude-rpc link', 'run it there, claim the code here — one leaderboard profile');
   console.log('');
 }
 

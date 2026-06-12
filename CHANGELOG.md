@@ -2,6 +2,13 @@
 
 All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.15.4] - 2026-06-12
+
+**Added**
+
+- **`claude-rpc link` is now two-sided — link machines without a browser.** On a machine that's already verified, bare `claude-rpc link` mints the one-time code itself (the worker trusts its instanceId, which already proves the identity); `claude-rpc link <code>` on the new machine claims it, exactly as before. No GitHub login, no website — your main machine IS the code generator. The worker's `/pair/start` accepts the new machine credential alongside web sessions, with its own per-machine rate window; unverified machines are refused (the ✓ a claim grants must root in a proven identity). *(Needs a `wrangler deploy`.)*
+- **Machine linking moved off the squads page to a dedicated `/link` page.** Linking installs is an identity operation, not a squads feature — it only lived there because that's where web login landed first. `claude-rpc.vercel.app/link` now owns both the first-time CLI connection and the add-a-machine code generator (and leads with the terminal-only path); `/squads` keeps a pointer and still notices a completed link on its own. Every CLI hint that said "log in at /squads" now teaches the two-sided `link` flow, and `setup` closes with a one-liner for multi-machine users.
+
 ## [0.15.3] - 2026-06-12
 
 **Added**

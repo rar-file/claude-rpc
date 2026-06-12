@@ -15,6 +15,9 @@
 //   POST /squad/leave    — leave (ownership transfers / squad dissolves)
 //   POST /squad/update   — owner tools: rename, regenerate code, remove member
 //   POST /squads/mine    — list my squads (Bearer session or instanceId)
+//   POST /pair/start     — mint a one-time link code (web session OR verified machine)
+//   POST /pair/claim     — claim a code from a machine → verified ✓ (merges into
+//                          the canonical identity when one exists)
 //   GET  /squad?id=      — public standings (weekly + lifetime)
 //   GET  /squad/bycode?code= — minimal preview for the join page
 //   GET  /sessions.svg   — shields-style badge for the README
@@ -1332,12 +1335,16 @@ async function applyVerifiedLink(env, machineId, login) {
 
 // ── CLI ↔ web pairing ("link codes") ─────────────────────────────────────
 //
-// The no-gist verification path. A user logged into the site already proved
-// their GitHub identity via OAuth; their CLI already holds the profile's
-// secret instanceId. The page mints a short one-time code bound to the
-// GitHub session; `claude-rpc link <code>` claims it from the machine. Both
-// identities meet at the worker — a proof at least as strong as the public
-// gist dance, so it grants the same verified ✓.
+// One-time codes that bind a machine to a verified GitHub identity. TWO
+// credentials can mint one, both already proving control of that identity:
+//   web — a Bearer session (GitHub OAuth proved the login directly)
+//   CLI — a machine whose canonical profile is ALREADY verified; its secret
+//         instanceId is the same credential the profile routes trust, so
+//         `claude-rpc link` on your main machine mints a code with no browser
+// Either way the code maps to the GitHub LOGIN, so /pair/claim is identical:
+// `claude-rpc link <code>` on the new machine claims it, granting the same
+// verified ✓ as the public-gist dance (and merging into the canonical
+// identity when one exists — see applyVerifiedLink).
 
 const PAIR_KEY = (code) => `pair:${code}`;
 const PAIR_TTL_SECONDS = 600;
@@ -1348,9 +1355,25 @@ function normPairCode(input) {
 }
 
 export async function handlePairStart(request, env) {
-  const login = await sessionLogin(request, env);
-  if (!login) return jsonError(401, 'log in first');
   if (!(await ipRateOk(env, clientIp(request)))) return jsonError(429, 'rate limited (ip)');
+  let login = await sessionLogin(request, env);
+  if (!login) {
+    // CLI path: a verified machine mints codes itself. Unverified machines
+    // can't — the ✓ the claim grants has to root in an identity that already
+    // proved its GitHub login (gist or OAuth), not in self-assertion.
+    let body = null;
+    try { body = await request.json(); } catch { /* no/invalid body → unauthenticated */ }
+    if (!body || !isUuidish(body.instanceId)) return jsonError(401, 'log in first');
+    // Minting is the spammable op — per-machine window, keyed on the
+    // ORIGINAL (pre-alias) id like squad-create, so bounds stay per machine.
+    if (!(await rateOk(env, body.instanceId, 'pair-start'))) return jsonError(429, 'rate limited');
+    const id = await resolveCanonical(env, body.instanceId);
+    const prof = await getProfile(env, id);
+    if (!prof || !prof.verified || !normGithub(prof.githubUser)) {
+      return jsonError(403, 'only a verified machine can mint link codes — verify this one first, or mint in the browser: claude-rpc.vercel.app/link');
+    }
+    login = prof.githubUser;
+  }
   const code = newInviteCode().slice(3); // 6 chars, same unambiguous alphabet
   await env.TOTALS.put(PAIR_KEY(code), login, { expirationTtl: PAIR_TTL_SECONDS });
   return jsonOk({ ok: true, code, expiresInSec: PAIR_TTL_SECONDS });
@@ -1362,9 +1385,9 @@ export async function handlePairClaim(request, env) {
   if (!isUuidish(body.instanceId)) return jsonError(400, 'instanceId must be a UUID');
   if (!(await ipRateOk(env, clientIp(request)))) return jsonError(429, 'rate limited (ip)');
   const code = normPairCode(body.code);
-  if (!code) return jsonError(400, 'link code looks wrong — it\'s the 6 characters from the squads page');
+  if (!code) return jsonError(400, 'link code looks wrong — it\'s the 6 characters from `claude-rpc link` on your main machine (or claude-rpc.vercel.app/link)');
   const login = await env.TOTALS.get(PAIR_KEY(code));
-  if (!login) return jsonError(404, 'code expired or unknown — grab a fresh one from claude-rpc.vercel.app/squads');
+  if (!login) return jsonError(404, 'code expired or unknown — run `claude-rpc link` on your main machine for a fresh one, or claude-rpc.vercel.app/link');
 
   // If this login already belongs to another machine, MERGE rather than steal.
   // applyVerifiedLink handles both the merge and the first-link cases; a

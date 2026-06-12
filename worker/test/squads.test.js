@@ -355,6 +355,56 @@ test('pair: claim without a profile, with a bad code, or unauthenticated start a
   assert.equal(res.status, 404, 'unknown code → 404');
 });
 
+// Verify a profile the way the merge tests do elsewhere: a web session mints a
+// pair code, the machine claims it. Leaves the machine verified + gh-linked.
+async function verifyViaPair(env, instanceId, login) {
+  const sess = await mintToken('sess', { gh: login }, SECRET, 60_000);
+  const { code } = await (await handlePairStart(post('/pair/start', {}, { Authorization: `Bearer ${sess}` }), env)).json();
+  const claim = await handlePairClaim(post('/pair/claim', { instanceId, code }), env);
+  assert.equal(claim.status, 200, await claim.clone().text());
+}
+
+test('pair: a verified machine mints a code itself; a fresh machine claims it and merges', async () => {
+  const env = makeEnv();
+  await seedProfile(env, IDS.alice, 'alice', { tokens: 100 });
+  await verifyViaPair(env, IDS.alice, 'AliceGH');
+
+  // No Bearer header — the machine's instanceId is the credential.
+  const start = await handlePairStart(post('/pair/start', { instanceId: IDS.alice }), env);
+  assert.equal(start.status, 200, await start.clone().text());
+  const { code } = await start.json();
+  assert.match(code, /^[2-9A-HJKMNP-Z]{6}$/);
+
+  // Machine #2 claims → folds into alice's canonical identity.
+  await seedProfile(env, IDS.bob, 'bob-laptop', { tokens: 7 });
+  const claim = await handlePairClaim(post('/pair/claim', { instanceId: IDS.bob, code }), env);
+  assert.equal(claim.status, 200, await claim.clone().text());
+  const j = await claim.json();
+  assert.equal(j.merged, true, 'second machine merges, never a rival identity');
+  assert.equal(j.githubUser, 'AliceGH');
+  assert.equal(j.handle, 'alice', 'canonical handle wins');
+  assert.equal(await env.TOTALS.get('alias:' + IDS.bob), IDS.alice);
+  const prof = JSON.parse(env.TOTALS.store.get('pf:' + IDS.alice).value);
+  assert.equal(prof.tokens, 107, 'totals sum across machines');
+});
+
+test('pair: unverified or unknown machines cannot mint, and minting is throttled per machine', async () => {
+  const env = makeEnv();
+  await seedProfile(env, IDS.carol, 'carol'); // published but NOT verified
+  let res = await handlePairStart(post('/pair/start', { instanceId: IDS.carol }), env);
+  assert.equal(res.status, 403, 'unverified machine cannot mint — the ✓ must root in a proven identity');
+
+  res = await handlePairStart(post('/pair/start', { instanceId: IDS.dave }), env);
+  assert.equal(res.status, 403, 'machine with no profile cannot mint');
+
+  await seedProfile(env, IDS.alice, 'alice');
+  await verifyViaPair(env, IDS.alice, 'AliceGH');
+  res = await handlePairStart(post('/pair/start', { instanceId: IDS.alice }), env);
+  assert.equal(res.status, 200);
+  res = await handlePairStart(post('/pair/start', { instanceId: IDS.alice }), env);
+  assert.equal(res.status, 429, 'back-to-back mints from one machine are throttled');
+});
+
 test('verify/check sends authenticated GitHub API requests when app creds exist', async () => {
   const env = makeEnv();
   await seedProfile(env, IDS.bob, 'bob');

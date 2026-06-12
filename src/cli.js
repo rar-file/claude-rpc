@@ -1137,22 +1137,49 @@ async function doSquadCmd(argv) {
   });
 }
 
-// ── Link (CLI ↔ web pairing) ─────────────────────────────────────────────
+// ── Link (one profile across machines) ───────────────────────────────────
 //
-// `claude-rpc link <code>` — the code comes from claude-rpc.vercel.app/squads
-// while logged in with GitHub. Claims it against this install's instanceId,
-// which verifies the profile (✓) and unlocks managing squads from the
-// browser. Replaces the gist dance for anyone who uses the website.
+// Two-sided by design — one verb owns the whole story:
+//   claude-rpc link            on your MAIN (verified) machine → mints a
+//                              one-time code, no browser needed
+//   claude-rpc link <code>     on the NEW machine → claims it, merging this
+//                              install into the same leaderboard identity
+// The browser fallback lives at claude-rpc.vercel.app/link (log in with
+// GitHub → same code) for when the other machine isn't handy. Claiming
+// verifies the profile (✓) and unlocks managing squads from the browser.
 
-async function doLink(argv) {
-  const code = (argv[0] || '').trim();
-  if (!code) {
-    fail('usage: claude-rpc link <code>', {
-      hint: 'log in at https://claude-rpc.vercel.app/squads — it shows you the code',
-      code: EX_USER_ERROR,
+const LINK_PAGE = 'https://claude-rpc.vercel.app/link';
+
+// Mint side: this machine asks the worker for a code. The worker only obliges
+// when this install's canonical profile is verified — the ✓ a claim grants
+// has to root in an already-proven identity.
+async function linkMint(ctx) {
+  const r = await ctx.post('/pair/start', {});
+  if (r.status === 403) {
+    return fail('link codes come from a verified machine — this one isn\'t yet', {
+      hint: `verify here first (claude-rpc profile verify), or mint in the browser: ${LINK_PAGE}`,
+      code: EX_BAD_STATE,
     });
   }
+  if (r.status !== 200 || !r.json?.code) {
+    return fail(`could not mint a link code: ${r.json?.error || r.status}`, { code: EX_SYS_ERROR });
+  }
+  const mins = Math.round((r.json.expiresInSec || 600) / 60);
+  console.log('');
+  console.log(`  ${c.green}✓${c.reset}  link code: ${c.cyan}${c.bold}${r.json.code}${c.reset}   ${c.dim}(expires in ${mins} min)${c.reset}`);
+  console.log('');
+  console.log(`  ${c.dim}on the new machine:${c.reset}`);
+  console.log(`    npx claude-rpc@latest setup`);
+  console.log(`    ${c.cyan}claude-rpc link ${r.json.code}${c.reset}`);
+  console.log('');
+  console.log(`  ${c.dim}one leaderboard profile — stats from every linked machine count as one${c.reset}`);
+  console.log('');
+}
+
+async function doLink(argv) {
   const ctx = squadAuth();
+  const code = (argv[0] || '').trim();
+  if (!code) return linkMint(ctx);
   // Make sure the profile row exists server-side before claiming — same
   // pre-publish profileVerify does, so link works on a fresh `profile on`.
   if (lb.profileIsPublishable(ctx.cfg.profile || {})) {
@@ -1162,7 +1189,7 @@ async function doLink(argv) {
   const r = await ctx.post('/pair/claim', { code });
   if (r.status !== 200) {
     return fail(`link failed: ${r.json?.error || r.status}`,
-      { hint: 'grab a fresh code from https://claude-rpc.vercel.app/squads and try again', code: EX_SYS_ERROR });
+      { hint: `get a fresh code: run \`claude-rpc link\` on your main machine, or ${LINK_PAGE}`, code: EX_SYS_ERROR });
   }
   // Mirror the verified identity locally so `profile status` agrees.
   const userCfg = readJson(CONFIG_PATH, {});
@@ -1174,7 +1201,7 @@ async function doLink(argv) {
     // canonical handle, one board row across all your machines.
     console.log(`  ${c.green}✓${c.reset}  this machine now merges into ${c.cyan}@${r.json.handle}${c.reset} ${c.dim}— stats from all your machines count as one${c.reset}`);
   }
-  console.log(`     ${c.dim}head back to https://claude-rpc.vercel.app/squads — it picks the link up automatically${c.reset}`);
+  console.log(`     ${c.dim}started in a browser tab? it picks the link up automatically${c.reset}`);
 }
 
 // ── Community totals ─────────────────────────────────────────────────────
@@ -1323,7 +1350,7 @@ function profileNextStep() {
   if (!next) {
     console.log(`     ${c.dim}→  all set — you're live at${c.reset} ${c.cyan}https://claude-rpc.vercel.app/u/${encodeURIComponent(p.handle)}${c.reset}`);
   } else if (next.key === 'verify') {
-    console.log(`     ${c.dim}→  next: log in at${c.reset} ${c.cyan}https://claude-rpc.vercel.app/squads${c.reset}${c.dim}, then${c.reset} ${c.cyan}claude-rpc link <code>${c.reset}`);
+    console.log(`     ${c.dim}→  next: run${c.reset} ${c.cyan}claude-rpc link${c.reset} ${c.dim}on a machine that's already verified, then${c.reset} ${c.cyan}claude-rpc link <code>${c.reset} ${c.dim}here — first machine? ${LINK_PAGE}${c.reset}`);
   } else {
     console.log(`     ${c.dim}→  next:${c.reset} ${c.cyan}${next.cmd}${c.reset}  ${c.dim}(${next.label})${c.reset}`);
   }
@@ -1366,12 +1393,12 @@ function profileStatus() {
         : `${c.cyan}${s.cmd}${c.reset}${i === nextIdx ? `  ${c.dim}← next${c.reset}` : ''}`;
       return `${mark} ${i + 1}. ${label}${' '.repeat(Math.max(1, 20 - s.label.length))}${tail}`;
     });
-    // Web pairing is the primary verify path; the gist dance stays available
+    // Link codes are the primary verify path; the gist dance stays available
     // for terminals with no browser nearby.
     if (!steps[2].done) {
       lines.push('');
-      lines.push(`${c.dim}the code comes from${c.reset} ${c.cyan}https://claude-rpc.vercel.app/squads${c.reset} ${c.dim}(log in with GitHub)${c.reset}`);
-      lines.push(`${c.dim}no browser? fall back to${c.reset} ${c.cyan}claude-rpc profile verify${c.reset}`);
+      lines.push(`${c.dim}the code comes from${c.reset} ${c.cyan}claude-rpc link${c.reset} ${c.dim}on a machine you already verified${c.reset}`);
+      lines.push(`${c.dim}first machine? log in at${c.reset} ${c.cyan}${LINK_PAGE}${c.reset} ${c.dim}— or no browser:${c.reset} ${c.cyan}claude-rpc profile verify${c.reset}`);
     }
     box('next steps', lines);
   }
@@ -1704,7 +1731,7 @@ function help() {
     ['community', 'Opt in/out of anonymous community totals (on|off|status|report)'],
     ['profile',   'Public leaderboard identity (status|set|on|off|publish|verify)'],
     ['squad',     'Private mini-leaderboards with friends (create|join|leave|status)'],
-    ['link',      'Pair this install with your web login (code from /squads page)'],
+    ['link',      'Link machines into one profile (mints a code; `link <code>` claims it)'],
     ['doctor',    'Run a diagnostic checklist — common-failure triage (--fix to auto-repair)'],
     ['tail',      'Tail the daemon log file'],
     ['daemon',    'Run daemon in foreground (debug)'],
