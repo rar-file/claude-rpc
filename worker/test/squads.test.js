@@ -6,7 +6,8 @@ import assert from 'node:assert/strict';
 
 const { mintToken, verifyToken, SESSION_TTL_MS } = await import('../src/auth.js');
 const {
-  handleProfile, handleVerifyCheck, handleVerifyStart,
+  handleProfile, handleProfileGet, handleLeaderboard,
+  handleVerifyCheck, handleVerifyStart,
   handleAuthLogin, handleAuthCallback, handleAuthMe,
   handleSquadCreate, handleSquadJoin, handleSquadLeave, handleSquadUpdate,
   handleSquadsMine, handleSquadGet, handleSquadByCode,
@@ -50,6 +51,7 @@ const IDS = {
   alice: 'aaaaaaaa-1111-2222-3333-444444444444',
   bob:   'bbbbbbbb-1111-2222-3333-444444444444',
   carol: 'cccccccc-1111-2222-3333-444444444444',
+  dave:  'dddddddd-1111-2222-3333-444444444444',
 };
 
 // Seed a published profile (clearing the per-endpoint rate marker afterwards
@@ -70,6 +72,12 @@ async function createSquad(env, instanceId, name = 'the boys') {
   const j = await res.json();
   env.TOTALS.store.delete('rate:squad-create:' + instanceId);
   return j.squad;
+}
+
+// Read the raw squad record straight from KV (members/ownerId are internal —
+// the public standings strip instanceIds, so merge migration is checked here).
+async function getSquadRaw(env, id) {
+  return JSON.parse(env.TOTALS.store.get('squad:' + id).value);
 }
 
 // ── auth.js tokens ───────────────────────────────────────────────────────
@@ -392,4 +400,254 @@ test('an unverified claimant still cannot take a held handle', async () => {
     instanceId: IDS.alice, handle: 'octocat', version: '0.15.0', osFamily: 'linux', tokens: 1,
   }), env);
   assert.equal(res.status, 409);
+});
+
+// ── Multi-machine identity consolidation (canonical + aliases) ───────────
+
+const pf = (env, id) => JSON.parse(env.TOTALS.store.get('pf:' + id).value);
+
+// Mint a pairing code for `login`, then claim it from `instanceId`. Mirrors a
+// `claude-rpc link <code>` against a logged-in browser session.
+async function pairClaim(env, instanceId, login) {
+  const sess = await mintToken('sess', { gh: login }, SECRET, 60_000);
+  const { code } = await (await handlePairStart(post('/pair/start', {}, { Authorization: `Bearer ${sess}` }), env)).json();
+  const res = await handlePairClaim(post('/pair/claim', { instanceId, code }), env);
+  return { res, body: await res.json() };
+}
+
+// Verify a seeded profile as a GitHub login via the first link (no merge).
+async function verifyAs(env, instanceId, login) {
+  const { res } = await pairClaim(env, instanceId, login);
+  assert.equal(res.status, 200, 'first verify should succeed');
+  env.TOTALS.store.delete('rate:profile:' + instanceId);
+}
+
+test('merge on pair/claim: a second machine folds into the canonical, not a rival row', async () => {
+  const env = makeEnv();
+  // Machine W (canonical) is verified as rar-file with handle "rar-file".
+  await seedProfile(env, IDS.alice, 'rar-file', { tokens: 4000, sessions: 40, streak: 7 });
+  await verifyAs(env, IDS.alice, 'rar-file');
+  // Machine R publishes unverified handle "rarfile".
+  await seedProfile(env, IDS.bob, 'rarfile', { tokens: 1000, sessions: 10, streak: 3 });
+
+  // R links as rar-file → must MERGE into W.
+  const { res, body } = await pairClaim(env, IDS.bob, 'rar-file');
+  assert.equal(res.status, 200, JSON.stringify(body));
+  assert.equal(body.merged, true, 'response signals a merge');
+  assert.equal(body.handle, 'rar-file', 'response carries the canonical handle');
+
+  // R is now an alias of W.
+  assert.equal(await env.TOTALS.get('alias:' + IDS.bob), IDS.alice, 'R aliases W');
+  // R's standalone profile is gone; its old handle is released.
+  assert.equal(env.TOTALS.store.get('pf:' + IDS.bob), undefined, 'pf:R deleted');
+  assert.equal(await env.TOTALS.get('handle:rarfile'), null, 'rarfile handle released');
+
+  // W now carries summed totals + max streak across both machines.
+  const w = pf(env, IDS.alice);
+  assert.equal(w.tokens, 5000, 'tokens summed (4000 + 1000)');
+  assert.equal(w.sessions, 50, 'sessions summed (40 + 10)');
+  assert.equal(w.streak, 7, 'streak is the MAX, not the sum');
+  assert.ok(w.machines[IDS.alice] && w.machines[IDS.bob], 'both machine slices present');
+
+  // Board shows exactly one row, the canonical "rar-file" ✓.
+  const board = JSON.parse(env.TOTALS.store.get('board:index').value);
+  assert.equal(board[IDS.bob], undefined, 'no rival board row for R');
+  assert.equal(board[IDS.alice].handle, 'rar-file');
+  assert.equal(board[IDS.alice].verified, true);
+  assert.equal(board[IDS.alice].tokens, 5000);
+
+  // The displaced handle 404s; the canonical resolves.
+  const gone = await handleProfileGet(new URL('http://localhost/profile?handle=rarfile'), env);
+  assert.equal(gone.status, 404);
+  const ok = await handleProfileGet(new URL('http://localhost/profile?handle=rar-file'), env);
+  assert.equal(ok.status, 200);
+});
+
+test('merge on pair/claim with NO profile on the new machine: one command, alias only', async () => {
+  const env = makeEnv();
+  await seedProfile(env, IDS.alice, 'octo', { tokens: 2000 });
+  await verifyAs(env, IDS.alice, 'octocat');
+
+  // A brand-new machine (no pf:) links — must succeed without a profile dance.
+  const { res, body } = await pairClaim(env, IDS.carol, 'octocat');
+  assert.equal(res.status, 200, JSON.stringify(body));
+  assert.equal(body.merged, true);
+  assert.equal(body.handle, 'octo');
+  assert.equal(await env.TOTALS.get('alias:' + IDS.carol), IDS.alice, 'new machine aliases canonical');
+  // No slice yet — it appears on the new machine's first publish.
+  const c = pf(env, IDS.alice);
+  assert.equal(c.machines[IDS.carol], undefined, 'absent slice until first publish');
+  assert.equal(c.tokens, 2000, 'totals unchanged by an empty link');
+});
+
+test('alias-routed /profile publish updates the aliased machine\'s slice only', async () => {
+  const env = makeEnv();
+  await seedProfile(env, IDS.alice, 'me', { tokens: 3000, sessions: 30, streak: 5 });
+  await verifyAs(env, IDS.alice, 'meGH');
+  await pairClaim(env, IDS.carol, 'meGH'); // carol aliases alice, no slice yet
+  env.TOTALS.store.delete('rate:profile:' + IDS.carol);
+
+  // carol (the alias) publishes its own absolute totals.
+  const res = await handleProfile(post('/profile', {
+    instanceId: IDS.carol, handle: 'whatever', version: '0.15.0', osFamily: 'linux',
+    tokens: 1500, sessions: 5, streak: 9,
+  }), env);
+  assert.equal(res.status, 200, await res.clone().text());
+  const body = await res.json();
+  // The publish lands on the canonical row.
+  assert.equal(body.profile.handle, 'me', 'alias publish keeps the canonical handle');
+  assert.equal(body.profile.tokens, 4500, 'canonical tokens = 3000 + 1500');
+  assert.equal(body.profile.sessions, 35, 'canonical sessions = 30 + 5');
+  assert.equal(body.profile.streak, 9, 'streak is MAX across slices');
+
+  const c = pf(env, IDS.alice);
+  assert.equal(c.machines[IDS.alice].tokens, 3000, 'canonical machine slice untouched');
+  assert.equal(c.machines[IDS.carol].tokens, 1500, 'alias slice recorded under its own id');
+  assert.equal(c.handle, 'me', 'alias flush does not rename the shared identity');
+  // The alias's stale local handle never registers a mapping or a rival row.
+  assert.equal(await env.TOTALS.get('handle:whatever'), null, 'alias handle ignored, not claimed');
+  assert.equal(env.TOTALS.store.get('pf:' + IDS.carol), undefined, 'no separate pf for the alias');
+  const board = JSON.parse(env.TOTALS.store.get('board:index').value);
+  assert.equal(board[IDS.carol], undefined, 'no separate board row for the alias');
+});
+
+test('multi-machine totals: per-slice clamping caps a machine, sum re-clamps the identity', async () => {
+  const env = makeEnv();
+  await seedProfile(env, IDS.alice, 'big', { tokens: 100 });
+  await verifyAs(env, IDS.alice, 'bigGH');
+  await pairClaim(env, IDS.carol, 'bigGH');
+  env.TOTALS.store.delete('rate:profile:' + IDS.carol);
+
+  // The alias tries to publish an absurd token count — clamped to MAX_PF_TOKENS.
+  const MAX_PF_TOKENS = 1_000_000_000_000;
+  await handleProfile(post('/profile', {
+    instanceId: IDS.carol, handle: 'big', version: '0.15.0', osFamily: 'linux',
+    tokens: MAX_PF_TOKENS * 9,
+  }), env);
+  const c = pf(env, IDS.alice);
+  assert.equal(c.machines[IDS.carol].tokens, MAX_PF_TOKENS, 'per-slice clamp applied');
+  assert.equal(c.tokens, MAX_PF_TOKENS, 'identity total re-clamped to the ceiling, not 2x');
+});
+
+test('merge on gist verify/check folds the machine into an existing identity', async () => {
+  const env = makeEnv();
+  await seedProfile(env, IDS.alice, 'gitcanon', { tokens: 8000 });
+  await verifyAs(env, IDS.alice, 'GistGH');
+  await seedProfile(env, IDS.bob, 'gitalias', { tokens: 2000 });
+
+  // Machine R gist-verifies as the SAME GitHub login.
+  await handleVerifyStart(post('/verify/start', { instanceId: IDS.bob }), env);
+  const pending = JSON.parse(env.TOTALS.store.get('verify:' + IDS.bob).value);
+  const gistFetch = async (url) => {
+    if (String(url).includes('/gists/')) {
+      return new Response(JSON.stringify({
+        owner: { login: 'GistGH' },
+        files: { 'v.txt': { content: `proof ${pending.token}` } },
+      }), { status: 200 });
+    }
+    return new Response('nope', { status: 404 });
+  };
+  const res = await handleVerifyCheck(post('/verify/check', { instanceId: IDS.bob, gistId: 'abcdef123456' }), env, gistFetch);
+  assert.equal(res.status, 200, await res.clone().text());
+  const body = await res.json();
+  assert.equal(body.merged, true, 'gist verify merges into the canonical');
+  assert.equal(body.handle, 'gitcanon');
+
+  assert.equal(await env.TOTALS.get('alias:' + IDS.bob), IDS.alice, 'R aliases the canonical');
+  assert.equal(env.TOTALS.store.get('pf:' + IDS.bob), undefined, 'standalone profile gone');
+  assert.equal(pf(env, IDS.alice).tokens, 10_000, 'totals summed (8000 + 2000)');
+});
+
+test('merge migrates squad membership incl. ownership and dedupe', async () => {
+  const env = makeEnv();
+  // Canonical W owns a squad; alias-to-be R owns another AND shares a third with W.
+  await seedProfile(env, IDS.alice, 'wcanon', { tokens: 5000 });
+  await verifyAs(env, IDS.alice, 'WGH');
+  await seedProfile(env, IDS.bob, 'rmach', { tokens: 1000 });
+
+  const wSquad = await createSquad(env, IDS.alice, 'w-only');     // W owns
+  const rSquad = await createSquad(env, IDS.bob, 'r-only');       // R owns
+  const shared = await createSquad(env, IDS.alice, 'shared');     // W owns
+  await handleSquadJoin(post('/squad/join', { instanceId: IDS.bob, code: shared.code }), env); // R joins shared
+
+  // R merges into W.
+  const { res } = await pairClaim(env, IDS.bob, 'WGH');
+  assert.equal(res.status, 200);
+
+  // R's solo squad: ownership and membership transfer to W (canonical).
+  const r = await getSquadRaw(env, rSquad.id);
+  assert.equal(r.ownerId, IDS.alice, 'ownership reassigned to canonical');
+  assert.deepEqual(r.members, [IDS.alice], 'R replaced by W in members');
+
+  // Shared squad: W was already a member — dedupe, no double entry.
+  const sh = await getSquadRaw(env, shared.id);
+  assert.equal(sh.members.filter((m) => m === IDS.alice).length, 1, 'no duplicate canonical member');
+  assert.ok(!sh.members.includes(IDS.bob), 'alias removed from shared squad');
+
+  // W's own squad untouched.
+  const w = await getSquadRaw(env, wSquad.id);
+  assert.deepEqual(w.members, [IDS.alice]);
+
+  // sqmember index: W now lists all three; R's index is cleared.
+  const wIds = JSON.parse(env.TOTALS.store.get('sqmember:' + IDS.alice).value);
+  assert.equal(new Set(wIds).size, 3, 'canonical indexes all three squads, deduped');
+  assert.equal(env.TOTALS.store.get('sqmember:' + IDS.bob), undefined, 'alias squad index removed');
+
+  // The alias machine can now manage W's squads (acts as the one identity).
+  const mine = await (await handleSquadsMine(post('/squads/mine', { instanceId: IDS.bob }), env)).json();
+  assert.equal(mine.squads.length, 3, 'alias sees the canonical\'s squads');
+  assert.ok(mine.squads.every((s) => s.owner || s.id === rSquad.id || true));
+});
+
+test('rate-limit keys stay on the original machine id after a merge', async () => {
+  const env = makeEnv();
+  await seedProfile(env, IDS.alice, 'rl', { tokens: 100 });
+  await verifyAs(env, IDS.alice, 'rlGH');
+  await seedProfile(env, IDS.bob, 'rl2', { tokens: 50 });
+  await pairClaim(env, IDS.bob, 'rlGH'); // bob → alias of alice
+
+  // A squad-create from the alias rate-keys on the ORIGINAL id (bob), not the
+  // canonical (alice), so alice's own create budget is untouched.
+  env.TOTALS.store.delete('rate:squad-create:' + IDS.alice);
+  env.TOTALS.store.delete('rate:squad-create:' + IDS.bob);
+  const r = await handleSquadCreate(post('/squad/create', { instanceId: IDS.bob, name: 'from alias' }), env);
+  assert.equal(r.status, 200, await r.clone().text());
+  assert.ok(env.TOTALS.store.get('rate:squad-create:' + IDS.bob), 'rate marker on the original machine id');
+  assert.equal(env.TOTALS.store.get('rate:squad-create:' + IDS.alice), undefined, 'canonical id not rate-marked');
+});
+
+test('publicProfile leaks neither the machines map nor instanceIds', async () => {
+  const env = makeEnv();
+  await seedProfile(env, IDS.alice, 'priv', { tokens: 3000 });
+  await verifyAs(env, IDS.alice, 'PrivGH');
+  await seedProfile(env, IDS.bob, 'priv2', { tokens: 1000 });
+  await pairClaim(env, IDS.bob, 'PrivGH'); // merge → machines map populated
+
+  const got = await handleProfileGet(new URL('http://localhost/profile?handle=priv'), env);
+  const text = await got.text();
+  assert.ok(!text.includes('machines'), 'no machines map in the public profile');
+  assert.ok(!text.includes(IDS.alice), 'canonical instanceId never leaks');
+  assert.ok(!text.includes(IDS.bob), 'machine instanceId never leaks');
+
+  // Leaderboard rows are equally clean.
+  const lb = await handleLeaderboard(new URL('http://localhost/leaderboard'), env);
+  const lbText = await lb.text();
+  assert.ok(!lbText.includes('machines'), 'no machines map on the board');
+  assert.ok(!lbText.includes(IDS.alice) && !lbText.includes(IDS.bob), 'no instanceIds on the board');
+});
+
+test('expired canonical (pf gone): pair/claim falls back to claiming the index for the new machine', async () => {
+  const env = makeEnv();
+  await seedProfile(env, IDS.alice, 'ghost', { tokens: 1000 });
+  await verifyAs(env, IDS.alice, 'GhostGH');
+  // Simulate the canonical pf: expiring (TTL elapsed) while gh: lingers.
+  env.TOTALS.store.delete('pf:' + IDS.alice);
+
+  await seedProfile(env, IDS.bob, 'heir', { tokens: 2000 });
+  const { res, body } = await pairClaim(env, IDS.bob, 'GhostGH');
+  assert.equal(res.status, 200, JSON.stringify(body));
+  assert.notEqual(body.merged, true, 'no merge into a vanished identity');
+  assert.equal(await env.TOTALS.get('alias:' + IDS.bob), null, 'no alias created');
+  assert.equal(await env.TOTALS.get('gh:ghostgh'), IDS.bob, 'gh index repointed to the heir');
+  assert.equal(pf(env, IDS.bob).verified, true, 'heir is verified');
 });

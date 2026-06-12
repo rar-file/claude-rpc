@@ -1169,6 +1169,11 @@ async function doLink(argv) {
   userCfg.profile = { ...(userCfg.profile || {}), githubUser: r.json.githubUser, verified: true };
   writeFileSync(CONFIG_PATH, JSON.stringify(userCfg, null, 2));
   console.log(`  ${c.green}✓${c.reset}  linked as ${c.cyan}@${r.json.githubUser}${c.reset} — profile verified, squads unlocked in the browser`);
+  if (r.json.merged) {
+    // This machine joined an existing identity: its stats now roll up under the
+    // canonical handle, one board row across all your machines.
+    console.log(`  ${c.green}✓${c.reset}  this machine now merges into ${c.cyan}@${r.json.handle}${c.reset} ${c.dim}— stats from all your machines count as one${c.reset}`);
+  }
   console.log(`     ${c.dim}head back to https://claude-rpc.vercel.app/squads — it picks the link up automatically${c.reset}`);
 }
 

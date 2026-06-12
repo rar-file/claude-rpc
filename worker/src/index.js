@@ -325,6 +325,15 @@ const GH_API                = 'https://api.github.com';
 const PF_KEY     = (id) => `pf:${id}`;
 const HANDLE_KEY = (h)  => `handle:${h}`;
 const VERIFY_KEY = (id) => `verify:${id}`;
+// Multi-machine identity. One person with several installs (each a distinct
+// instanceId UUID) is ONE board identity once their machines are linked as the
+// same verified GitHub login. The canonical profile owns the handle and board
+// row; every other machine is an alias pointing at it.
+//   alias:<instanceId> → canonicalInstanceId
+// The mapping is single-hop by construction: a merge always repoints at the
+// FINAL canonical (mergeIntoCanonical resolves the target first), so following
+// alias: exactly once is enough and there are no chains to walk.
+const ALIAS_KEY  = (id) => `alias:${id}`;
 // A single KV blob keyed `board:index` holds { [instanceId]: boardEntry } for
 // every profile ever written. handleLeaderboard reads this one blob and ranks
 // in-memory — ordering is by score, not by lexicographic pf: key order — so an
@@ -391,6 +400,19 @@ async function getBoardIndex(env) {
   try { return JSON.parse(raw); } catch { return {}; }
 }
 
+// Follow alias:<id> a SINGLE hop to the canonical instanceId. Merges always
+// repoint at the final canonical, so there are never chains to walk — one
+// lookup resolves any linked machine to the identity that owns the board row.
+// Call this at the top of every identity-consuming handler so any of a
+// person's machines acts as the one identity. Rate-limit keys deliberately
+// stay on the ORIGINAL (pre-alias) instanceId so abuse bounds remain per
+// machine, not per person.
+async function resolveCanonical(env, instanceId) {
+  if (!isUuidish(instanceId)) return instanceId;
+  const canonical = await env.TOTALS.get(ALIAS_KEY(instanceId));
+  return canonical || instanceId;
+}
+
 // Lightweight summary kept inside board:index — everything handleLeaderboard needs.
 function boardEntry(p) {
   return {
@@ -420,11 +442,74 @@ export function pruneBoardIndex(index, now = Date.now()) {
 }
 
 function publicProfile(p) {
+  // Deliberately enumerated, not spread: the public shape must NEVER leak the
+  // internal `machines` map (which is keyed by raw instanceIds) or any other
+  // internal field. Keeping this an explicit allowlist is the guard.
   return {
     handle: p.handle, displayName: p.displayName || null, githubUser: p.githubUser || null,
     verified: !!p.verified, tokens: p.tokens || 0, sessions: p.sessions || 0,
     activeMs: p.activeMs || 0, streak: p.streak || 0,
   };
+}
+
+// ── Multi-machine totals ─────────────────────────────────────────────────
+//
+// A canonical profile aggregates several machines. `p.machines` is a map
+//   { <originalInstanceId>: { tokens, sessions, activeMs, streak, updatedAt } }
+// of per-machine slices. The displayed top-level totals are DERIVED from the
+// slices: tokens/sessions/activeMs are SUMMED across machines, streak is the
+// MAX (a streak is a personal-best run, not additive). Each slice is clamped
+// with the same ceilings a single profile uses, and the recomputed sums are
+// clamped again so an N-machine identity can't exceed the per-field ceiling.
+
+// A single machine's clamped contribution. Mirrors handleProfile's setClamp
+// ceilings; missing fields fall back to the slice's previous value.
+function machineSlice(body, prevSlice = {}, now = Date.now()) {
+  const setClamp = (v, max, prevV) =>
+    v == null ? (prevV || 0) : Math.min(max, Math.max(0, Math.floor(Number(v) || 0)));
+  return {
+    tokens:    setClamp(body.tokens,   MAX_PF_TOKENS,    prevSlice.tokens),
+    sessions:  setClamp(body.sessions, MAX_PF_SESSIONS,  prevSlice.sessions),
+    activeMs:  setClamp(body.activeMs, MAX_PF_ACTIVE_MS, prevSlice.activeMs),
+    streak:    setClamp(body.streak,   MAX_STREAK,       prevSlice.streak),
+    updatedAt: now,
+  };
+}
+
+// Ensure a profile has a `machines` map. A profile written before this model
+// existed carries only top-level totals; seed those as its OWN machine slice
+// (keyed by its instanceId) so the first multi-machine recompute doesn't drop
+// the canonical machine's own numbers.
+function ensureMachines(p, selfId) {
+  if (p.machines && typeof p.machines === 'object') return p.machines;
+  p.machines = {};
+  if (selfId) {
+    p.machines[selfId] = {
+      tokens: p.tokens || 0, sessions: p.sessions || 0,
+      activeMs: p.activeMs || 0, streak: p.streak || 0,
+      updatedAt: p.updatedAt || Date.now(),
+    };
+  }
+  return p.machines;
+}
+
+// Recompute the displayed top-level totals from the slice map: sum the additive
+// metrics (re-clamped to the per-field ceiling), max the streak. Mutates and
+// returns p.
+function recomputeTotals(p) {
+  let tokens = 0, sessions = 0, activeMs = 0, streak = 0;
+  for (const m of Object.values(p.machines || {})) {
+    if (!m) continue;
+    tokens   += m.tokens   || 0;
+    sessions += m.sessions || 0;
+    activeMs += m.activeMs || 0;
+    streak    = Math.max(streak, m.streak || 0);
+  }
+  p.tokens   = Math.min(MAX_PF_TOKENS,    tokens);
+  p.sessions = Math.min(MAX_PF_SESSIONS,  sessions);
+  p.activeMs = Math.min(MAX_PF_ACTIVE_MS, activeMs);
+  p.streak   = Math.min(MAX_STREAK,       streak);
+  return p;
 }
 
 export async function handleProfile(request, env) {
@@ -433,21 +518,39 @@ export async function handleProfile(request, env) {
   const why = validateProfile(body);
   if (why) return jsonError(400, why);
 
+  // Rate-limit on the ORIGINAL instanceId (per-machine bound) BEFORE resolving
+  // the alias, so a person's machines each get their own publish budget.
   if (!(await ipRateOk(env, clientIp(request)))) return jsonError(429, 'rate limited (ip)');
   if (!(await rateOk(env, body.instanceId, 'profile'))) return jsonError(429, 'rate limited');
 
-  const handle = normHandle(body.handle);
+  // Resolve to the canonical identity. If this machine is an alias of a linked
+  // profile, the publish lands on the canonical row — pf:/handle:/board are all
+  // keyed by `id`, while the machine's stats slice is keyed by the ORIGINAL
+  // `machineId` so a multi-machine identity tracks each install separately.
+  const machineId = body.instanceId;
+  const id = await resolveCanonical(env, machineId);
+  const isAlias = id !== machineId;
+
   const now = Date.now();
-  const prev = (await getProfile(env, body.instanceId))
+  const prev = (await getProfile(env, id))
     || { tokens: 0, sessions: 0, activeMs: 0, verified: false, createdAt: now };
 
-  // Handle uniqueness: a handle belongs to exactly one instanceId — but only
-  // while that instance's profile still exists. Unverified pf: rows expire
+  // A merged (aliased) machine still flushes its own locally-stored handle —
+  // e.g. the Linux box that linked still has handle "rarfile" in its config.
+  // That must NOT keep renaming the shared identity on every flush: the
+  // canonical handle is set by the canonical machine (or claimed at merge),
+  // and an alias publish just contributes its stats slice. So when the
+  // canonical already has a handle, an alias adopts it and skips the rename
+  // path entirely; only its displayName (no uniqueness war) rides along.
+  const handle = (isAlias && prev.handle) ? prev.handle : normHandle(body.handle);
+
+  // Handle uniqueness: a handle belongs to exactly one identity — but only
+  // while that identity's profile still exists. Unverified pf: rows expire
   // after 90 days while handle:<h> has no TTL, so an expired squatter's
   // handle would otherwise stay claimed forever. If the owning profile is
   // gone, release the orphaned mapping to the new claimant.
   const owner = await env.TOTALS.get(HANDLE_KEY(handle));
-  if (owner && owner !== body.instanceId) {
+  if (owner && owner !== id) {
     const ownerProfile = await getProfile(env, owner);
     if (!ownerProfile) {
       try { await env.TOTALS.delete(HANDLE_KEY(handle)); } catch { /* best-effort */ }
@@ -475,41 +578,45 @@ export async function handleProfile(request, env) {
       return jsonError(409, 'handle taken');
     }
   }
-  // Release a previously-held handle if this instance is renaming.
+  // Release the canonical's previously-held handle if it is renaming. (Handle
+  // and displayName updates apply to the canonical from ANY of the person's
+  // machines — same person.)
   if (prev.handle && prev.handle !== handle) {
     try { await env.TOTALS.delete(HANDLE_KEY(prev.handle)); } catch { /* best-effort */ }
   }
 
-  // Set (not accumulate) absolute totals, clamped to the ceilings. Missing
-  // fields keep the previous value. Idempotent: re-sending the same totals is a
-  // no-op, so there's no double-count risk and the board matches the user's
-  // real aggregate exactly.
-  const setClamp = (v, max, prevV) =>
-    v == null ? (prevV || 0) : Math.min(max, Math.max(0, Math.floor(Number(v) || 0)));
+  // Write the publishing machine's slice (keyed by the ORIGINAL machineId,
+  // even for the canonical machine itself) and recompute the displayed totals.
+  // A canonical profile written before the machines model is migrated by
+  // seeding its current totals as its own slice first — see ensureMachines.
   const next = {
     handle,
     displayName: cleanName(body.displayName) || prev.displayName || null,
     githubUser:  normGithub(body.githubUser) || prev.githubUser  || null,
     verified:    !!prev.verified, // only the verify flow flips this — never the client
-    tokens:      setClamp(body.tokens,   MAX_PF_TOKENS,    prev.tokens),
-    sessions:    setClamp(body.sessions, MAX_PF_SESSIONS,  prev.sessions),
-    activeMs:    setClamp(body.activeMs, MAX_PF_ACTIVE_MS, prev.activeMs),
-    streak:      setClamp(body.streak,   MAX_STREAK,       prev.streak),
+    machines:    ensureMachines(prev, id),
     createdAt:   prev.createdAt || now,
     updatedAt:   now,
   };
+  // Absolute lifetime totals are SET (not accumulated) per machine, clamped to
+  // the ceilings; re-sending the same totals is idempotent. The top-level
+  // tokens/sessions/activeMs become the SUM across machines, streak the MAX.
+  next.machines[machineId] = machineSlice(body, next.machines[machineId], now);
+  recomputeTotals(next);
+
   // Unverified profiles get a 90-day TTL so squatted entries expire automatically;
   // verified profiles are permanent.
   const pfOpts = next.verified ? {} : { expirationTtl: PF_UNVERIFIED_TTL_SECONDS };
-  await env.TOTALS.put(PF_KEY(body.instanceId), JSON.stringify(next), pfOpts);
-  await env.TOTALS.put(HANDLE_KEY(handle), body.instanceId);
+  await env.TOTALS.put(PF_KEY(id), JSON.stringify(next), pfOpts);
+  await env.TOTALS.put(HANDLE_KEY(handle), id);
 
   // Update the score-ordered index. Best-effort read-modify-write (same race
   // tolerance as addInt — acceptable for a vanity leaderboard). Pruning on
-  // every write keeps the blob bounded without a scheduled job.
+  // every write keeps the blob bounded without a scheduled job. Keyed by the
+  // canonical id → one board row per identity, never one per machine.
   try {
     const index = pruneBoardIndex(await getBoardIndex(env));
-    index[body.instanceId] = boardEntry(next);
+    index[id] = boardEntry(next);
     await env.TOTALS.put(BOARD_INDEX_KEY, JSON.stringify(index));
   } catch { /* best-effort */ }
 
@@ -678,23 +785,20 @@ export async function handleVerifyCheck(request, env, fetchImpl = fetch) {
 
   if (!matchedOwner) return jsonError(422, 'token not found in the gist yet — pass the gistId, and make sure the gist is public');
 
-  const prof = await getProfile(env, body.instanceId);
-  if (!prof) return jsonError(409, 'create your profile first (POST /profile)');
-  prof.verified = true;
-  prof.githubUser = matchedOwner; // authoritative: whoever actually owns the gist
-  // Verified profiles are permanent — no TTL.
-  await env.TOTALS.put(PF_KEY(body.instanceId), JSON.stringify(prof));
-  // Reverse index for web login: a GitHub OAuth session for this login now
-  // resolves to this profile. Last verification wins if one account verifies
-  // multiple installs — the freshest machine is the one you meant.
-  try { await env.TOTALS.put(GH_KEY(matchedOwner), body.instanceId); } catch { /* best-effort */ }
+  // A profile must exist to gist-verify (the user published it to get here).
+  if (!(await getProfile(env, body.instanceId))) return jsonError(409, 'create your profile first (POST /profile)');
   try { await env.TOTALS.delete(VERIFY_KEY(body.instanceId)); } catch { /* best-effort */ }
-  // Reflect verification in the board index immediately.
-  try {
-    const index = pruneBoardIndex(await getBoardIndex(env));
-    index[body.instanceId] = boardEntry(prof);
-    await env.TOTALS.put(BOARD_INDEX_KEY, JSON.stringify(index));
-  } catch { /* best-effort */ }
+
+  // Same merge rule as pair/claim: if this GitHub login already owns a
+  // different canonical profile, fold this machine into it (matchedOwner is
+  // authoritative — whoever actually owns the gist). Otherwise this machine
+  // claims the login for itself.
+  const link = await applyVerifiedLink(env, body.instanceId, matchedOwner);
+  if (link.merged) {
+    return new Response(JSON.stringify({ ok: true, verified: true, githubUser: matchedOwner, merged: true, handle: link.handle }), {
+      headers: { ...CORS, 'Content-Type': 'application/json' },
+    });
+  }
   return new Response(JSON.stringify({ ok: true, verified: true, githubUser: matchedOwner }), {
     headers: { ...CORS, 'Content-Type': 'application/json' },
   });
@@ -734,7 +838,10 @@ function siteOrigin(env) {
 async function resolveGithubInstance(env, login) {
   if (!normGithub(login)) return null;
   const direct = await env.TOTALS.get(GH_KEY(login));
-  if (direct) return direct;
+  // Defensive: if the gh: index ever points at a machine that has since been
+  // aliased into a canonical, resolve through alias: so callers always get the
+  // identity that owns the board row.
+  if (direct) return resolveCanonical(env, direct);
   try {
     const index = await getBoardIndex(env);
     const want = String(login).toLowerCase();
@@ -823,6 +930,12 @@ export async function handleAuthMe(request, env) {
 //   web — Bearer session → GitHub login → gh:<login> index
 //   CLI — body.instanceId (the same secret UUID the profile routes trust)
 // Both converge so every squad is co-ownable from either surface.
+//
+// `instanceId` is the CANONICAL identity (an aliased machine acts as the one
+// identity it was merged into, so any of a person's installs sees and manages
+// the same squads). `rateId` is the ORIGINAL pre-alias machine id — squad
+// per-instance limiters key on it so abuse bounds stay per machine. For the web
+// path the canonical id is the only id we have, so rateId mirrors it.
 async function resolveMemberId(request, env, body) {
   const login = await sessionLogin(request, env);
   if (login) {
@@ -830,9 +943,12 @@ async function resolveMemberId(request, env, body) {
     if (!id) {
       return { error: jsonError(403, 'no verified claude-rpc profile is linked to this GitHub account — run `claude-rpc profile verify` once, then log in again') };
     }
-    return { instanceId: id, via: 'session' };
+    return { instanceId: id, rateId: id, via: 'session' };
   }
-  if (body && isUuidish(body.instanceId)) return { instanceId: body.instanceId, via: 'instance' };
+  if (body && isUuidish(body.instanceId)) {
+    const canonical = await resolveCanonical(env, body.instanceId);
+    return { instanceId: canonical, rateId: body.instanceId, via: 'instance' };
+  }
   return { error: jsonError(401, 'authentication required') };
 }
 
@@ -922,10 +1038,12 @@ export async function handleSquadCreate(request, env) {
   const who = await resolveMemberId(request, env, body);
   if (who.error) return who.error;
   // Creation is the spammable op, so it gets its own per-instance window.
+  // Keyed on the ORIGINAL machine id (who.rateId), so the abuse bound stays
+  // per machine even after machines merge into one identity.
   // Join deliberately has no per-instance limiter — "create then immediately
   // join a friend's squad" is a normal interactive minute; possession of an
   // invite code plus the membership caps already bound join volume.
-  if (!(await rateOk(env, who.instanceId, 'squad-create'))) return jsonError(429, 'rate limited');
+  if (!(await rateOk(env, who.rateId, 'squad-create'))) return jsonError(429, 'rate limited');
 
   const name = cleanSquadName(body.name);
   if (!name) return jsonError(400, 'squad name required (1–40 printable chars)');
@@ -1107,6 +1225,111 @@ export async function handleSquadGet(url, env) {
   }, 'public, max-age=30');
 }
 
+// ── Multi-machine merge ──────────────────────────────────────────────────
+//
+// When a machine N verifies/links as a GitHub login that already maps to a
+// DIFFERENT canonical profile C (and pf:C still exists), N is not a rival
+// identity — it's the same person's other install. Merge N into C instead of
+// letting N steal the web identity (the old last-write-wins bug). After a
+// merge, N is an alias of C: one board row, summed totals, shared squads.
+
+// Migrate N's squad memberships onto C. For each squad N belongs to: replace N
+// with C in the members list (dedupe if C is already there), repoint ownerId,
+// and union the squad id into C's membership index. Weekly baselines (sqbase,
+// keyed by instanceId) are left as-is: a missing slice for C simply anchors
+// fresh on the next standings read, which the existing code already tolerates.
+async function migrateSquadsToCanonical(env, fromId, toId) {
+  const fromSquads = await memberSquadIds(env, fromId);
+  if (!fromSquads.length) return;
+  for (const sid of fromSquads) {
+    const squad = await getSquad(env, sid);
+    if (!squad || !Array.isArray(squad.members)) continue;
+    if (squad.members.includes(fromId)) {
+      squad.members = squad.members.filter((m) => m !== fromId);
+      if (!squad.members.includes(toId)) squad.members.push(toId);
+    }
+    if (squad.ownerId === fromId) squad.ownerId = toId;
+    try { await env.TOTALS.put(SQUAD_KEY(sid), JSON.stringify(squad)); } catch { /* best-effort */ }
+  }
+  // Union fromId's squad ids into toId's index, then drop fromId's index.
+  const toSquads = await memberSquadIds(env, toId);
+  const union = [...new Set([...toSquads, ...fromSquads])];
+  try { await writeMemberSquads(env, toId, union); } catch { /* best-effort */ }
+  try { await writeMemberSquads(env, fromId, []); } catch { /* best-effort */ }
+}
+
+// Fold machine N into canonical C: alias N→C, absorb N's existing pf:N totals
+// into C.machines[N], release N's handle, delete pf:N, drop N's board row and
+// refresh C's, and migrate N's squads. Idempotent enough to be safe on retry.
+async function mergeIntoCanonical(env, machineId, canonicalId, canonicalProfile) {
+  const C = canonicalProfile;
+  C.machines = ensureMachines(C, canonicalId);
+  // Fold N's standalone profile (if any) into C's slice map under N's id, so
+  // its lifetime totals are summed rather than lost. machineSlice re-clamps.
+  const nProf = await getProfile(env, machineId);
+  if (nProf) {
+    C.machines[machineId] = machineSlice(nProf, C.machines[machineId]);
+  }
+  recomputeTotals(C);
+  await env.TOTALS.put(PF_KEY(canonicalId), JSON.stringify(C)); // canonical → permanent (verified)
+
+  // Point N at C (single hop), then dismantle N's standalone identity.
+  await env.TOTALS.put(ALIAS_KEY(machineId), canonicalId);
+  if (nProf && nProf.handle) {
+    const holder = await env.TOTALS.get(HANDLE_KEY(nProf.handle));
+    if (holder === machineId) { try { await env.TOTALS.delete(HANDLE_KEY(nProf.handle)); } catch { /* best-effort */ } }
+  }
+  try { await env.TOTALS.delete(PF_KEY(machineId)); } catch { /* best-effort */ }
+
+  // One board row per identity: drop N's entry, refresh C's.
+  try {
+    const index = pruneBoardIndex(await getBoardIndex(env));
+    delete index[machineId];
+    index[canonicalId] = boardEntry(C);
+    await env.TOTALS.put(BOARD_INDEX_KEY, JSON.stringify(index));
+  } catch { /* best-effort */ }
+
+  await migrateSquadsToCanonical(env, machineId, canonicalId);
+}
+
+// Shared by pair/claim and gist verify/check: mark machine N verified as
+// `login`. Returns one of:
+//   { merged: true, canonicalId, handle }  — folded into an existing identity
+//   { merged: false, profile }             — N is (or becomes) its own identity
+// MERGE when gh:<login> → a different canonical C whose pf:C still exists.
+// Otherwise (no prior link, or C expired) fall back to claiming the index for
+// N. When N has no profile of its own and a canonical exists, linking still
+// succeeds (alias only) — a brand-new machine links in one command.
+async function applyVerifiedLink(env, machineId, login) {
+  const existing = await resolveGithubInstance(env, login);
+  if (existing && existing !== machineId) {
+    const canonicalProfile = await getProfile(env, existing);
+    if (canonicalProfile) {
+      await mergeIntoCanonical(env, machineId, existing, canonicalProfile);
+      // gh: must point at the canonical even if it had drifted onto an alias.
+      try { await env.TOTALS.put(GH_KEY(login), existing); } catch { /* best-effort */ }
+      return { merged: true, canonicalId: existing, handle: canonicalProfile.handle };
+    }
+    // pf:C is gone (expired) → no identity to merge into; N becomes the owner.
+  }
+
+  // No prior canonical (or it expired): N claims the login for itself.
+  const prof = await getProfile(env, machineId);
+  if (!prof) return { merged: false, profile: null }; // caller decides if that's an error
+  prof.verified = true;
+  prof.githubUser = login;
+  prof.machines = ensureMachines(prof, machineId);
+  recomputeTotals(prof);
+  await env.TOTALS.put(PF_KEY(machineId), JSON.stringify(prof)); // verified → permanent
+  await env.TOTALS.put(GH_KEY(login), machineId);
+  try {
+    const index = pruneBoardIndex(await getBoardIndex(env));
+    index[machineId] = boardEntry(prof);
+    await env.TOTALS.put(BOARD_INDEX_KEY, JSON.stringify(index));
+  } catch { /* best-effort */ }
+  return { merged: false, profile: prof };
+}
+
 // ── CLI ↔ web pairing ("link codes") ─────────────────────────────────────
 //
 // The no-gist verification path. A user logged into the site already proved
@@ -1142,20 +1365,21 @@ export async function handlePairClaim(request, env) {
   if (!code) return jsonError(400, 'link code looks wrong — it\'s the 6 characters from the squads page');
   const login = await env.TOTALS.get(PAIR_KEY(code));
   if (!login) return jsonError(404, 'code expired or unknown — grab a fresh one from claude-rpc.vercel.app/squads');
-  const prof = await getProfile(env, body.instanceId);
-  if (!prof) return jsonError(409, 'publish a profile first: claude-rpc profile on && claude-rpc profile publish');
 
-  prof.verified = true;
-  prof.githubUser = login;
-  await env.TOTALS.put(PF_KEY(body.instanceId), JSON.stringify(prof)); // verified → permanent
-  await env.TOTALS.put(GH_KEY(login), body.instanceId);
+  // If this login already belongs to another machine, MERGE rather than steal.
+  // applyVerifiedLink handles both the merge and the first-link cases; a
+  // brand-new machine with no profile of its own still links (alias only) when
+  // a canonical identity already exists — no profile dance required.
+  const link = await applyVerifiedLink(env, body.instanceId, login);
+  if (link.merged) {
+    try { await env.TOTALS.delete(PAIR_KEY(code)); } catch { /* TTL covers it */ }
+    return jsonOk({ ok: true, githubUser: login, handle: link.handle, verified: true, merged: true });
+  }
+  if (!link.profile) {
+    return jsonError(409, 'publish a profile first: claude-rpc profile on && claude-rpc profile publish');
+  }
   try { await env.TOTALS.delete(PAIR_KEY(code)); } catch { /* TTL covers it */ }
-  try {
-    const index = pruneBoardIndex(await getBoardIndex(env));
-    index[body.instanceId] = boardEntry(prof);
-    await env.TOTALS.put(BOARD_INDEX_KEY, JSON.stringify(index));
-  } catch { /* best-effort */ }
-  return jsonOk({ ok: true, githubUser: login, handle: prof.handle, verified: true });
+  return jsonOk({ ok: true, githubUser: login, handle: link.profile.handle, verified: true });
 }
 
 // Join-page preview: enough to render "you're joining <name> (n members)",
