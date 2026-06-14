@@ -2,6 +2,12 @@
 
 All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.16.2] - 2026-06-14
+
+**Fixed**
+
+- **Windows: file-watch events the OS drops now recover in ~3s instead of 30s, and `pause`/`config` changes can no longer get stranded.** The daemon reacts to its four on-disk inputs — `state.json`, `pause.json`, `config.json`, `aggregate.json` — with a directory watcher *and* an mtime-poll fallback, because `fs.watch` drops events on Windows when the writer commits via atomic rename (which all four writers do). Two gaps closed: the fallback only ever polled `state.json` and `aggregate.json`, so a missed `pause.json` or `config.json` event had **no** backstop and could hang until the next unrelated change (a `claude-rpc pause` that never cleared the card, an edited config the daemon never reloaded); and the single 30s interval left Windows — where the watcher is the *unreliable* party — with a 30s worst-case lag instead of the sub-second latency macOS/Linux get from inotify/FSEvents. The poll now covers all four inputs and runs every 3s on Windows (still a lazy 30s elsewhere, where it's pure belt-and-suspenders). The watcher and poll now share one last-seen-mtime baseline, so the poll fires — and logs — only for events the watcher genuinely missed, rather than re-handling and re-pushing every change it already caught. Decision logic lives in `src/watch-poll.js` with unit coverage.
+
 ## [0.16.1] - 2026-06-12
 
 **Fixed**

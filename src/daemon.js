@@ -14,6 +14,7 @@ import { desktopNotify, postWebhook, shouldWebhook, shouldNotify } from './notif
 import { humanProject } from './format.js';
 import { CONFIG_PATH, STATE_PATH, PID_PATH, LOG_PATH, STATE_DIR, AGGREGATE_PATH, PAUSE_PATH } from './paths.js';
 import { readUsageCache, pollUsage } from './usage.js';
+import { pollDecision, pollIntervalMs } from './watch-poll.js';
 
 if (!existsSync(STATE_DIR)) mkdirSync(STATE_DIR, { recursive: true });
 
@@ -436,83 +437,93 @@ function scheduleReconnect(reason = 'reconnect') {
 }
 
 function watchFiles() {
-  // Watch DIRECTORIES, not files. Every watched file here is written via
-  // tmp+rename (state.js, the scanner, the settings GUI), and inotify tracks
-  // the inode — a watcher attached to the file path goes silent after the
-  // first rename. A directory watcher survives renames AND works when the
-  // file doesn't exist yet (fresh install where the daemon starts before the
-  // first hook / before `setup` seeds config.json). Events are filtered by
-  // filename where the platform reports one; the rare null-filename event
-  // just costs one debounced no-op push (the payload hash dedupes it).
-  const watchDirFor = (targetPath, label, onChange, extraNames = []) => {
-    const dir = dirname(targetPath);
-    const names = new Set([basename(targetPath), ...extraNames]);
-    if (!existsSync(dir)) return;
+  // Single source of truth for every on-disk change the daemon reacts to.
+  // Each target is covered two ways at once: a directory watcher (instant)
+  // and the mtime-poll fallback below (never misses). See watch-poll.js for
+  // why both exist — fs.watch drops atomic-rename events on Windows, and
+  // every writer here (state.js, pause.js, the scanner, the settings GUI)
+  // commits via tmp+rename.
+  const targets = [
+    { path: STATE_PATH, label: 'state', onChange: pushPresence },
+    { path: PAUSE_PATH, label: 'pause', onChange: pushPresence },
+    { path: CONFIG_PATH, label: 'config', onChange: () => {
+      log('Config changed — reloading');
+      config = loadConfigWithLog();
+      lastPayloadHash = '';
+      pushPresence();
+    } },
+    { path: AGGREGATE_PATH, label: 'aggregate', onChange: () => {
+      aggregate = readAggregate() || aggregate;
+      lastPayloadHash = '';
+      pushPresence();
+    } },
+  ];
+
+  // Last mtime we've reacted to, per target. Updated by BOTH the watcher and
+  // the poll, so a change one path already handled resolves to a no-op for
+  // the other (pollDecision → 'idle') instead of a duplicate push — and the
+  // poll only logs a "fallback caught it" line for events the watcher truly
+  // missed, not for everything it already handled.
+  const lastMtime = new Map();
+  const recordMtime = (path) => {
+    try { if (existsSync(path)) lastMtime.set(path, statSync(path).mtimeMs); }
+    catch { /* mid-rename; a later observation records it */ }
+  };
+  // Seed baselines so the first poll tick doesn't fire for files that merely
+  // already existed when the daemon started.
+  targets.forEach((t) => recordMtime(t.path));
+
+  const fire = (t, viaPoll) => {
+    if (viaPoll) log(`${t.label} changed — poll fallback caught an event fs.watch missed`);
+    recordMtime(t.path); // record before onChange so a re-entrant tick can't double-fire
+    t.onChange();
+  };
+
+  // Watch DIRECTORIES, not files: every writer uses tmp+rename and inotify
+  // tracks the inode, so a file-path watcher goes silent after the first
+  // rename. A dir watcher survives renames and works before the file exists
+  // (fresh install — daemon up before the first hook seeds state/config).
+  // Group by directory so STATE_DIR (state.json + pause.json) takes one
+  // watcher, not two. Events are filtered by filename where the platform
+  // reports one; a null filename fans out to the whole group (one debounced
+  // push per target, deduped by the payload hash).
+  const groups = new Map();
+  for (const t of targets) {
+    const dir = dirname(t.path);
+    if (!groups.has(dir)) groups.set(dir, []);
+    groups.get(dir).push(t);
+  }
+  for (const [dir, group] of groups) {
+    if (!existsSync(dir)) continue;
+    const byName = new Map(group.map((t) => [basename(t.path), t]));
     let timer = null;
     try {
       watch(dir, (event, filename) => {
-        if (filename && !names.has(filename)) return;
+        const hits = filename ? (byName.has(filename) ? [byName.get(filename)] : []) : group;
+        if (!hits.length) return;
         clearTimeout(timer);
-        timer = setTimeout(onChange, 250);
+        timer = setTimeout(() => hits.forEach((t) => fire(t, false)), 250);
       });
     } catch (e) {
-      log(`watch failed for ${label} (poll fallback still covers it):`, e.message);
+      log(`watch failed for ${dir} (poll fallback still covers it):`, e.message);
     }
-  };
+  }
 
-  // state.json and pause.json share STATE_DIR — one watcher serves both, so
-  // a `claude-rpc pause` clears the card on the next debounce, not the next
-  // 4s tick. The filename filter keeps daemon.log appends from triggering it.
-  watchDirFor(STATE_PATH, 'state', pushPresence, [basename(PAUSE_PATH)]);
-  watchDirFor(CONFIG_PATH, 'config', () => {
-    log('Config changed — reloading');
-    config = loadConfigWithLog();
-    lastPayloadHash = '';
-    pushPresence();
-  });
-  watchDirFor(AGGREGATE_PATH, 'aggregate', () => {
-    aggregate = readAggregate() || aggregate;
-    lastPayloadHash = '';
-    pushPresence();
-  });
-
-  // Mtime-poll fallback. fs.watch on Windows occasionally drops events
-  // when the writer uses an atomic-rename pattern (which `state.js` does
-  // and the scanner does for aggregate.json). A 30s poll comparing
-  // last-seen mtime catches anything the watcher missed without making
-  // the watcher itself the bottleneck. No-op on Linux/macOS most of the
-  // time, but cheap enough to leave on everywhere.
-  let lastStateMtime = 0, lastAggMtime = 0;
+  // Mtime-poll fallback. Runs fast on Windows (where it's effectively the
+  // primary path — fs.watch drops atomic-rename events there) and lazily on
+  // macOS/Linux. Now covers config.json and pause.json too: a dropped
+  // pause/config event previously had no backstop at all and could hang
+  // until the next unrelated state change.
   setInterval(() => {
-    try {
-      if (existsSync(STATE_PATH)) {
-        const m = statSync(STATE_PATH).mtimeMs;
-        if (m > lastStateMtime) {
-          if (lastStateMtime !== 0) {
-            // The first observation is just the starting value; only
-            // log + push when we actually missed a watcher event.
-            log('state.json mtime advanced without a watcher event (poll fallback)');
-            pushPresence();
-          }
-          lastStateMtime = m;
-        }
-      }
-      if (existsSync(AGGREGATE_PATH)) {
-        const m = statSync(AGGREGATE_PATH).mtimeMs;
-        if (m > lastAggMtime) {
-          if (lastAggMtime !== 0) {
-            aggregate = readAggregate() || aggregate;
-            lastPayloadHash = '';
-            pushPresence();
-          }
-          lastAggMtime = m;
-        }
-      }
-    } catch {
-      // Stat fail mid-rotate of the watched file. The next tick will
-      // pick up the new mtime. Silent on purpose.
+    for (const t of targets) {
+      let cur;
+      try { cur = existsSync(t.path) ? statSync(t.path).mtimeMs : undefined; }
+      catch { continue; /* mid-rename; next tick picks it up */ }
+      const decision = pollDecision(lastMtime.get(t.path), cur);
+      if (decision === 'seed') lastMtime.set(t.path, cur);
+      else if (decision === 'fire') fire(t, true);
     }
-  }, 30_000);
+  }, pollIntervalMs());
 }
 
 async function runBackgroundScan({ force = false } = {}) {
