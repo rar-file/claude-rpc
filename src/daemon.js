@@ -3,6 +3,7 @@ import { writeFileSync, readFileSync, existsSync, unlinkSync, watch, appendFileS
 import { basename, dirname } from 'node:path';
 import { Client } from './discord-ipc.js';
 import { readState, sweepStaleStateTmp } from './state.js';
+import { makeRotationCursor, pickFrames, selectFrame, resolveLargeImageKey } from './presence.js';
 import { buildVars, fillTemplate, framePasses, applyIdle, applyShipped, applyTrigger } from './format.js';
 import { scan, readAggregate, findLiveSessions, readSessionTokens } from './scanner.js';
 import { detectGithubUrl } from './git.js';
@@ -90,17 +91,15 @@ let reconnectTimer = null;
 const RECONNECT_BASE_MS = 5_000;
 const RECONNECT_CAP_MS  = 300_000;
 let reconnectDelayMs    = RECONNECT_BASE_MS;
-let rotationIndex = 0;
-let lastRotationAt = 0;
+// Rotation cursor (index + lastAt + status). selectFrame in presence.js resets
+// it on a status transition — otherwise the cursor carries over from idle's
+// 12-frame rotation into a single-frame working state and back, producing a
+// jarring "blank tick" until modulo aligns.
+const rotationCursor = makeRotationCursor();
 // Stabilizes Discord's elapsed timer: applyIdle can synthesize a sessionStart
 // from a moving transcript mtime, and missing-hook scenarios leave it null —
 // either case would make startTimestamp jump on every rotation.
 let effectiveSessionStart = null;
-// Track which status the rotation cursor belongs to so we can reset it cleanly
-// on a status transition — otherwise the cursor carries over from idle's
-// 7-frame rotation into a single-frame working state and back, producing a
-// jarring "blank tick" until modulo aligns.
-let rotationStatus = null;
 
 // Single-instance guard. The CLI checks before spawning, but off-path launches
 // (a login-startup entry racing a manual start; a packaged exe beside a dev
@@ -125,40 +124,9 @@ writeFileSync(PID_PATH, String(process.pid));
 // Reclaim any per-pid state tmp files orphaned by a hard-killed writer.
 sweepStaleStateTmp();
 
-function maybeAdvanceRotation(rotation, intervalMs) {
-  if (!Array.isArray(rotation) || rotation.length === 0) return undefined;
-  if (rotation.length === 1) return rotation[0];
-  const now = Date.now();
-  if (now - lastRotationAt >= intervalMs) {
-    rotationIndex = (rotationIndex + 1) % rotation.length;
-    lastRotationAt = now;
-  }
-  return rotation[rotationIndex % rotation.length];
-}
-
-// Choose frames + a status-level largeImageText override based on the new
-// `presence.byStatus` block when present. Falls back to legacy `p.rotation`
-// (which still works for any existing user config that doesn't use byStatus).
-//
-// Returns { frames, largeImageTextTpl }. A byStatus entry can be:
-//   { details, state, largeImageText, rotation? }
-// If `rotation` is present, the base { details, state } is rendered first
-// and the rotation array cycles after it. Otherwise the entry is a single
-// fixed frame.
-function pickFrames(p, status) {
-  const sb = p.byStatus?.[status];
-  if (sb) {
-    const base = { details: sb.details, state: sb.state, largeImageText: sb.largeImageText };
-    const frames = Array.isArray(sb.rotation) && sb.rotation.length
-      ? [base, ...sb.rotation]
-      : [base];
-    return { frames, largeImageTextTpl: sb.largeImageText || null };
-  }
-  if (Array.isArray(p.rotation) && p.rotation.length) {
-    return { frames: p.rotation, largeImageTextTpl: null };
-  }
-  return { frames: [{ details: p.details, state: p.state }], largeImageTextTpl: null };
-}
+// pickFrames / selectFrame / resolveLargeImageKey now live in presence.js (pure
+// + unit-tested). The rotation cursor (rotationCursor) is owned here and passed
+// into selectFrame.
 
 // Resolve the raw state file into the final presence state: idle/stale, shipped
 // and trigger overlays, live-session token enrichment, and the privacy verdict.
@@ -223,18 +191,10 @@ function buildActivity(opts = {}) {
   } else {
     ({ frames: rawFrames, largeImageTextTpl: statusLIT } = pickFrames(p, state.status));
   }
-  if (state.status !== rotationStatus) {
-    rotationIndex = 0;
-    lastRotationAt = 0;
-    rotationStatus = state.status;
-  }
-
-  // Drop frames whose `requires` vars are empty/zero. Keeps presence tight.
-  const frames = rawFrames.filter((f) => framePasses(f, vars));
-  const safeFrames = frames.length ? frames : rawFrames.slice(0, 1);
-
+  // Select the frame for this tick: filter by `requires`, reset the cursor on a
+  // status change (starting on the base frame), advance once per intervalMs.
   const intervalMs = Math.max(5000, config.rotationIntervalMs || 12000);
-  const frame = maybeAdvanceRotation(safeFrames, intervalMs) || {};
+  const frame = selectFrame(rawFrames, vars, state.status, rotationCursor, intervalMs, framePasses, Date.now());
 
   const activity = {};
   // Forcing `name` overrides whatever Discord has cached for the app's
@@ -244,28 +204,10 @@ function buildActivity(opts = {}) {
   if (frame.details) activity.details = fillTemplate(frame.details, vars).slice(0, 128);
   if (frame.state) activity.state = fillTemplate(frame.state, vars).slice(0, 128);
 
-  // ── Large-image precedence (single source of truth) ────────────────
-  //   1. statusAssets[status]      "working" gif when working, etc.
-  //   2. modelAssets[opus|sonnet|haiku|default]
-  //                                  per-model art (Opus/Sonnet/Haiku),
-  //                                  only consulted when statusAssets
-  //                                  doesn't match AND state isn't stale.
-  //   3. presence.largeImageKey    global fallback.
-  // smallImageKey separately resolves to the `{statusIcon}` template var
-  // (set via config.statusIcons) and is dropped entirely when empty.
-  let largeKeyTpl = p.largeImageKey;
-  if (config.statusAssets && config.statusAssets[state.status]) {
-    largeKeyTpl = config.statusAssets[state.status];
-  } else if (config.modelAssets && state.model && state.status !== 'stale') {
-    const m = String(state.model).toLowerCase();
-    let pick = null;
-    if (m.includes('fable'))       pick = config.modelAssets.fable;
-    else if (m.includes('opus'))   pick = config.modelAssets.opus;
-    else if (m.includes('sonnet')) pick = config.modelAssets.sonnet;
-    else if (m.includes('haiku'))  pick = config.modelAssets.haiku;
-    if (!pick) pick = config.modelAssets.default;
-    if (pick) largeKeyTpl = pick;
-  }
+  // Large-image precedence (statusAssets[status] > modelAssets[tier] > global)
+  // lives in presence.js/resolveLargeImageKey. smallImageKey separately resolves
+  // to the `{statusIcon}` template var (config.statusIcons), dropped when empty.
+  const largeKeyTpl = resolveLargeImageKey(config, p, state.status, state.model);
   if (largeKeyTpl) activity.largeImageKey = fillTemplate(largeKeyTpl, vars);
   // largeImageText precedence: per-frame override > byStatus entry > global default.
   const largeTextTpl = frame.largeImageText || statusLIT || p.largeImageText;
