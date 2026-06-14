@@ -804,6 +804,29 @@ function staleWipe(state) {
   };
 }
 
+// A live transcript is being written by a session whose hooks don't feed THIS
+// daemon (a sibling, or a session that out-lived a SessionEnd). The user IS
+// working — adopt the most-recent live session as our 'working' context, zeroing
+// the old session's hook-derived counters since they belong to the quiet one.
+function borrowLiveSession(state, liveSessions, now) {
+  const recent = liveSessions[0] || {};
+  return {
+    ...state,
+    status: 'working',
+    cwd: recent.cwd || state.cwd || '',
+    sessionStart: recent.mtime || now,
+    lastActivity: recent.mtime || now,
+    currentTool: null,
+    currentFile: null,
+    messages: 0,
+    tools: 0,
+    filesOpened: [],
+    filesEdited: [],
+    filesRead: [],
+    tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  };
+}
+
 // Apply idle/stale transitions based on lastActivity age. Used by both daemon
 // and the `preview` CLI command so they agree.
 //
@@ -827,10 +850,28 @@ export function applyIdle(state, cfg = {}) {
   // backstop (keeps the card up through short pauses with the terminal open).
   const idleWhenOpen = cfg.idleWhenOpen === true;
 
-  // Authoritative close signal from the SessionEnd hook — trust it instead
-  // of waiting on staleSessionMin. Any other hook clears the flag, so a
-  // sibling session staying alive will reset us out of this branch.
-  if (state.claudeClosed) return staleWipe(state);
+  // Most-recent disk-level activity across ALL transcripts we can see. Computed
+  // before the close check so it can defer to a live sibling.
+  const mostRecentLiveMs = liveSessions.length
+    ? Math.max(...liveSessions.map((s) => s.mtime || 0))
+    : 0;
+  const liveAgeMs = mostRecentLiveMs ? now - mostRecentLiveMs : Infinity;
+
+  // Authoritative close signal from the SessionEnd hook — trust it instead of
+  // waiting on staleSessionMin. BUT state.json is global: a SessionEnd from ONE
+  // session must not blank the card while a SIBLING is mid-work. A sibling is
+  // alive iff a live transcript in a DIFFERENT cwd than the one that just closed
+  // (still in state.cwd) is fresh — adopt it. The just-closed session's own
+  // transcript is briefly still fresh, so it must NOT keep the card up; anything
+  // but a distinct live sibling wipes. (A's next hook also clears the flag.)
+  //
+  // Known limitation: the inverse — B's SessionStart resetState briefly showing
+  // idle over A's work — isn't fully fixed here (the hook can't see live
+  // transcripts); it self-heals on A's next hook. See MEMORY/SECURITY notes.
+  if (state.claudeClosed) {
+    const sibling = liveSessions.find((s) => s.cwd && s.cwd !== state.cwd && now - (s.mtime || 0) <= staleMs);
+    return sibling ? borrowLiveSession(state, [sibling], now) : staleWipe(state);
+  }
 
   // Notification is a brief status — hold it for ~8s after the hook fires,
   // then fall through to normal idle/stale processing.
@@ -840,12 +881,6 @@ export function applyIdle(state, cfg = {}) {
     state = { ...state, status: 'idle' };
   }
 
-  // Most-recent disk-level activity across ALL transcripts we can see.
-  const mostRecentLiveMs = liveSessions.length
-    ? Math.max(...liveSessions.map((s) => s.mtime || 0))
-    : 0;
-  const liveAgeMs = mostRecentLiveMs ? now - mostRecentLiveMs : Infinity;
-
   // Truly dormant: no live transcripts AND local state is old → stale.
   if (ageMs > staleMs && liveAgeMs > staleMs) return staleWipe(state);
 
@@ -853,23 +888,7 @@ export function applyIdle(state, cfg = {}) {
   // Borrow the most-recent live session as our "active" context, since the
   // user clearly IS working — just not in a session whose hooks feed us.
   if (ageMs > staleMs && liveAgeMs <= staleMs) {
-    const recent = liveSessions[0] || {};
-    return {
-      ...state,
-      status: 'working',
-      cwd: recent.cwd || state.cwd || '',
-      sessionStart: recent.mtime || now,
-      lastActivity: recent.mtime || now,
-      // Hook-derived per-session counters belong to the OLD session — zero them.
-      currentTool: null,
-      currentFile: null,
-      messages: 0,
-      tools: 0,
-      filesOpened: [],
-      filesEdited: [],
-      filesRead: [],
-      tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    };
+    return borrowLiveSession(state, liveSessions, now);
   }
 
   // Local state is fresh.

@@ -44,6 +44,25 @@ test('applyIdle: claudeClosed=true returns stale immediately', () => {
   assert.equal(r.claudeClosed, true, 'flag preserved through subsequent ticks');
 });
 
+test('applyIdle: claudeClosed defers to a live SIBLING in a different cwd', () => {
+  // Session in /tmp/proj just closed (SessionEnd → claudeClosed), but a sibling
+  // is mid-work in /tmp/other — adopt it instead of blanking the card.
+  const s = baseState({ claudeClosed: true, cwd: '/tmp/proj',
+    liveSessions: [{ cwd: '/tmp/other', mtime: now() - 5_000 }] });
+  const r = applyIdle(s, { staleSessionMin: 5 });
+  assert.equal(r.status, 'working', 'borrows the live sibling');
+  assert.equal(r.cwd, '/tmp/other');
+});
+
+test('applyIdle: claudeClosed still wipes when the only live transcript is the closed one', () => {
+  // The just-closed session's own transcript is briefly still fresh (same cwd) —
+  // it must NOT keep the card up.
+  const s = baseState({ claudeClosed: true, cwd: '/tmp/proj',
+    liveSessions: [{ cwd: '/tmp/proj', mtime: now() - 2_000 }] });
+  const r = applyIdle(s, { staleSessionMin: 5 });
+  assert.equal(r.status, 'stale', 'single-session close still clears');
+});
+
 test('applyIdle: working stays working with fresh activity', () => {
   const s = baseState({ status: 'working' });
   const r = applyIdle(s, { staleSessionMin: 5 });
