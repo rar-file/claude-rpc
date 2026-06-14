@@ -18,11 +18,12 @@ fetch-and-execute anywhere in `src/`.
 | --- | --- | --- | --- |
 | Startup persistence | `src/install.js` → `addStartupEntry` | `HKCU` Run key, current user, no admin | Yes — `claude-rpc uninstall` / `removeStartupEntry` |
 | Hook injection | `src/install.js` → `installHooks` | Only into Claude Code's own `settings.json`, only our own commands | Yes — `uninstallHooks` removes exactly what it added |
-| Outbound network | `src/community.js`, `src/gist.js`, `default-config.js` asset URLs | Anonymous counters + (opt-in) gist publish + GIF assets | Telemetry: `community off`. Gist: only on explicit `badge --gist`. |
-| Local subprocess | `reg.exe`, `git`, `gh` | Static args, no shell interpolation of untrusted input | n/a |
+| Outbound network | `src/community.js`, `src/gist.js`, `src/usage.js`, `src/notify.js`, `default-config.js` | Anonymous counters + (opt-in) profile/gist/webhook + own read-only OAuth-usage poll + GIF assets | Telemetry: `community off`. Profile: `profile off`. Gist/webhook: opt-in only. Usage: `usage.enabled:false`. |
+| Local subprocess | `reg.exe`, `wscript`, `git`, `gh`, `npm`, `claude`, `security`, notifiers | Static or escaped args, no shell interpolation of untrusted input | n/a |
 
-No credential access, no filesystem scanning outside `~/.claude-rpc` and Claude
-Code transcripts, no keylogging, no clipboard access, no AV/EDR evasion.
+No credential access beyond the read-only Claude Code OAuth-token read for usage
+polling (§3d), no filesystem scanning outside `~/.claude-rpc` and Claude Code
+transcripts, no keylogging, no clipboard access, no AV/EDR evasion.
 
 ## 1. Startup persistence (Windows Run key)
 
@@ -78,9 +79,11 @@ events: `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`,
 
 ## 3. Outbound network
 
-There are five distinct network behaviors: community totals (3a), gist
-publishing (3b), squads/web login (3c), subscription-usage polling (3d), and
-the cosmetic GIF assets (3e). Each is independently optional.
+There are six distinct network behaviors: community totals (3a), gist
+publishing (3b), squads/web login (3c), subscription-usage polling (3d),
+the cosmetic GIF assets (3e), and the opt-in status webhook (3f). Each is
+independently optional. The separate desktop dashboard app, if installed,
+additionally auto-updates itself (3g).
 
 ### 3a. Community totals (telemetry) — ON by default for fresh installs
 
@@ -144,6 +147,31 @@ Worker-side storage adds: `gh:<login>` → profile link, `squad:*` membership
 records, and weekly baseline snapshots (auto-expiring). Leaving your last
 squad deletes its record.
 
+When the opt-in public profile is enabled (`profile on` + a handle), the daemon
+also POSTs to `<endpoint>/profile` on the same 30-minute timer. Unlike the
+anonymous 3a report, this one carries your chosen public identity. The
+**complete** payload (`buildProfilePayload`, enforced by the worker's
+`validateProfile`) is:
+
+```json
+{
+  "instanceId": "<your local UUID>",
+  "handle": "ada",
+  "displayName": "Ada L.",
+  "githubUser": "ada",
+  "tokens": 142000000,
+  "sessions": 1200,
+  "activeMs": 360000000,
+  "streak": 23,
+  "version": "0.16.2",
+  "osFamily": "linux",
+  "ts": 1716500000000
+}
+```
+
+It sends absolute totals (not deltas) and is idempotent worker-side (a SET, not
+an add). `profile off` stops it.
+
 ### 3d. Subscription usage — your own token, to its issuer, ON by default
 
 **Source:** `src/usage.js`; consumed by the daemon poll, `claude-rpc usage`,
@@ -180,20 +208,62 @@ are handed to Discord as image keys; **Discord's** client fetches them to render
 the card. The daemon itself doesn't download them. Swap them for your own URLs
 in `config.json` if you prefer.
 
+### 3f. Status webhook — opt-in, OFF by default
+
+**Source:** `src/notify.js` (`postWebhook`), fired from the daemon's
+`fireStatusSideEffects` (`src/daemon.js`). Dormant unless you set `webhook.url`
+and list statuses in `webhook.on`. On a matching status transition the daemon
+POSTs to your configured URL (a Slack/Discord channel or your own endpoint):
+
+```json
+{ "status": "notification", "project": "my-app", "model": "claude-opus-4-8", "justShipped": null, "ts": 1716500000000 }
+```
+
+`project` is the cwd-derived name — redacted to `"Claude Code"` when the
+directory is privacy=hidden, and run through `sanitizeLabel` (strips shell /
+PowerShell metacharacters) first; `model` is always sent. The webhook is
+suppressed entirely while the card is paused or privacy=hidden. Turn it off by
+removing `webhook.url`.
+
+### 3g. Desktop dashboard auto-update — the optional Electron app only
+
+**Source:** `dashboard/main.js` (`initAutoUpdater`, electron-updater). The npm
+CLI package never auto-updates. The *separate* desktop dashboard app, if you
+install it, polls GitHub Releases hourly and downloads + installs updates on
+quit (`autoDownload` / `autoInstallOnAppQuit`) over HTTPS. The release binaries
+are currently **unsigned**, so update integrity rests on GitHub Releases + TLS
+rather than a code signature — a known gap tracked for provenance + published
+checksums. Avoid it by not installing the dashboard.
+
 ## 4. Local subprocesses
 
-All `child_process` use is static-argument and visible:
+Every binary the package can spawn, with its trigger and argument shape. All
+arguments are static constants or values we control — none interpolate
+untrusted or remote input into a shell:
 
-- `reg.exe add/delete` — the Run key above (`src/install.js`).
+- `reg.exe add/delete` — the Windows Run key (`src/install.js`).
+- `wscript.exe` — runs the generated windowless startup shim (`src/install.js`).
+- `chcp.com 65001` — set the console to UTF-8 on Windows TTYs (`src/cli.js`).
 - `git` — read last commit subject / branch for the "just shipped" card
   (`src/git.js`).
 - `gh repo view --json isPrivate` — auto-hide GitHub-private repos from the card
   (`src/privacy.js`); 1.5s timeout, silent skip if `gh` is absent.
-- `gh gist` — only under 3b above.
+- `gh gist` / `gh --version` — gist badge publishing, only under 3b
+  (`src/gist.js`).
+- `npm root -g` / `npm install -g` — resolve / promote the global install during
+  `setup` (`src/install.js`, `src/cli.js`).
+- `claude mcp add/remove` — register / unregister the MCP server on
+  `mcp install` / `mcp uninstall` (`src/install.js`).
+- `security find-generic-password` — read Claude Code's OAuth token from the
+  macOS login keychain for usage polling (`src/usage.js`, §3d). Read-only; may
+  prompt for keychain access.
+- `osascript` / `powershell` / `notify-send` — the opt-in desktop notification
+  (`src/notify.js`); off unless `notify.enabled`. The project label is
+  interpolated but sanitized first (`sanitizeLabel`).
 
-No subprocess interpolates untrusted/remote input into a shell. The one
-`shell: true` call (`verifyHookPipe`) uses only static, trusted args and is
-documented inline as such.
+No subprocess passes untrusted or remote input to a shell — arguments are
+static or escaped. The historical `shell: true` paths (`verifyHookPipe`, and the
+gist `gh` wrapper on Windows) use only trusted args.
 
 ## 5. What it stores locally
 
