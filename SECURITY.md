@@ -53,9 +53,9 @@ and skips it).
 
 **Source:** `src/install.js`, `installHooks` / `uninstallHooks`.
 
-`setup` adds command hooks to Claude Code's `settings.json` for eight lifecycle
+`setup` adds command hooks to Claude Code's `settings.json` for nine lifecycle
 events: `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`,
-`Stop`, `SubagentStop`, `Notification`, `SessionEnd`. Each entry looks like:
+`Stop`, `SubagentStop`, `Notification`, `SessionEnd`, `PreCompact`. Each entry looks like:
 
 ```jsonc
 { "matcher": "", "hooks": [{ "type": "command", "command": "\"<exe>\" hook PostToolUse" }] }

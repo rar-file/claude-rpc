@@ -268,20 +268,9 @@ export function processHookEvent(event, input = {}) {
       appendEvent({ type: 'precompact', ts: now, trigger: input.trigger || input.matcher || null, cwd: input.cwd || null });
       break;
     }
-    case 'PostCompact': {
-      // Compaction finished — clear the marker and drop to idle. The next
-      // hook (UserPromptSubmit / PreToolUse) will set the real next state.
-      updateState((s) => {
-        s.status = 'idle';
-        s.compactStartedAt = null;
-        s.compactTrigger = null;
-        s.lastActivity = now;
-        s.claudeClosed = false;
-        return s;
-      });
-      appendEvent({ type: 'postcompact', ts: now, cwd: input.cwd || null });
-      break;
-    }
+    // No PostCompact case: Claude Code has no such event. Post-compaction
+    // arrives as SessionStart (source:'compact'), whose resetState clears the
+    // compacting marker — so the `compacting` state ends without a handler.
     case 'SessionEnd': {
       // Authoritative "Claude Code is gone" signal — don't wait on the
       // staleSessionMin timeout. applyIdle short-circuits to stale when it

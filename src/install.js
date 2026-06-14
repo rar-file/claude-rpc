@@ -54,7 +54,7 @@ function noop(fact) { noopFacts.push(fact); }
 
 const EVENTS = [
   'SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse',
-  'Stop', 'SubagentStop', 'Notification', 'SessionEnd',
+  'Stop', 'SubagentStop', 'Notification', 'SessionEnd', 'PreCompact',
 ];
 
 function readJson(p, fb) {
@@ -135,15 +135,29 @@ function regCommand(args) {
   });
 }
 
+const STARTUP_VBS = join(CANONICAL_INSTALL_DIR, 'claude-rpc-daemon.vbs');
+
 export async function addStartupEntry(exePath) {
+  // The packaged exe is a console-subsystem node.exe, so a bare Run-key entry
+  // (`"<exe>" daemon`) makes Explorer pop a console window at every login that
+  // persists for the daemon's whole (weeks-long) life — closing it kills the
+  // daemon. Launch through a tiny .vbs shim via wscript (window style 0) so the
+  // unattended startup path is windowless, like every other launch path. We
+  // avoid schtasks deliberately — SECURITY.md advertises "no scheduled task".
+  let runCmd = `"${exePath}" daemon`;
+  try {
+    mkdirSync(CANONICAL_INSTALL_DIR, { recursive: true });
+    writeFileSync(STARTUP_VBS, `CreateObject("WScript.Shell").Run """${exePath}"" daemon", 0, False\r\n`);
+    runCmd = `wscript.exe "${STARTUP_VBS}"`;
+  } catch { /* couldn't write the shim — fall back to the direct (windowed) entry */ }
   await regCommand([
     'add', STARTUP_KEY,
     '/v', STARTUP_VALUE,
     '/t', 'REG_SZ',
-    '/d', `"${exePath}" daemon`,
+    '/d', runCmd,
     '/f',
   ]);
-  if (runDirty) step(SYM_OK, 'startup entry', `HKCU\\…\\Run\\${STARTUP_VALUE} — daemon starts at login`);
+  if (runDirty) step(SYM_OK, 'startup entry', `HKCU\\…\\Run\\${STARTUP_VALUE} — daemon starts at login (windowless)`);
   else noop('startup entry present');
 }
 
@@ -154,6 +168,7 @@ export async function removeStartupEntry() {
   } catch {
     // Already absent — fine.
   }
+  try { unlinkSync(STARTUP_VBS); } catch { /* shim absent — fine */ }
 }
 
 function samePath(a, b) {

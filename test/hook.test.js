@@ -196,14 +196,16 @@ test('PreCompact falls back to matcher field when trigger missing', () => {
   assert.equal(s.compactTrigger, 'manual', 'matcher used when trigger absent');
 });
 
-test('PostCompact clears the compacting marker', () => {
+test('post-compaction SessionStart clears the compacting marker', () => {
+  // Claude Code has no PostCompact event — compaction ends with a fresh
+  // SessionStart (source:'compact'), whose resetState clears the marker.
   resetStateFile();
   processHookEvent('PreCompact', { trigger: 'auto' });
-  processHookEvent('PostCompact', {});
+  processHookEvent('SessionStart', { cwd: '/tmp/proj' });
   const s = readState();
   assert.equal(s.compactStartedAt, null);
   assert.equal(s.compactTrigger, null);
-  assert.equal(s.status, 'idle', 'falls back to idle until next real hook');
+  assert.equal(s.status, 'idle', 'reset drops to idle until the next real hook');
 });
 
 test('Stop/SubagentStop go to idle (not stale)', () => {

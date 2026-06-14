@@ -21,9 +21,10 @@ const DEFAULT_STATE = {
   status: 'idle',
   currentTool: null,
   currentFile: null,
-  // Set by PreCompact, cleared by PostCompact. While non-null the daemon
-  // renders the `compacting` frame so the card never reads "thinking"
-  // during a context squeeze (which is mechanically distinct from reasoning).
+  // Set by PreCompact, cleared by the next SessionStart (post-compaction
+  // arrives as SessionStart with source:'compact', whose reset clears it).
+  // While non-null the daemon renders the `compacting` frame so the card never
+  // reads "thinking" during a context squeeze (distinct from reasoning).
   compactStartedAt: null,
   compactTrigger: null,
   // Set by PreToolUse, cleared by PostToolUse. format.js derives {toolElapsed}
