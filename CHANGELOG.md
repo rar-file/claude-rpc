@@ -2,6 +2,13 @@
 
 All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.21.0] - 2026-06-16
+
+**Added**
+
+- **Updates now self-heal — no `setup` re-run needed.** npm runs no install script (by design — `npm install` must run nothing), so an `npm update` used to swap the files but re-wire nothing: a long-lived install kept stale hook commands and old config and never got the new behavior (the "I updated but the daemon didn't start / nothing changed" reports). The daemon — itself brought up by the `SessionStart` self-heal — now carries the update forward on its first start after an update: it re-wires the Claude Code hooks, migrates config to the current shape, and stamps the version (`~/.claude-rpc/version`). A since-0.1.0 install converges to the current experience the first time it's used after updating.
+- **Login autostart on macOS and Linux — parity with Windows.** Windows already started the daemon at login via a Run-key; macOS and Linux now do too — a per-user LaunchAgent (`~/Library/LaunchAgents/com.claude-rpc.daemon.plist`) and a `systemd --user` service (`~/.config/systemd/user/claude-rpc.service`), so the daemon is up at login, before you open Claude Code. Per-user only — never a root/system service, no admin. Installed at `setup` and, like the rest of the self-heal, **ensured on update** (so existing installs get login autostart without a manual `setup`). Gated by `autostart` (default on); `autostart:false` opts out of every auto-start path. Best-effort: if `launchctl`/`systemctl`/`reg` fails, the `SessionStart` self-heal still starts the daemon. Fully disclosed in SECURITY.md §1 — including that this is the one place a background-start entry can appear without an explicit `setup`.
+
 ## [0.20.4] - 2026-06-15
 
 **Changed**
