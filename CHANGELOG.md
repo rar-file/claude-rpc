@@ -2,6 +2,31 @@
 
 All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.19.0] - 2026-06-15
+
+Audit-remainder cleanup pass — the reliability/security tail the v0.17 sweep left behind, plus DRY/test-hardening to slim the surface. One live crash fixed.
+
+**Fixed**
+
+- **Config-mutating commands no longer crash.** `writeUserConfig` (introduced in v0.17.0) called itself instead of writing the file, so `community on/off`, `profile set`, `link`, and the gist/profile config writers stack-overflowed and never persisted. Restored the write and added a subprocess regression test (cli.js has no importable seam, which is why it shipped).
+- **Live presence works on relocated installs** — `findLiveSessions` now scans the same alternate project dirs (XDG, AppData, Library) the scanner already discovers, not just `~/.claude/projects`.
+- **The dashboard connection badge tells the truth** — it follows the EventSource `onopen`/`readyState` (showing `offline` when the daemon is actually down) instead of a blind 4s timer that always flipped back to "live"; the SSE stream now sends a ~20s heartbeat so half-open connections get reaped.
+- **discord-ipc** gains a per-candidate connect timeout (a socket that accepts then stalls can't wedge discovery of the real one), and the daemon's `connect()` is guarded so the watchdog can't spawn a competing client mid-login.
+- **`detectGithubPrivate` no longer blocks the daemon** — the 1.5s `gh` probe moved off the render path (async, fills the cache for the next tick).
+- **The installer won't disturb a third-party hook** — our hook entries are tagged (`_claudeRpc`) and install/uninstall key off the tag, so a foreign `…/hook.js` is never rewritten or deleted; `verifyHookPipe` parses the ack instead of substring-matching `"continue"`.
+- **The dashboard heatmap** shows a fixed 90-day window regardless of the range pill and color-normalizes against only the cells it draws (it was blanking on 7d/30d and dimming against off-window peaks).
+- **`gh -R owner/repo pr create`** is recognized by the "just shipped" detector (global flags skipped); the concurrent-session list no longer leaks a `$HOME`-named project as the OS username.
+- Renderer/usage hardening: out-of-range `peakHour`/weekday are dropped rather than rendering `99:00`/blank labels; a future-dated usage cache reads as stale; the token-expiry check gains a 30s skew margin; the MCP stdio server caps an unterminated line, attaches an `error` listener, and echoes a recognized client `protocolVersion`.
+- **`fmtNum`/`fmtHours` tier-boundary rounding** — `999_999` now formats as `1.00M` (not `1000.0k`) and `59.7m` as `1.0h` (not `60m`), consistently everywhere.
+
+**Security**
+
+- **The leaderboard worker** strips bidi/zero-width/C1 characters from display names (shared-board visual spoofing) and, in the no-gistId verify fallback, takes the verified owner from the gist itself, sends no client credentials to the public raw URL, and fetches only from `gist.githubusercontent.com`. *(Ships on the next `wrangler deploy`, together with the v0.17.0 board-impersonation fix, which is not yet live.)*
+
+**Internal**
+
+- `fmtNum`/`fmtHours` consolidated into `src/fmt.js` (six diverging copies → one; the worker keeps a byte-for-byte mirror) and the Monday-week grid into `src/week.js` — both unit-tested. Doctor's clientId classification and daemon-log IPC inference are now pure, tested helpers. `desktopNotify` takes an injectable spawn so `npm test` no longer fires a real OS toast. Removed a stray NUL byte that made `install.js` read as a binary file.
+
 ## [0.18.0] - 2026-06-14
 
 **Added**

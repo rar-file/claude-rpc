@@ -4,6 +4,7 @@ import { fmtCost } from './pricing.js';
 import { languageOf } from './languages.js';
 import { detectGitBranch, detectGitRepo } from './git.js';
 import { fmtResetTime, fmtResetDay } from './usage.js';
+import { fmtNum, fmtHours } from './fmt.js';
 
 const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -33,14 +34,6 @@ function fmtHourLocal(ms) {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
-function fmtNum(n) {
-  if (!n) return '0';
-  if (n < 1000) return `${n}`;
-  if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`;
-  if (n < 1_000_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
-  return `${(n / 1_000_000_000).toFixed(2)}B`;
-}
-
 function fmtDuration(ms) {
   if (!ms || ms < 0) return '0s';
   const s = Math.floor(ms / 1000);
@@ -67,14 +60,6 @@ function fmtToolElapsed(ms) {
   const h = Math.floor(sec / 3600);
   const m = Math.floor((sec % 3600) / 60);
   return `${h}h ${m}m`;
-}
-
-function fmtHours(ms) {
-  if (!ms || ms < 0) return '0h';
-  const hours = ms / 3_600_000;
-  if (hours < 1) return `${Math.round(hours * 60)}m`;
-  if (hours < 10) return `${hours.toFixed(1)}h`;
-  return `${Math.round(hours)}h`;
 }
 
 function plural(n, sing, plur) {
@@ -223,9 +208,11 @@ export function buildVars(state, config, aggregate) {
   // leak to anyone viewing the card. Fall back to the configured app name.
   const cwdIsLeaky = looksLikeUsernameLeak(state.cwd);
   const safeCwd = cwdIsLeaky ? '' : (state.cwd || '');
-  const projectPretty = cwdIsLeaky
-    ? (config?.appName || 'Claude Code')
-    : (humanProject(state.cwd) || 'Claude Code');
+  const appName = config?.appName || 'Claude Code';
+  // Project label with the home-dir/username-leak guard applied — shared by the
+  // single-session label and the concurrent list so neither renders "lucas".
+  const safeProject = (cwd) => looksLikeUsernameLeak(cwd) ? appName : (humanProject(cwd) || appName);
+  const projectPretty = safeProject(state.cwd);
   const currentToolPretty = humanTool(state.currentTool);
   const modelPretty = humanModel(state.model);
 
@@ -244,7 +231,7 @@ export function buildVars(state, config, aggregate) {
   const concurrentOther = Math.max(0, concurrent - 1);
   const concurrentListPretty = liveSessions
     .slice(0, 3)
-    .map((s) => (typeof s === 'string' ? humanProject(s) : humanProject(s.cwd || s.project || '')))
+    .map((s) => safeProject(typeof s === 'string' ? s : (s.cwd || s.project || '')))
     .filter(Boolean)
     .join(', ') || '—';
 
@@ -517,7 +504,7 @@ export function buildVars(state, config, aggregate) {
     gitRepo,
 
     // ── App identity (v0.3.6) ───────────────────────────────────
-    appName: config?.appName || 'Claude Code',
+    appName,
 
     // Literal single space — handy for blanking a line without `requires`.
     empty: ' ',

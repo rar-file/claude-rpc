@@ -7,6 +7,7 @@
 
 import { fmtCost } from './pricing.js';
 import { VERSION } from './version.js';
+import { fmtNum, fmtHours } from './fmt.js';
 
 const W = 520;
 const H = 240;
@@ -30,22 +31,6 @@ function escapeXml(s) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
-}
-
-function fmtNum(n) {
-  if (!n) return '0';
-  if (n < 1000) return String(Math.round(n));
-  if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`;
-  if (n < 1_000_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
-  return `${(n / 1_000_000_000).toFixed(2)}B`;
-}
-
-function fmtHours(ms) {
-  if (!ms || ms < 0) return '0h';
-  const h = ms / 3_600_000;
-  if (h < 1) return `${Math.round(h * 60)}m`;
-  if (h < 10) return `${h.toFixed(1)}h`;
-  return `${Math.round(h)}h`;
 }
 
 function topLanguage(aggregate) {

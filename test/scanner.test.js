@@ -4,13 +4,13 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync, appendFileSync, mkdtempSync, rmSync, utimesSync } from 'node:fs';
+import { writeFileSync, appendFileSync, mkdtempSync, mkdirSync, rmSync, utimesSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 const {
   parseTranscript, readSessionTokens, cleanProjectName,
-  discoverAltProjectDirs,
+  discoverAltProjectDirs, findLiveSessions,
 } = await import('../src/scanner.js');
 
 function makeTranscript(records) {
@@ -21,6 +21,22 @@ function makeTranscript(records) {
   writeFileSync(path, records.map((r) => JSON.stringify(r) + '\n').join(''));
   return { dir, path };
 }
+
+test('findLiveSessions: aggregates live transcripts across multiple project roots', () => {
+  const rootA = mkdtempSync(join(tmpdir(), 'rpc-rootA-'));
+  const rootB = mkdtempSync(join(tmpdir(), 'rpc-rootB-'));
+  mkdirSync(join(rootA, 'projA'));
+  mkdirSync(join(rootB, 'projB'));
+  writeFileSync(join(rootA, 'projA', 's1.jsonl'), '');
+  writeFileSync(join(rootB, 'projB', 's2.jsonl'), '');
+  // Explicit multi-root: both fresh sessions show up. In production the default
+  // roots are CLAUDE_PROJECTS + discoverAltProjectDirs(), so relocated installs
+  // no longer go silent.
+  const live = findLiveSessions({ projectsDirs: [rootA, rootB], thresholdMs: 90_000 });
+  assert.equal(live.length, 2);
+  rmSync(rootA, { recursive: true, force: true });
+  rmSync(rootB, { recursive: true, force: true });
+});
 
 // ── parseTranscript ───────────────────────────────────────────────────
 

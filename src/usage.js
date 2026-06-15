@@ -75,7 +75,7 @@ export function normalizeUsage(json) {
 
 export async function fetchUsage({ fetchImpl = globalThis.fetch, creds = readClaudeCredentials(), now = Date.now() } = {}) {
   if (!creds?.accessToken) return { ok: false, reason: 'no-credentials' };
-  if (creds.expiresAt && now > creds.expiresAt) return { ok: false, reason: 'token-expired' };
+  if (creds.expiresAt && now > creds.expiresAt - 30_000) return { ok: false, reason: 'token-expired' }; // 30s skew margin — skip a request we know will 401
   let res;
   try {
     res = await fetchImpl(USAGE_ENDPOINT, {
@@ -112,7 +112,11 @@ export function writeUsageCache(usage, path = USAGE_CACHE_PATH) {
 export function readUsageCache({ path = USAGE_CACHE_PATH, maxAgeMs = USAGE_STALE_MS, now = Date.now() } = {}) {
   try {
     const u = JSON.parse(readFileSync(path, 'utf8'));
-    if (!u?.fetchedAt || now - u.fetchedAt > maxAgeMs) return null;
+    if (!u?.fetchedAt) return null;
+    const age = now - u.fetchedAt;
+    // Stale, or future-dated (corrupt write / clock skew) — a future fetchedAt
+    // would otherwise read as fresh forever.
+    if (age > maxAgeMs || age < -60_000) return null;
     return u;
   } catch { return null; }
 }

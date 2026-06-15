@@ -29,7 +29,7 @@ export function sanitizeLabel(s) {
  * @param {string} [body] - Notification body text.
  * @returns {boolean} true if a notifier was spawned, false on failure.
  */
-export function desktopNotify(title, body = '') {
+export function desktopNotify(title, body = '', { spawn: spawnFn = spawn } = {}) {
   try {
     const p = platform();
     // A missing notifier binary (e.g. no `notify-send`) makes spawn emit an
@@ -43,15 +43,15 @@ export function desktopNotify(title, body = '') {
     };
     if (p === 'darwin') {
       const script = `display notification ${JSON.stringify(body)} with title ${JSON.stringify(title)}`;
-      swallow(spawn('osascript', ['-e', script], { stdio: 'ignore', detached: true }));
+      swallow(spawnFn('osascript', ['-e', script], { stdio: 'ignore', detached: true }));
     } else if (p === 'win32') {
       const script = `Add-Type -AssemblyName System.Windows.Forms;`
         + `$n=New-Object System.Windows.Forms.NotifyIcon;`
         + `$n.Icon=[System.Drawing.SystemIcons]::Information;$n.Visible=$true;`
         + `$n.ShowBalloonTip(5000, ${JSON.stringify(title)}, ${JSON.stringify(body)}, 'Info')`;
-      swallow(spawn('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], { stdio: 'ignore', detached: true, windowsHide: true }));
+      swallow(spawnFn('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], { stdio: 'ignore', detached: true, windowsHide: true }));
     } else {
-      swallow(spawn('notify-send', ['-a', 'Claude Code', title, body], { stdio: 'ignore', detached: true }));
+      swallow(spawnFn('notify-send', ['-a', 'Claude Code', title, body], { stdio: 'ignore', detached: true }));
     }
     return true;
   } catch {

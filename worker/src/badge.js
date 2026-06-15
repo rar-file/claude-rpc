@@ -22,12 +22,18 @@ function textWidth(s) {
   return Math.ceil(w);
 }
 
+// Byte-for-byte mirror of src/fmt.js fmtNum — the worker deploys dependency-free
+// and can't import across the package boundary. Keep the two in sync.
 export function fmtNum(n) {
   if (!n) return '0';
-  if (n < 1000) return String(n);
-  if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`;
-  if (n < 1_000_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
-  return `${(n / 1_000_000_000).toFixed(2)}B`;
+  const neg = n < 0 ? '-' : '';
+  const v = Math.abs(n);
+  if (v < 1000) return neg + Math.round(v);
+  for (const [suf, div, prec] of [['k', 1e3, 1], ['M', 1e6, 2], ['B', 1e9, 2]]) {
+    const s = (v / div).toFixed(prec);
+    if (Number(s) < 1000) return neg + s + suf;
+  }
+  return neg + (v / 1e9).toFixed(2) + 'B';
 }
 
 export function renderBadge({ label, value, color }) {

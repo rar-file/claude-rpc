@@ -15,7 +15,7 @@ import { createServer } from 'node:http';
 import { exec } from 'node:child_process';
 import { ROUTES, JSON_HEADERS } from './routes.js';
 import { projectDrilldown, dayDetail } from './api.js';
-import { sseClients, watchSources } from './sse.js';
+import { watchSources, addClient, removeClient } from './sse.js';
 import { buildHtml, buildWrappedHtml } from './page.js';
 
 // Pre-compose the HTML once at startup — the only dynamic bit is the port
@@ -60,8 +60,8 @@ function dispatch(req, res) {
       'connection': 'keep-alive',
     });
     res.write(': hello\n\n');
-    sseClients.add(res);
-    req.on('close', () => sseClients.delete(res));
+    addClient(res);
+    req.on('close', () => removeClient(res));
     return;
   }
 

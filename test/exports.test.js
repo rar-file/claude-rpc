@@ -12,7 +12,7 @@ const { calendarSvg } = await import('../src/calendar.js');
 const { cardSvg } = await import('../src/card.js');
 const { sessionCardSvg } = await import('../src/session-card.js');
 const { postWebhook, desktopNotify, sanitizeLabel } = await import('../src/notify.js');
-const { runDoctor, fixPlan } = await import('../src/doctor.js');
+const { runDoctor, fixPlan, classifyClientId, ipcStateFromLog } = await import('../src/doctor.js');
 
 const fakeAgg = {
   activeMs: 100 * 3_600_000,
@@ -124,10 +124,23 @@ test('postWebhook: POSTs JSON to the url, swallows rejections, never throws', as
   }
 });
 
-test('desktopNotify: returns a boolean and never throws (missing binary is swallowed)', () => {
-  let result;
-  assert.doesNotThrow(() => { result = desktopNotify('claude-rpc', 'test body'); });
-  assert.equal(typeof result, 'boolean');
+test('desktopNotify: spawns the platform notifier with title/body and swallows errors', () => {
+  // Inject a recording spawn so the test never fires a real OS toast (it used
+  // to on every `npm test`), and assert the load-bearing argv + error listener.
+  const calls = [];
+  let errorListener = false;
+  const fakeSpawn = (cmd, args, opts) => {
+    calls.push({ cmd, args, opts });
+    return { on(ev) { if (ev === 'error') errorListener = true; }, unref() {} };
+  };
+  const result = desktopNotify('claude-rpc', 'test body', { spawn: fakeSpawn });
+  assert.equal(result, true);
+  assert.equal(calls.length, 1, 'spawned exactly one notifier');
+  assert.ok(errorListener, 'attaches a no-op error listener so a missing binary cannot crash the daemon');
+  const argv = JSON.stringify(calls[0].args);
+  assert.ok(argv.includes('claude-rpc') && argv.includes('test body'), 'title + body reach the notifier');
+  // Never throws, even if spawn itself blows up.
+  assert.doesNotThrow(() => desktopNotify('x', 'y', { spawn: () => { throw new Error('boom'); } }));
 });
 
 test('sanitizeLabel: strips shell/PowerShell metacharacters, keeps readable text', () => {
@@ -158,4 +171,22 @@ test('runDoctor: runs the full checklist and returns a 0|1 exit code', () => {
   } finally {
     console.log = realLog;
   }
+});
+
+test('classifyClientId: unset / placeholder / malformed / ok', () => {
+  assert.equal(classifyClientId(''), 'unset');
+  assert.equal(classifyClientId(null), 'unset');
+  assert.equal(classifyClientId('1234567890123456789'), 'unset', 'the seed placeholder is not configured');
+  assert.equal(classifyClientId('12345'), 'malformed', 'too short for a snowflake');
+  assert.equal(classifyClientId('15064abc09406920948'), 'malformed', 'non-digits');
+  assert.equal(classifyClientId('1506443909406920948'), 'ok');
+});
+
+test('ipcStateFromLog: most-recent line wins (up / down / unknown)', () => {
+  assert.equal(ipcStateFromLog(''), 'unknown');
+  assert.equal(ipcStateFromLog('Discord RPC connected as foo'), 'up');
+  assert.equal(ipcStateFromLog('Presence updated'), 'up');
+  assert.equal(ipcStateFromLog('Discord disconnected — retry in 5s'), 'down');
+  assert.equal(ipcStateFromLog(['login failed', 'Discord RPC connected'].join('\n')), 'up', 'reconnect after drop → up');
+  assert.equal(ipcStateFromLog(['Discord RPC connected', 'retry in 10s'].join('\n')), 'down', 'drop after connect → down');
 });

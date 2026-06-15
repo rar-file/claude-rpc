@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import { watchFile } from '../src/server/sse.js';
+import { watchFile, sseClients, broadcast, addClient, removeClient } from '../src/server/sse.js';
 
 test('watchFile survives repeated atomic renames (stale-inode regression)', async (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'sse-test-'));
@@ -45,4 +45,18 @@ test('watchFile survives repeated atomic renames (stale-inode regression)', asyn
 test('watchFile returns null when directory does not exist', () => {
   const watcher = watchFile('/nonexistent-dir-abc123/file.json', () => {});
   assert.equal(watcher, null);
+});
+
+test('broadcast reaps a client whose write throws; client set drains on remove', () => {
+  sseClients.clear();
+  const good = { lines: [], write(s) { this.lines.push(s); } };
+  const dead = { write() { throw new Error('EPIPE'); } };
+  addClient(good);
+  addClient(dead);
+  broadcast({ type: 'state' });
+  assert.ok(good.lines.some((l) => l.includes('"state"')), 'live client received the frame');
+  assert.ok(!sseClients.has(dead), 'dead socket evicted on write failure');
+  removeClient(good);
+  removeClient(dead);
+  assert.equal(sseClients.size, 0, 'heartbeat stops when the last client leaves');
 });

@@ -21,7 +21,7 @@
 // by these flags. Privacy is a one-way valve from local state → Discord.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { join, basename, dirname, resolve as resolvePath } from 'node:path';
 import { DATA_DIR } from './paths.js';
 
@@ -33,6 +33,7 @@ const TTL_MS = 5 * 60 * 1000;
 
 const projectFileCache = new Map();   // cwd → { ts, value | null }
 const ghPrivateCache  = new Map();    // cwd → { ts, value: bool | null }
+const ghProbeInFlight = new Set();    // cwds with an async `gh` probe running
 
 // ── Per-project .claude-rpc.json ────────────────────────────────────────
 
@@ -182,18 +183,33 @@ export function detectGithubPrivate(cwd) {
   if (!cwd) return null;
   const cached = ghPrivateCache.get(cwd);
   if (cached && Date.now() - cached.ts < TTL_MS) return cached.value;
-  let value = null;
-  try {
-    const out = execFileSync(
-      'gh',
-      ['repo', 'view', '--json', 'isPrivate', '-q', '.isPrivate'],
-      { cwd, stdio: ['ignore', 'pipe', 'ignore'], timeout: 1500 }
-    ).toString().trim();
-    if (out === 'true') value = true;
-    else if (out === 'false') value = false;
-  } catch { /* gh missing, not auth'd, not a repo, timeout — unknown */ }
-  ghPrivateCache.set(cwd, { ts: Date.now(), value });
-  return value;
+  // Cache miss: the single-threaded daemon render path must never block on a
+  // subprocess (a 1.5s gh call stalls ALL presence + file-watch updates). Fire
+  // a non-blocking probe and serve the last known value (null = unknown) this
+  // tick; the fresh verdict lands in the cache for the next one.
+  probeGithubPrivate(cwd);
+  return cached ? cached.value : null;
+}
+
+function probeGithubPrivate(cwd) {
+  if (ghProbeInFlight.has(cwd)) return; // one in-flight probe per cwd
+  ghProbeInFlight.add(cwd);
+  execFile(
+    'gh',
+    ['repo', 'view', '--json', 'isPrivate', '-q', '.isPrivate'],
+    { cwd, timeout: 1500 },
+    (err, stdout) => {
+      ghProbeInFlight.delete(cwd);
+      let value = null;
+      if (!err) {
+        const out = String(stdout).trim();
+        if (out === 'true') value = true;
+        else if (out === 'false') value = false;
+      }
+      // gh missing / not auth'd / not a repo / timeout → value stays null (unknown).
+      ghPrivateCache.set(cwd, { ts: Date.now(), value });
+    }
+  );
 }
 
 // ── Resolution + application ────────────────────────────────────────────

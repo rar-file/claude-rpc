@@ -35,6 +35,14 @@ test('cleanDisplayName: strips control chars, bounds length', () => {
   assert.equal(cleanDisplayName('   '), null);
   assert.equal(cleanDisplayName('x'.repeat(50)).length, 40);
   assert.equal(cleanDisplayName(null), null);
+  // Bidi overrides, zero-width, C1 controls, and BOM are stripped (board spoof).
+  const RTL = String.fromCharCode(0x202e), ZWSP = String.fromCharCode(0x200b);
+  const BOM = String.fromCharCode(0xfeff), C1 = String.fromCharCode(0x85);
+  const CJK = String.fromCharCode(0x65e5, 0x672c); // 日本
+  assert.equal(cleanDisplayName('ab' + RTL + 'cd'), 'abcd', 'RTL override stripped');
+  assert.equal(cleanDisplayName('a' + ZWSP + 'b' + BOM + 'c'), 'abc', 'zero-width / BOM stripped');
+  assert.equal(cleanDisplayName('x' + C1 + 'y'), 'xy', 'C1 control stripped');
+  assert.equal(cleanDisplayName(CJK), CJK, 'CJK survives');
 });
 
 test('normalizeGithubUser: accepts valid, strips @ and url, rejects junk', () => {

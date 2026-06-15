@@ -7,7 +7,8 @@
 import process from 'node:process';
 import { readFileSync, existsSync } from 'node:fs';
 import { readState } from './state.js';
-import { readAggregate, findLiveSessions, dayKey, weekKey } from './scanner.js';
+import { readAggregate, findLiveSessions, weekKey } from './scanner.js';
+import { weekGrid } from './week.js';
 import { buildVars, applyIdle, humanProject } from './format.js';
 import { loadConfig } from './config.js';
 import { PID_PATH } from './paths.js';
@@ -186,22 +187,7 @@ function tabWeek(_, data) {
   if (agg.byDay) {
     out.push('');
     out.push(`${C.dim}daily breakdown${C.reset}`);
-    const now = new Date();
-    now.setHours(0, 0, 0, 0);
-    const monday = new Date(now);
-    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
-    const days = [];
-    for (let i = 0; i < 7; i++) {
-      const d = new Date(monday);
-      d.setDate(d.getDate() + i);
-      const k = dayKey(d.getTime());
-      const dayName = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()];
-      const ms = agg.byDay[k]?.activeMs || 0;
-      const isFuture = d > now;
-      const isToday = k === dayKey(now.getTime());
-      days.push({ label: `${dayName} ${k.slice(5)}`, ms, isFuture, isToday });
-    }
-    const maxMs = Math.max(...days.map((d) => d.ms)) || 1;
+    const { days, maxMs } = weekGrid(agg.byDay);
     for (const { label, ms, isFuture, isToday } of days) {
       if (isFuture) {
         out.push(`${C.dim}${label.padEnd(11)}${' '.repeat(18)}     —${C.reset}`);

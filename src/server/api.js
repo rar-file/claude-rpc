@@ -196,7 +196,7 @@ export function wrappedData() {
     topLanguage: langs[0] ? { name: langs[0][0], edits: langs[0][1].edits || 0 } : null,
     languages: langs.slice(0, 5).map(([name, v]) => ({ name, edits: v.edits || 0 })),
     hotspot: top ? { name: basename(String(top.path || '')), count: top.count, daysSinceLastEdit: top.daysSinceLastEdit } : null,
-    peakHour: agg.peakHour && agg.peakHour.hour != null ? agg.peakHour.hour : null,
+    peakHour: (Number.isInteger(agg.peakHour?.hour) && agg.peakHour.hour >= 0 && agg.peakHour.hour <= 23) ? agg.peakHour.hour : null,
     peakWeekday: peakWd ? { name: WRAPPED_WEEKDAYS[peakWd.day], hours: peakWd.ms / 3_600_000 } : null,
     modelSplit: (agg.modelSplit || []).slice(0, 4).map((m) => ({ model: humanModel(m.model) || m.model, costPct: m.costPct || 0, tokenPct: m.tokenPct || 0 })),
     linesAdded: agg.linesAdded || 0,

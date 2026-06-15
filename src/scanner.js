@@ -632,25 +632,37 @@ export function readSessionTokens(path) {
 
 // Detect live sessions by transcript mtime. Returns array of { path, project, cwd, mtime, ageSec }.
 // A session is "live" if its .jsonl was modified within thresholdMs.
-export function findLiveSessions({ projectsDir = CLAUDE_PROJECTS, thresholdMs = 90_000 } = {}) {
-  if (!existsSync(projectsDir)) return [];
+// Roots default to the same set scan() uses — the canonical ~/.claude/projects
+// plus any discovered alt locations — so live presence, concurrent-session
+// detection, the web API, doctor and the TUI don't go silent on XDG-strict /
+// AppData / Library-relocated installs. Legacy single-root `projectsDir` and
+// explicit multi-root `projectsDirs` are both still accepted.
+export function findLiveSessions({ projectsDir, projectsDirs, thresholdMs = 90_000 } = {}) {
+  const dirs = projectsDirs && projectsDirs.length ? projectsDirs
+    : projectsDir ? [projectsDir]
+    : [CLAUDE_PROJECTS, ...discoverAltProjectDirs()];
   const now = Date.now();
   const live = [];
-  for (const proj of readdirSync(projectsDir)) {
-    const projPath = join(projectsDir, proj);
-    let entries;
-    try { entries = readdirSync(projPath, { withFileTypes: true }); } catch { continue; }
-    for (const e of entries) {
-      // Only top-level transcripts count as sessions, not subagent files.
-      if (!e.isFile() || !e.name.endsWith('.jsonl')) continue;
-      const full = join(projPath, e.name);
-      let st;
-      try { st = statSync(full); } catch { continue; }
-      const age = now - st.mtimeMs;
-      if (age <= thresholdMs) {
-        const cwd = readTranscriptCwd(full, st.mtimeMs);
-        const project = cleanProjectName(cwd ? basename(cwd) : proj);
-        live.push({ path: full, project, cwd: cwd || '', mtime: st.mtimeMs, ageSec: Math.round(age / 1000) });
+  for (const root of dirs) {
+    if (!existsSync(root)) continue;
+    let projects;
+    try { projects = readdirSync(root); } catch { continue; }
+    for (const proj of projects) {
+      const projPath = join(root, proj);
+      let entries;
+      try { entries = readdirSync(projPath, { withFileTypes: true }); } catch { continue; }
+      for (const e of entries) {
+        // Only top-level transcripts count as sessions, not subagent files.
+        if (!e.isFile() || !e.name.endsWith('.jsonl')) continue;
+        const full = join(projPath, e.name);
+        let st;
+        try { st = statSync(full); } catch { continue; }
+        const age = now - st.mtimeMs;
+        if (age <= thresholdMs) {
+          const cwd = readTranscriptCwd(full, st.mtimeMs);
+          const project = cleanProjectName(cwd ? basename(cwd) : proj);
+          live.push({ path: full, project, cwd: cwd || '', mtime: st.mtimeMs, ageSec: Math.round(age / 1000) });
+        }
       }
     }
   }

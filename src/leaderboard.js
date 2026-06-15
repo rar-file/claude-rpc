@@ -29,7 +29,11 @@ export function isValidHandle(input) {
 // trim, bound the length. Returns null for empty input.
 export function cleanDisplayName(input, max = 40) {
   if (!input || typeof input !== 'string') return null;
-  const name = input.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, max);
+  // Strip control chars (C0/DEL/C1), zero-width, and bidi overrides so a name
+  // can't visually corrupt or spoof the shared board. Denylist by code point -
+  // CJK, emoji and accents still pass. Mirrored in the worker's cleanName.
+  const ok = (c) => !(c < 32 || (c >= 0x7f && c <= 0x9f) || (c >= 0x200b && c <= 0x200f) || (c >= 0x202a && c <= 0x202e) || (c >= 0x2066 && c <= 0x2069) || c === 0xfeff);
+  const name = [...input].filter((ch) => ok(ch.codePointAt(0))).join('').trim().slice(0, max);
   return name || null;
 }
 

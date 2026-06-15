@@ -23,6 +23,7 @@
   let range = '90d';
   let liveData = null;
   let aggData = null;
+  let heatmapByDay = null; // dedicated fixed-90d source, independent of the range pill
   let allFrames = [];
   let currentLiveIdx = 0;
   let rotationTimer = null;
@@ -162,25 +163,30 @@
   function renderHeatmap(byDay) {
     const grid = $('heatmap-grid');
     grid.innerHTML = '';
+    byDay = byDay || {};
     const today = new Date(); today.setHours(0, 0, 0, 0);
-    let start = new Date(today); start.setDate(start.getDate() - 90);
+    const start = new Date(today); start.setDate(start.getDate() - 90);
     while (start.getDay() !== 0) start.setDate(start.getDate() - 1);
-    let max = 0;
-    for (let k in byDay) max = Math.max(max, byDay[k].activeMs || 0);
+    // The day keys actually drawn — a fixed window ending today, independent of
+    // the range pill (so 7d/30d don't blank the grid).
+    const keys = [];
     const cur = new Date(start);
-    while (cur <= today) {
-      const k = dayKey(cur.getTime());
+    while (cur <= today) { keys.push(dayKey(cur.getTime())); cur.setDate(cur.getDate() + 1); }
+    // Normalize against the max of ONLY the drawn cells, so an off-window peak
+    // (from a wider range selection) can't dim the visible grid.
+    let max = 0;
+    for (const k of keys) max = Math.max(max, (byDay[k] || {}).activeMs || 0);
+    for (const k of keys) {
       const ms = (byDay[k] || {}).activeMs || 0;
       const cell = document.createElement('div');
       cell.className = 'cell';
-      if (ms > 0) {
+      if (ms > 0 && max > 0) {
         const lvl = Math.min(1, ms / max);
         cell.style.background = 'rgba(74, 222, 128, ' + (0.18 + lvl * 0.72).toFixed(2) + ')';
       }
       cell.title = k + ' · ' + fmtH(ms);
       cell.addEventListener('click', () => openDay(k));
       grid.appendChild(cell);
-      cur.setDate(cur.getDate() + 1);
     }
   }
 
@@ -434,6 +440,16 @@
     } catch (e) { console.error(e); }
   }
 
+  // The heatmap always shows the same fixed ~90-day window, so it has its own
+  // fetch decoupled from the range pill.
+  async function fetchHeatmap() {
+    try {
+      const r = await fetch('/api/aggregate?range=90d', { cache: 'no-store' });
+      heatmapByDay = (await r.json()).byDay || {};
+      renderHeatmap(heatmapByDay);
+    } catch (e) { console.error(e); }
+  }
+
   async function fetchInsights() {
     try {
       const r = await fetch('/api/insights');
@@ -454,7 +470,7 @@
     if (!aggData) return;
     const days = range === '7d' ? 7 : range === '30d' ? 30 : range === '1y' ? 365 : range === 'all' ? 365 : 90;
     renderChart(aggData.byDay || {}, days);
-    renderHeatmap(aggData.byDay || {});
+    renderHeatmap(heatmapByDay || aggData.byDay || {});
     renderChurn(aggData.byDay || {}, Math.min(days, 90));
     renderCost(aggData);
     renderLanguages(aggData.languages);
@@ -573,7 +589,9 @@
   // ── SSE ────────────────────────────────────────────────
   function startSse() {
     try {
+      $('conn-state').textContent = 'connecting';
       const ev = new EventSource('/events');
+      ev.onopen = () => { $('conn-state').textContent = 'live'; };
       ev.onmessage = async (e) => {
         try {
           const d = JSON.parse(e.data);
@@ -582,10 +600,14 @@
             await refreshState();
             await fetchAggregate();
             await fetchInsights();
+            await fetchHeatmap();
           }
         } catch { /* malformed SSE frame — wait for the next one */ }
       };
-      ev.onerror = () => { $('conn-state').textContent = 'reconnecting'; setTimeout(() => { $('conn-state').textContent = 'live'; }, 4000); };
+      // CLOSED = EventSource gave up (no auto-retry); otherwise a native
+      // reconnect is already in flight. No blind timer flipping back to "live"
+      // while the daemon is actually down.
+      ev.onerror = () => { $('conn-state').textContent = ev.readyState === EventSource.CLOSED ? 'offline' : 'reconnecting'; };
     } catch { /* EventSource constructor failed (very old browser) — dashboard falls back to one-shot fetches */ }
   }
 
@@ -650,6 +672,7 @@
     await refreshState();
     await fetchAggregate();
     await fetchInsights();
+    await fetchHeatmap();
     startSse();
     // Restore deep link.
     if (location.hash.startsWith('#projects/')) openProject(decodeURIComponent(location.hash.slice(10)));

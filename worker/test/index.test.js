@@ -540,7 +540,7 @@ test('handleVerifyCheck: verifies when the token appears in a public gist', asyn
     JSON.stringify({ githubUser: 'octocat', token: 'vrf_abc123', ts: Date.now() }));
   const fakeFetch = async (url) => {
     if (url.includes('/gists')) {
-      return { ok: true, json: async () => ([{ files: { 'a.txt': { raw_url: 'https://raw/x' } } }]) };
+      return { ok: true, json: async () => ([{ owner: { login: 'octocat' }, files: { 'a.txt': { raw_url: 'https://gist.githubusercontent.com/octocat/abc/raw/a.txt' } } }]) };
     }
     return { ok: true, text: async () => 'my proof token vrf_abc123 here' };
   };

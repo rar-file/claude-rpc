@@ -124,3 +124,23 @@ test('buildVars: usage vars present with data, all-empty without', async () => {
   assert.equal(without.usageWeeklyPct, '');
   assert.equal(without.usageStateLabel, '');
 });
+
+test('cache: a future-dated fetchedAt is rejected (clock skew / corrupt write)', () => {
+  const path = join(mkdtempSync(join(tmpdir(), 'crpc-usage-')), 'usage.json');
+  const now = 1_750_000_000_000;
+  // 10 min in the future would otherwise read as "fresh forever".
+  writeUsageCache({ weeklyPct: 5, fetchedAt: now + 600_000 }, path);
+  assert.equal(readUsageCache({ path, now }), null, 'future-dated → no data');
+  // A small skew within tolerance still reads.
+  writeUsageCache({ weeklyPct: 5, fetchedAt: now + 10_000 }, path);
+  assert.equal(readUsageCache({ path, now }).weeklyPct, 5);
+});
+
+test('fetchUsage: a token within 30s of expiry is treated as expired (skew margin)', async () => {
+  const now = 1_750_000_000_000;
+  const r = await fetchUsage({
+    creds: { accessToken: 't', expiresAt: now + 20_000 }, now,
+    fetchImpl: async () => { throw new Error('should not fetch a doomed request'); },
+  });
+  assert.deepEqual([r.ok, r.reason], [false, 'token-expired']);
+});

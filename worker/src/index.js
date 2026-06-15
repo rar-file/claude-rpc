@@ -359,7 +359,11 @@ function normGithub(input) {
 }
 function cleanName(input) {
   if (typeof input !== 'string') return null;
-  const n = [...input].filter((ch) => { const c = ch.charCodeAt(0); return c >= 32 && c !== 127; }).join('').trim().slice(0, 40);
+  // Strip control chars (C0/DEL/C1), zero-width, and bidi overrides so a display
+  // name can't visually corrupt or spoof the shared board. Denylist by code
+  // point - CJK/emoji/accents still pass. Mirrors src/leaderboard.js cleanDisplayName.
+  const ok = (c) => !(c < 32 || (c >= 0x7f && c <= 0x9f) || (c >= 0x200b && c <= 0x200f) || (c >= 0x202a && c <= 0x202e) || (c >= 0x2066 && c <= 0x2069) || c === 0xfeff);
+  const n = [...input].filter((ch) => ok(ch.codePointAt(0))).join('').trim().slice(0, 40);
   return n || null;
 }
 
@@ -785,8 +789,15 @@ export async function handleVerifyCheck(request, env, fetchImpl = fetch) {
         for (const g of (Array.isArray(gists) ? gists.slice(0, 20) : [])) {
           for (const f of Object.values(g.files || {})) {
             if (!f || !f.raw_url || ++rawFetches > 10) continue;
-            const rr = await fetchImpl(f.raw_url, { headers: ghApiHeaders(env) });
-            if (rr.ok && (await rr.text()).includes(pending.token)) { matchedOwner = pending.githubUser; break; }
+            // Public raw content: never attach our client creds, and never fetch
+            // off the gist CDN (a malformed API response could otherwise point
+            // us at an arbitrary host). Owner comes from the gist itself, not
+            // the client-supplied hint.
+            let host = '';
+            try { host = new URL(f.raw_url).hostname; } catch { continue; }
+            if (host !== 'gist.githubusercontent.com') continue;
+            const rr = await fetchImpl(f.raw_url);
+            if (rr.ok && (await rr.text()).includes(pending.token)) { matchedOwner = g.owner?.login || pending.githubUser; break; }
           }
           if (matchedOwner || rawFetches > 10) break;
         }

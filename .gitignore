@@ -29,6 +29,7 @@ config.local.json
 
 # Local audit scratchpads (findings, not part of the repo)
 NOTES.md
+docs/AUDIT-*.md
 .repo-scan/
 
 # Wrangler dev state (worker/) — caches, miniflare, build output

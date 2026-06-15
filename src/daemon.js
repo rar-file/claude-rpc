@@ -78,6 +78,7 @@ let aggregate = readAggregate() || null;
 let liveSessions = [];
 let client = null;
 let connected = false;
+let connecting = false; // login() in flight — see the watchdog note in connect()
 let lastPayloadHash = '';
 // Last status we acted on for outbound side-effects (webhook / desktop notify).
 // Tracked separately from the render hash so we fire once per transition.
@@ -405,6 +406,10 @@ function isConnectionError(e) {
 
 async function connect() {
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  // While login() is in flight, connected===false and reconnectTimer===null
+  // both hold, so the watchdog's "down, nothing pending" branch would spawn a
+  // second connect() that overwrites `client` and orphans this socket. Block it.
+  connecting = true;
   client = new Client({ clientId: config.clientId, transport: { type: 'ipc' } });
 
   client.on('ready', () => {
@@ -422,6 +427,8 @@ async function connect() {
   try { await client.login(); }
   catch (e) {
     scheduleReconnect(`Discord login failed: ${e.message}`);
+  } finally {
+    connecting = false;
   }
 }
 
@@ -609,7 +616,7 @@ const HEALTH_CHECK_MS = 30_000;
 setInterval(() => {
   try {
     // Half-open: flag says connected but there's no usable user handle.
-    if (connected && !client?.user) {
+    if (connected && !client?.user && !connecting) {
       log('Watchdog: connected but no user handle — forcing reconnect');
       connected = false;
       try { client?.destroy(); } catch { /* already gone */ }
@@ -618,7 +625,7 @@ setInterval(() => {
     }
     // Down with nothing scheduled to bring us back. scheduleReconnect is a
     // no-op when a timer is already pending, so this can't stack retries.
-    if (!connected && !reconnectTimer) {
+    if (!connected && !reconnectTimer && !connecting) {
       log('Watchdog: disconnected with no reconnect pending — forcing reconnect');
       scheduleReconnect('watchdog: no retry pending');
     }

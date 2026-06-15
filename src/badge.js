@@ -3,6 +3,7 @@
 
 import { dayKey } from './scanner.js';
 import { fmtCost } from './pricing.js';
+import { fmtNum, fmtHours as fmtHoursLabel } from './fmt.js';
 
 const COLORS = {
   hours:  { left: '#555', right: '#4c1' },     // green
@@ -57,22 +58,6 @@ function rangeLabel(range) {
 }
 
 export { rangeToDays, rangeLabel, pickWindow };
-
-function fmtHoursLabel(ms) {
-  if (!ms) return '0h';
-  const h = ms / 3_600_000;
-  if (h < 1) return `${Math.round(h * 60)}m`;
-  if (h < 10) return `${h.toFixed(1)}h`;
-  return `${Math.round(h)}h`;
-}
-
-function fmtNum(n) {
-  if (!n) return '0';
-  if (n < 1000) return String(n);
-  if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`;
-  if (n < 1_000_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
-  return `${(n / 1_000_000_000).toFixed(2)}B`;
-}
 
 // Compute label/value pair for the requested metric.
 function valueFor(aggregate, metric, range) {

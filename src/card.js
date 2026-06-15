@@ -15,6 +15,7 @@ import { dayKey } from './scanner.js';
 import { fmtCost } from './pricing.js';
 import { rangeToDays, rangeLabel, pickWindow } from './badge.js';
 import { VERSION } from './version.js';
+import { fmtNum, fmtHours } from './fmt.js';
 
 const W = 880;
 const H = 540;
@@ -43,22 +44,6 @@ function escapeXml(s) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
-}
-
-function fmtNum(n) {
-  if (!n) return '0';
-  if (n < 1000) return String(Math.round(n));
-  if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`;
-  if (n < 1_000_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
-  return `${(n / 1_000_000_000).toFixed(2)}B`;
-}
-
-function fmtHours(ms) {
-  if (!ms || ms < 0) return '0h';
-  const h = ms / 3_600_000;
-  if (h < 1) return `${Math.round(h * 60)}m`;
-  if (h < 10) return `${h.toFixed(1)}h`;
-  return `${Math.round(h)}h`;
 }
 
 function rangeTitle(range) {
@@ -103,7 +88,9 @@ function topWeekday(aggregate) {
   const wd = aggregate?.byWeekday || {};
   let best = null;
   for (const [k, v] of Object.entries(wd)) {
-    if (!best || (v.activeMs || 0) > (best.ms || 0)) best = { day: Number(k), ms: v.activeMs || 0 };
+    const day = Number(k);
+    if (!Number.isInteger(day) || day < 0 || day > 6) continue; // out-of-range key → skip, no blank name + stray "(3h)"
+    if (!best || (v.activeMs || 0) > (best.ms || 0)) best = { day, ms: v.activeMs || 0 };
   }
   return best;
 }
@@ -133,6 +120,7 @@ function peakHourLabel(aggregate) {
   const ph = aggregate?.peakHour;
   if (!ph || ph.hour == null) return null;
   const h = Number(ph.hour);
+  if (!Number.isInteger(h) || h < 0 || h > 23) return null; // corrupt aggregate → no label, not "99:00"/"NaN:00"
   return `${String(h).padStart(2, '0')}:00`;
 }
 

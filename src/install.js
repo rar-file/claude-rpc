@@ -52,7 +52,7 @@ function dirtyStep(sym, label, detail = '', log = console.log) {
 }
 function noop(fact) { noopFacts.push(fact); }
 
-const EVENTS = [
+export const EVENTS = [
   'SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse',
   'Stop', 'SubagentStop', 'Notification', 'SessionEnd', 'PreCompact',
 ];
@@ -69,7 +69,18 @@ function writeJson(p, d) {
 
 function isOurHookCommand(cmd) {
   if (!cmd) return false;
-  return /claude-rpc/i.test(cmd) || /hook\.js/i.test(cmd);
+  if (/claude-rpc/i.test(cmd)) return true;
+  // Dev-mode hooks point at THIS install's hook.js by absolute path. Match that
+  // exact path — NOT any `hook.js`, which could be a third-party tool's hook we
+  // must never rewrite or delete.
+  return cmd.includes(HOOK_SCRIPT.replace(/\\/g, '/'));
+}
+
+// A hook entry we own. Tagged entries are recognized regardless of command
+// shape or clone-dir name; command-matching is the legacy fallback for entries
+// written before tagging.
+export function isOurHook(h) {
+  return !!h && (h._claudeRpc === true || isOurHookCommand(h.command));
 }
 
 export function installHooks(exePath) {
@@ -91,14 +102,14 @@ export function installHooks(exePath) {
     const bucket = settings.hooks[event] = settings.hooks[event] || [];
     const wanted = cmdFor(event);
     const existingEntry = bucket.find((b) =>
-      Array.isArray(b.hooks) && b.hooks.some((h) => isOurHookCommand(h.command))
+      Array.isArray(b.hooks) && b.hooks.some((h) => isOurHook(h))
     );
     if (existingEntry) {
       existingEntry.hooks = existingEntry.hooks.map((h) =>
-        isOurHookCommand(h.command) ? { ...h, command: wanted } : h
+        isOurHook(h) ? { ...h, command: wanted, _claudeRpc: true } : h
       );
     } else {
-      bucket.push({ matcher: '', hooks: [{ type: 'command', command: wanted }] });
+      bucket.push({ matcher: '', hooks: [{ type: 'command', command: wanted, _claudeRpc: true }] });
     }
   }
   if (JSON.stringify(settings.hooks) === before) {
@@ -117,7 +128,7 @@ export function uninstallHooks() {
     const bucket = settings.hooks[event];
     if (!Array.isArray(bucket)) continue;
     settings.hooks[event] = bucket
-      .map((entry) => ({ ...entry, hooks: (entry.hooks || []).filter((h) => !isOurHookCommand(h.command)) }))
+      .map((entry) => ({ ...entry, hooks: (entry.hooks || []).filter((h) => !isOurHook(h)) }))
       .filter((entry) => (entry.hooks || []).length > 0);
     if (settings.hooks[event].length === 0) delete settings.hooks[event];
   }
@@ -421,7 +432,7 @@ export function migrateConfig({ silent = false } = {}) {
   // anyone who added a custom frame is left entirely alone.
   const frameId = (f) => (Array.isArray(f?.requires) && f.requires.length)
     ? 'r:' + [...f.requires].map(String).sort().join('|')
-    : 't:' + (f?.details ?? '') + ' ' + (f?.state ?? '');
+    : 't:' + (f?.details ?? '') + '\x00' + (f?.state ?? '');
   const dflBy = DEFAULT_CONFIG.presence?.byStatus || {};
   const usrBy = cfg.presence.byStatus || {};
   let framesAdded = 0;
@@ -481,8 +492,14 @@ function verifyHookPipe(exePath) {
   if (result.status !== 0) {
     return { ok: false, detail: `hook exit ${result.status}: ${(result.stderr || '').trim().slice(0, 120)}` };
   }
-  if (!result.stdout.includes('"continue"')) {
-    return { ok: false, detail: `unexpected hook output: ${result.stdout.trim().slice(0, 120)}` };
+  // Parse the ack and assert the actual contract (a JSON object with
+  // continue:true) rather than substring-matching the bytes "continue" anywhere
+  // in stdout.
+  let ack;
+  try { ack = JSON.parse((result.stdout || '').trim()); }
+  catch { return { ok: false, detail: `non-JSON hook output: ${(result.stdout || '').trim().slice(0, 120)}` }; }
+  if (ack?.continue !== true) {
+    return { ok: false, detail: `hook ack missing continue:true: ${(result.stdout || '').trim().slice(0, 120)}` };
   }
   return { ok: true, detail: 'SessionStart round-trip succeeded' };
 }

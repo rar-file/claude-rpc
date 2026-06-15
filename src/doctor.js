@@ -18,6 +18,7 @@ import { findLiveSessions } from './scanner.js';
 import { detectGithubUrl } from './git.js';
 import { resolveVisibility, listPrivateCwds, detectGithubPrivate } from './privacy.js';
 import { readClaudeCredentials, readUsageCache } from './usage.js';
+import { EVENTS as HOOK_EVENTS, isOurHook } from './install.js';
 import { c, check as uiCheck } from './ui.js';
 
 const counters = { pass: 0, fail: 0, warn: 0 };
@@ -82,6 +83,28 @@ function checkMode() {
   check('execution mode', mode, detail);
 }
 
+// Pure classifiers — extracted so doctor's decision logic is unit-testable
+// without spawning the full filesystem diagnostic. The check* wrappers below
+// pair these with the actual reads + check() output.
+const PLACEHOLDER_CLIENT_ID = '1234567890123456789';
+
+// '' / the seed placeholder → 'unset'; not a 17–21 digit snowflake → 'malformed'.
+export function classifyClientId(clientId) {
+  if (!clientId || clientId === PLACEHOLDER_CLIENT_ID) return 'unset';
+  if (!/^\d{17,21}$/.test(String(clientId))) return 'malformed';
+  return 'ok';
+}
+
+// Most-recent-wins IPC state inferred from the daemon log tail: 'up'/'down'/'unknown'.
+export function ipcStateFromLog(logText) {
+  let ipc = 'unknown';
+  for (const line of String(logText || '').split('\n').slice(-80)) {
+    if (/Discord RPC connected|Presence updated|Presence cleared/i.test(line)) ipc = 'up';
+    else if (/retry in \d+s|login failed|Discord disconnected/i.test(line)) ipc = 'down';
+  }
+  return ipc;
+}
+
 function checkConfig() {
   if (!existsSync(CONFIG_PATH)) {
     check('config.json present', 'fail', CONFIG_PATH,
@@ -98,10 +121,11 @@ function checkConfig() {
   }
   check('config.json present', 'pass', CONFIG_PATH);
 
-  if (!cfg.clientId || cfg.clientId === '1234567890123456789') {
+  const clientIdClass = classifyClientId(cfg.clientId);
+  if (clientIdClass === 'unset') {
     check('discord clientId set', 'fail', cfg.clientId || '(empty)',
       `paste your discord application ID into ${CONFIG_PATH}`);
-  } else if (!/^\d{17,21}$/.test(String(cfg.clientId))) {
+  } else if (clientIdClass === 'malformed') {
     check('discord clientId set', 'warn', `${cfg.clientId} doesn't look like a snowflake`,
       'discord application IDs are 17–21 digits');
   } else {
@@ -152,16 +176,6 @@ function checkClaudeProjects() {
   return count;
 }
 
-const HOOK_EVENTS = [
-  'SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse',
-  'Stop', 'SubagentStop', 'Notification', 'SessionEnd',
-];
-
-function isOurHookCommand(cmd) {
-  if (!cmd) return false;
-  return /claude-rpc/i.test(cmd) || /hook\.js/i.test(cmd);
-}
-
 function checkHooks() {
   if (!existsSync(CLAUDE_SETTINGS)) {
     check('hooks registered', 'fail', `${CLAUDE_SETTINGS} missing`,
@@ -181,7 +195,7 @@ function checkHooks() {
   for (const event of HOOK_EVENTS) {
     const bucket = settings.hooks?.[event];
     if (!Array.isArray(bucket) || bucket.length === 0) { missing.push(event); continue; }
-    const ours = bucket.flatMap((e) => e.hooks || []).find((h) => isOurHookCommand(h.command));
+    const ours = bucket.flatMap((e) => e.hooks || []).find((h) => isOurHook(h));
     if (!ours) { missing.push(event); continue; }
     if (IS_PACKAGED && !ours.command.includes(CANONICAL_EXE)) stale.push({ event, cmd: ours.command });
     if (IS_NPM_INSTALL && !/\bclaude-rpc\b\s+hook\b/.test(ours.command)) stale.push({ event, cmd: ours.command });
@@ -259,12 +273,8 @@ function checkDaemonLog() {
   // Ns" / "login failed" / "disconnected" line means it dropped. Whichever
   // happened most recently wins.
   let ipc = 'unknown';
-  try {
-    for (const line of readFileSync(LOG_PATH, 'utf8').split('\n').slice(-80)) {
-      if (/Discord RPC connected|Presence updated|Presence cleared/i.test(line)) ipc = 'up';
-      else if (/retry in \d+s|login failed|Discord disconnected/i.test(line)) ipc = 'down';
-    }
-  } catch { /* log unreadable — ipc stays 'unknown', warn renders */ }
+  try { ipc = ipcStateFromLog(readFileSync(LOG_PATH, 'utf8')); }
+  catch { /* log unreadable — ipc stays 'unknown', warn renders */ }
   if (ipc === 'up') {
     check('discord IPC connection', 'pass',
       `connected · ${sizeKB} KB log · last write ${ageMin.toFixed(1)} min ago`);

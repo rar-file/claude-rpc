@@ -6,8 +6,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-const { ensureCanonicalExe } = await import('../src/install.js');
+const { ensureCanonicalExe, isOurHook } = await import('../src/install.js');
 const { DEFAULT_CONFIG } = await import('../src/default-config.js');
+
+test('isOurHook: matches our entries, never a third-party hook.js', () => {
+  assert.equal(isOurHook({ _claudeRpc: true, command: 'literally anything' }), true, 'tagged entry is ours');
+  assert.equal(isOurHook({ command: 'claude-rpc hook SessionStart' }), true);
+  assert.equal(isOurHook({ command: 'node "/other/tool/hook.js" Stop' }), false, 'a third-party hook.js is NOT ours');
+  assert.equal(isOurHook({ command: 'some-unrelated-tool --flag' }), false);
+  assert.equal(isOurHook(null), false);
+});
 
 // migrateConfig writes to the real CONFIG_PATH, so we re-implement its core
 // logic here to test the non-destructive merge invariants without touching
@@ -382,6 +390,9 @@ test('verifyHookPipe sets shell:true for Windows+npm mode', async () => {
     'verifyHookPipe must pass a shell flag to spawnSync');
   assert.match(src, /IS_NPM_INSTALL\s*&&\s*process\.platform\s*===\s*['"]win32['"]/,
     'shell flag must gate on npm-install + Windows');
+  // The ack must be JSON-parsed and asserted, not substring-matched (Reliability #17).
+  assert.match(src, /ack\??\.continue\s*!==\s*true/,
+    'verifyHookPipe must assert parsed ack.continue === true, not substring-match "continue"');
 });
 
 // ── v0.12.1: MCP server command resolution ──────────────────────────────

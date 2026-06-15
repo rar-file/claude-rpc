@@ -4,23 +4,9 @@
 
 import { dayKey, weekKey } from './scanner.js';
 import { fmtCost } from './pricing.js';
+import { fmtNum, fmtHours } from './fmt.js';
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-
-function fmtHours(ms) {
-  if (!ms || ms < 0) return '0h';
-  const hours = ms / 3_600_000;
-  if (hours < 1) return `${Math.round(hours * 60)}m`;
-  if (hours < 10) return `${hours.toFixed(1)}h`;
-  return `${Math.round(hours)}h`;
-}
-
-function fmtNum(n) {
-  if (!n) return '0';
-  if (n < 1000) return `${n}`;
-  if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`;
-  return `${(n / 1_000_000).toFixed(2)}M`;
-}
 
 function pct(n) {
   const sign = n >= 0 ? '+' : '−';

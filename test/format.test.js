@@ -512,6 +512,9 @@ test('fmtNum scales by suffix', () => {
   assert.equal(fmtNum(1500), '1.5k');
   assert.equal(fmtNum(1_500_000), '1.50M');
   assert.match(fmtNum(2_500_000_000), /^2\.\d+B$/);
+  // Tier-boundary rounding: must promote, not render "1000.0k" / "1000.00M".
+  assert.equal(fmtNum(999_999), '1.00M');
+  assert.equal(fmtNum(999_999_999), '1.00B');
 });
 
 test('fmtDuration uses hours/minutes/seconds', () => {
@@ -526,6 +529,9 @@ test('fmtHours: <1h → minutes, <10h → decimal, ≥10h → integer', () => {
   assert.equal(fmtHours(2.5 * 3600_000), '2.5h');
   assert.equal(fmtHours(12 * 3600_000), '12h');
   assert.equal(fmtHours(0), '0h');
+  // 59.7 min must promote to "1.0h", not round up to "60m".
+  assert.equal(fmtHours(59.7 * 60_000), '1.0h');
+  assert.equal(fmtHours(59 * 60_000), '59m');
 });
 
 test('plural picks singular when n=1', () => {
@@ -629,4 +635,20 @@ test('humanModel: fable ids render as Fable 5 (no fake minor from date stamps)',
   assert.equal(humanModel('claude-opus-4-8'), 'Opus 4.8');
   // Legacy version-first ids still fall through to the bare tier name.
   assert.equal(humanModel('claude-3-5-sonnet-20241022'), 'Sonnet');
+});
+
+test('buildVars: concurrent list applies the username-leak guard', () => {
+  const savedHome = process.env.HOME;
+  process.env.HOME = '/home/secretuser';
+  try {
+    // A concurrent session whose cwd is the home dir must render as the app
+    // name, never the home-dir basename (typically the OS username).
+    const leaky = baseState({ liveSessions: [{ cwd: '/home/secretuser', mtime: now() }] });
+    assert.equal(buildVars(leaky, { appName: 'MyApp' }, {}).concurrentListPretty, 'MyApp');
+    // A normal project still shows its real name.
+    const ok = baseState({ liveSessions: [{ cwd: '/work/cool-proj', mtime: now() }] });
+    assert.equal(buildVars(ok, { appName: 'MyApp' }, {}).concurrentListPretty, 'cool-proj');
+  } finally {
+    process.env.HOME = savedHome;
+  }
 });

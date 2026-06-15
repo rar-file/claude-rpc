@@ -93,3 +93,29 @@ test('wrappedData: returns the year-in-review payload shape', () => {
   assert.ok(Array.isArray(w.modelSplit), 'modelSplit is an array');
   assert.equal(typeof w.cachePct, 'number');
 });
+
+// ── hardening: corrupt aggregate / unknown protocol version ──────────────
+test('renderCard: corrupt peakHour/weekday keys do not leak "99:00" or blank labels', async () => {
+  const { renderCard } = await import('../src/card.js');
+  const bad = { ...AGG, peakHour: { hour: 99 }, byWeekday: { '9': { activeMs: 5e6 } } };
+  const svg = renderCard(bad, {});
+  assert.match(svg, /^<svg /);
+  assert.ok(!svg.includes('99:00'), 'out-of-range peak hour suppressed');
+  assert.ok(!svg.includes('NaN'), 'no NaN leaks into the card');
+});
+
+test('mcp initialize: echoes a recognized protocolVersion, falls back otherwise', async () => {
+  const { runMcpServer } = await import('../src/mcp.js');
+  const { PassThrough } = await import('node:stream');
+  function drive(requested) {
+    return new Promise((resolve) => {
+      const input = new PassThrough();
+      const output = { write: (s) => resolve(JSON.parse(s)) };
+      runMcpServer({ input, output }); // never ended → no process.exit
+      const params = requested === undefined ? {} : { protocolVersion: requested };
+      input.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params }) + '\n');
+    });
+  }
+  assert.equal((await drive('2025-06-18')).result.protocolVersion, '2025-06-18');
+  assert.equal((await drive('made-up')).result.protocolVersion, '2024-11-05');
+});

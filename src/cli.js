@@ -14,6 +14,7 @@ import { DAEMON_SCRIPT, PID_PATH, STATE_PATH, LOG_PATH, AGGREGATE_PATH, CONFIG_P
 import { readState } from './state.js';
 import { buildVars, fillTemplate, humanProject, humanTool, applyIdle, framePasses, fmtNum } from './format.js';
 import { scan, readAggregate, findLiveSessions, dayKey, weekKey } from './scanner.js';
+import { weekGrid } from './week.js';
 import { runHookCli } from './hook.js';
 import { install as runInstall, uninstall as runUninstall, isInstalled, migrateConfig, installHooks, ensureCanonicalExe, installMcp, uninstallMcp, setupOutro } from './install.js';
 import { startTui } from './tui.js';
@@ -62,7 +63,7 @@ function readJson(path, fallback) {
 // (`profile set`, `community on`, `link`, …). mkdirSync first.
 function writeUserConfig(userCfg) {
   mkdirSync(dirname(CONFIG_PATH), { recursive: true });
-  writeUserConfig(userCfg);
+  writeFileSync(CONFIG_PATH, JSON.stringify(userCfg, null, 2) + '\n');
 }
 
 // Validate a flag's value taken with `argv[++i]`. A value that's missing or
@@ -593,22 +594,7 @@ function showWeek() {
 
   // Current ISO week (Mon → Sun). Future days show "—".
   if (aggregate?.byDay) {
-    const now = new Date();
-    now.setHours(0, 0, 0, 0);
-    const monday = new Date(now);
-    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
-    const days = [];
-    for (let i = 0; i < 7; i++) {
-      const d = new Date(monday);
-      d.setDate(d.getDate() + i);
-      const k = dayKey(d.getTime());
-      const dayName = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()];
-      const ms = aggregate.byDay[k]?.activeMs || 0;
-      const isFuture = d > now;
-      const isToday = k === dayKey(now.getTime());
-      days.push({ label: `${dayName} ${k.slice(5)}`, ms, isFuture, isToday });
-    }
-    const maxMs = Math.max(...days.map((d) => d.ms)) || 1;
+    const { days, maxMs } = weekGrid(aggregate.byDay);
     const lines = days.map(({ label, ms, isFuture, isToday }) => {
       if (isFuture) return `${c.dim}${label.padEnd(12)} ${'·'.repeat(22)}     —${c.reset}`;
       const h = ms / 3_600_000;

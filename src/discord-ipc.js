@@ -32,6 +32,9 @@ export const OP_PING = 3;
 export const OP_PONG = 4;
 
 const CONNECT_TIMEOUT_MS = 10_000; // matches @xhayper's connect() timeout
+// Per-candidate connect timeout: a socket file whose peer accepts then stalls
+// must not wedge discovery of the real Discord socket behind it.
+const SOCKET_CONNECT_TIMEOUT_MS = 1500;
 
 // Same resolution order @xhayper used: XDG_RUNTIME_DIR → TMPDIR → TMP → TEMP → /tmp.
 function getTempDir() {
@@ -171,14 +174,18 @@ export class Client extends EventEmitter {
     for (const p of paths) {
       const socket = await new Promise((resolve) => {
         const s = net.createConnection(p);
-        const onErr = () => {
+        let timer = null;
+        const cleanup = () => {
+          clearTimeout(timer);
           s.removeListener('connect', onOk);
-          resolve(null);
-        };
-        const onOk = () => {
           s.removeListener('error', onErr);
-          resolve(s);
         };
+        const onErr = () => { cleanup(); resolve(null); };
+        const onOk = () => { cleanup(); resolve(s); };
+        // A peer that accepts then stalls would otherwise never settle this
+        // candidate and block the rest each discovery cycle (and leak the fd).
+        timer = setTimeout(() => { cleanup(); s.destroy(); resolve(null); }, SOCKET_CONNECT_TIMEOUT_MS);
+        if (typeof timer === 'object' && 'unref' in timer) timer.unref();
         s.once('connect', onOk);
         s.once('error', onErr);
       });

@@ -234,6 +234,12 @@ test('classifyShip: gh pr / issue / release', () => {
   assert.equal(classifyShip('gh release create v1.0'), 'tag');
 });
 
+test('classifyShip: gh global flags before the noun still classify', () => {
+  // The canonical targeted form `gh -R owner/repo pr create` must not be missed.
+  assert.equal(classifyShip('gh -R owner/repo pr create --fill'), 'pr');
+  assert.equal(classifyShip('gh --repo owner/repo issue create'), 'issue');
+});
+
 test('classifyShip: unrelated commands return null', () => {
   assert.equal(classifyShip('ls -la'), null);
   assert.equal(classifyShip('git status'), null);

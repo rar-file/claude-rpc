@@ -114,6 +114,9 @@ export function callTool(name, getAgg = readAggregate) {
  */
 export function runMcpServer({ input = process.stdin, output = process.stdout } = {}) {
   let buf = '';
+  const MAX_BUF = 4 * 1024 * 1024; // hard cap on a single un-terminated line
+  const DEFAULT_PROTOCOL = '2024-11-05';
+  const SUPPORTED_PROTOCOLS = new Set([DEFAULT_PROTOCOL, '2025-03-26', '2025-06-18']);
   const send = (msg) => output.write(JSON.stringify(msg) + '\n');
   const reply = (id, result) => send({ jsonrpc: '2.0', id, result });
   const replyErr = (id, code, message) => send({ jsonrpc: '2.0', id, error: { code, message } });
@@ -121,8 +124,12 @@ export function runMcpServer({ input = process.stdin, output = process.stdout } 
   function handle(msg) {
     const { id, method, params } = msg;
     if (method === 'initialize') {
+      // Echo the client's protocol version when we recognize it; otherwise fall
+      // back to our baseline (our surface — initialize/tools/*/ping — is stable
+      // across these revisions).
+      const requested = params?.protocolVersion;
       return reply(id, {
-        protocolVersion: '2024-11-05',
+        protocolVersion: SUPPORTED_PROTOCOLS.has(requested) ? requested : DEFAULT_PROTOCOL,
         capabilities: { tools: {} },
         serverInfo: { name: 'claude-rpc', version: VERSION },
       });
@@ -159,7 +166,14 @@ export function runMcpServer({ input = process.stdin, output = process.stdout } 
       try { msg = JSON.parse(line); } catch { continue; }
       try { handle(msg); } catch (e) { process.stderr.write(`mcp handler error: ${e.message}\n`); }
     }
+    // A single line larger than the cap (no newline yet) would grow buf without
+    // bound — drop the partial and resync on the next newline.
+    if (buf.length > MAX_BUF) {
+      process.stderr.write(`mcp: dropping oversized line (>${MAX_BUF} bytes)\n`);
+      buf = '';
+    }
   });
   input.on('end', () => process.exit(0));
+  input.on('error', () => process.exit(0));
   process.stderr.write(`claude-rpc MCP server v${VERSION} ready (stdio)\n`);
 }
