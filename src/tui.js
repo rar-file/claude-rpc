@@ -6,7 +6,7 @@
 
 import process from 'node:process';
 import { readFileSync, existsSync } from 'node:fs';
-import { readState } from './state.js';
+import { readActiveState } from './state.js';
 import { readAggregate, findLiveSessions, weekKey } from './scanner.js';
 import { weekGrid } from './week.js';
 import { buildVars, applyIdle, humanProject } from './format.js';
@@ -52,7 +52,7 @@ let exiting = false;
 
 // ── Data ────────────────────────────────────────────────────────────────────
 function loadSnapshot() {
-  let state = readState();
+  let state = readActiveState();
   state.liveSessions = findLiveSessions({ thresholdMs: 90_000 });
   const config = loadConfig();
   state = applyIdle(state, config);

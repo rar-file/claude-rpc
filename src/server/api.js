@@ -3,7 +3,7 @@
 // from the routing layer.
 
 import { basename } from 'node:path';
-import { readState } from '../state.js';
+import { readActiveState } from '../state.js';
 import { buildVars, fillTemplate, applyIdle, framePasses, humanModel } from '../format.js';
 import { readAggregate, findLiveSessions, dayKey } from '../scanner.js';
 import { loadConfig as loadSharedConfig } from '../config.js';
@@ -111,7 +111,7 @@ export function windowedAggregate(agg, range) {
 export function snapshot() {
   const config = loadConfig();
   const live = findLiveSessions({ thresholdMs: 90_000 });
-  let state = readState();
+  let state = readActiveState();
   state.liveSessions = live;
   state = applyIdle(state, config);
   const aggregate = readAggregate() || {};

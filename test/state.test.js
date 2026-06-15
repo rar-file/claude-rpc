@@ -3,7 +3,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -61,7 +61,7 @@ test('shortFile returns basename', () => {
 // (e.g. dropping the .tmp) would silently lose state under crash, and
 // no other test would catch it.
 
-const { readState, writeState, updateState, resetState } = await import('../src/state.js');
+const { readState, writeState, updateState, resetState, readActiveState, statePathFor } = await import('../src/state.js');
 
 test('writeState + readState round-trip preserves shape', () => {
   const before = readState();
@@ -93,5 +93,23 @@ test('resetState seeds DEFAULT_STATE with overrides', () => {
     assert.equal(fresh.messages, 0, 'counters zero on reset');
   } finally {
     writeState(before);
+  }
+});
+
+test('readActiveState resolves the active per-session file, not the empty global', () => {
+  // Guards a v0.18.0 regression: status / serve / tui read bare readState()
+  // (the global state.json), which per-session hooks — always carrying a
+  // session_id — never write, so the inspection surfaces showed an empty
+  // session mid-work. The daemon resolved per-session; the readers must too.
+  const sid = 'test-active-' + process.pid;
+  const path = statePathFor(sid);
+  try {
+    writeState({ status: 'working', cwd: '/demo/acme-api', model: 'claude-opus-4-8', messages: 7, lastActivity: Date.now() }, sid);
+    const active = readActiveState();
+    assert.equal(active.status, 'working', 'picks the live per-session state, not the global');
+    assert.equal(active.cwd, '/demo/acme-api');
+    assert.equal(active.messages, 7);
+  } finally {
+    try { unlinkSync(path); } catch { /* already gone */ }
   }
 });

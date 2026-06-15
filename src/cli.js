@@ -11,7 +11,7 @@ if (process.platform === 'win32' && process.stdout.isTTY) {
   try { spawnSync('chcp.com', ['65001'], { stdio: 'ignore', windowsHide: true }); } catch { /* chcp absent (Wine, custom shell) — accept whatever code page is set */ }
 }
 import { DAEMON_SCRIPT, PID_PATH, STATE_PATH, LOG_PATH, AGGREGATE_PATH, CONFIG_PATH, IS_PACKAGED, IS_NPX, EXE_PATH, CANONICAL_EXE } from './paths.js';
-import { readState } from './state.js';
+import { readActiveState } from './state.js';
 import { buildVars, fillTemplate, humanProject, humanTool, applyIdle, framePasses, fmtNum } from './format.js';
 import { scan, readAggregate, findLiveSessions, dayKey, weekKey } from './scanner.js';
 import { weekGrid } from './week.js';
@@ -347,7 +347,7 @@ function todayBoxLines(vars, aggregate) {
 }
 
 function showStatus() {
-  const state = readState();
+  const state = readActiveState();
   const aggregate = readAggregate();
   const config = loadConfig();
   const live = findLiveSessions({ thresholdMs: 90_000 });
@@ -529,7 +529,7 @@ function showStatus() {
 }
 
 function showToday() {
-  const state = readState();
+  const state = readActiveState();
   const aggregate = readAggregate();
   const config = loadConfig();
   state.liveSessions = findLiveSessions({ thresholdMs: 90_000 });
@@ -562,7 +562,7 @@ function showToday() {
 }
 
 function showWeek() {
-  const state = readState();
+  const state = readActiveState();
   const aggregate = readAggregate();
   const config = loadConfig();
   state.liveSessions = findLiveSessions({ thresholdMs: 90_000 });
@@ -667,7 +667,7 @@ function statusColor(status) {
 }
 
 function showPreview() {
-  let state = readState();
+  let state = readActiveState();
   const aggregate = readAggregate();
   const config = loadConfig();
   const live = findLiveSessions({ thresholdMs: 90_000 });
@@ -730,7 +730,7 @@ function showPreview() {
 // dashboard having to inline-eval ESM source. Output shape matches the
 // previous helper exactly: { vars: [sorted keys], live: <full vars object> }.
 function dumpVars() {
-  let state = readState();
+  let state = readActiveState();
   const config = loadConfig();
   state.liveSessions = findLiveSessions({ thresholdMs: 90_000 });
   state = applyIdle(state, config);
@@ -957,7 +957,7 @@ async function doGithubStat(argv) {
 // Build the live template-variable table the way the daemon does — current
 // state + idle/stale resolution + aggregate. Shared by statusline/session-card.
 function liveVars() {
-  const state = readState();
+  const state = readActiveState();
   state.liveSessions = findLiveSessions({ thresholdMs: 90_000 });
   const config = loadConfig();
   const resolved = applyIdle(state, config);
@@ -1823,7 +1823,7 @@ function overview() {
   }
 
   // Status line: daemon up/down + project + model + status verb.
-  const state = readState();
+  const state = readActiveState();
   const aggregate = readAggregate();
   state.liveSessions = findLiveSessions({ thresholdMs: 90_000 });
   state.usage = readUsageCache();

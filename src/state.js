@@ -13,6 +13,7 @@ import {
 } from 'node:fs';
 import { basename, join } from 'node:path';
 import { STATE_PATH, STATE_DIR } from './paths.js';
+import { pickActiveSession } from './presence.js';
 
 const DEFAULT_STATE = {
   sessionStart: null,
@@ -168,6 +169,17 @@ export function readState(sessionId) {
   } catch {
     return { ...DEFAULT_STATE };
   }
+}
+
+// The session a one-shot reader (status / serve / tui) should display. The
+// daemon resolves per-session state with cross-tick stickiness; one-shot readers
+// have no cursor, so they pass displayedId=null and get the most-recently-active
+// session — exactly what the daemon settles on. Falls back to the legacy global
+// state.json when no per-session files exist (e.g. a hook payload without an id).
+export function readActiveState({ now = Date.now(), idleMs = 60_000 } = {}) {
+  const sessions = listSessionStates();
+  if (!sessions.length) return readState();
+  return pickActiveSession(sessions, null, now, idleMs).state || readState();
 }
 
 export function writeState(next, sessionId) {
