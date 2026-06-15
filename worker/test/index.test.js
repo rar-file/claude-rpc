@@ -72,6 +72,12 @@ test('validateReport: rejects empty deltas (no real signal)', () => {
   assert.match(validateReport({ ...validBody, sessionsDelta: 0, tokensDelta: 0 }), /no delta/);
 });
 
+test('validateReport: rejects fractional / non-integer deltas', () => {
+  assert.match(validateReport({ ...validBody, tokensDelta: 1.5 }), /tokensDelta/);
+  assert.match(validateReport({ ...validBody, sessionsDelta: 2.7 }), /sessionsDelta/);
+  assert.match(validateReport({ ...validBody, tokensDelta: 'NaN' }), /tokensDelta/);
+});
+
 test('validateReport: rejects unknown osFamily', () => {
   assert.match(validateReport({ ...validBody, osFamily: 'freebsd' }), /osFamily/);
 });
@@ -431,6 +437,25 @@ test('handleLeaderboard: duplicate handles resolve to the authoritative handle: 
   assert.equal(dupes[0].tokens, 999, 'the authoritative owner row survives');
   assert.ok(j.leaderboard.some((r) => r.handle === 'solo'), 'uncontested rows unaffected');
   assert.ok(!('updatedAt' in j.leaderboard[0]), 'index-internal fields not leaked');
+});
+
+test('handleLeaderboard: contested handle with an unresolvable owner pointer keeps one row (verified preferred)', async () => {
+  // Regression: when handle:<h> resolves to an id absent from the index (a
+  // lost/racy pointer write or a KV read miss), the old repair dropped EVERY
+  // row for that handle. It must instead keep exactly one — the strongest
+  // claim, verified first — so a contested handle never silently vanishes.
+  const env = makeEnv();
+  await env.TOTALS.put('board:index', JSON.stringify({
+    '11111111-1111-1111-1111-111111111111': { handle: 'dupe', verified: false, tokens: 999, sessions: 9, activeMs: 0, streak: 0, displayName: null, githubUser: null },
+    '22222222-2222-2222-2222-222222222222': { handle: 'dupe', verified: true,  tokens: 100, sessions: 1, activeMs: 0, streak: 0, displayName: null, githubUser: null },
+  }));
+  // Pointer references an id that isn't in the index at all.
+  await env.TOTALS.put('handle:dupe', 'ffffffff-ffff-ffff-ffff-ffffffffffff');
+  const res = await handleLeaderboard(new URL('http://localhost/leaderboard'), env);
+  const j = await res.json();
+  const dupes = j.leaderboard.filter((r) => r.handle === 'dupe');
+  assert.equal(dupes.length, 1, 'contested handle still surfaces exactly one row, not zero');
+  assert.equal(dupes[0].tokens, 100, 'verified claim is kept over the higher-token unverified one');
 });
 
 test('pruneBoardIndex: drops stale unverified entries, keeps verified and fresh ones', () => {

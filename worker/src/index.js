@@ -112,8 +112,11 @@ export function validateReport(body) {
   if (!isUuidish(body.instanceId)) return 'instanceId must be a UUID';
   const sd = Number(body.sessionsDelta);
   const td = Number(body.tokensDelta);
-  if (!Number.isFinite(sd) || sd < 0 || sd > MAX_DELTA_SESSIONS) return 'sessionsDelta out of range';
-  if (!Number.isFinite(td) || td < 0 || td > MAX_DELTA_TOKENS) return 'tokensDelta out of range';
+  // Deltas are integer counts from the scanner. Require Number.isInteger (not
+  // just isFinite) so a fractional/scientific value can't slip in and drift the
+  // community totals away from whole sessions/tokens via addInt.
+  if (!Number.isInteger(sd) || sd < 0 || sd > MAX_DELTA_SESSIONS) return 'sessionsDelta out of range';
+  if (!Number.isInteger(td) || td < 0 || td > MAX_DELTA_TOKENS) return 'tokensDelta out of range';
   if (sd === 0 && td === 0) return 'no delta';
   if (typeof body.version !== 'string' || body.version.length > 32) return 'version missing or too long';
   if (typeof body.osFamily !== 'string' || !/^(linux|darwin|win32)$/.test(body.osFamily)) return 'osFamily invalid';
@@ -684,9 +687,17 @@ export async function handleLeaderboard(url, env) {
     }
     for (const [handle, claims] of byHandle) {
       if (claims.length === 1) { rows.push(claims[0][1]); continue; }
+      // handle:<h> is authoritative — but a racy write can leave it pointing at
+      // an id that isn't in the index (or the read can miss), and the old
+      // `claims.find(id===owner)` then dropped EVERY row for the handle (and
+      // could vanish a verified row). Prefer the authoritative owner; otherwise
+      // keep the strongest claim (verified first, then tokens) so a contested
+      // handle still surfaces exactly one row instead of disappearing.
       const owner = await env.TOTALS.get(HANDLE_KEY(handle));
-      const kept = claims.find(([id]) => id === owner);
-      if (kept) rows.push(kept[1]);
+      const authoritative = claims.find(([id]) => id === owner);
+      const best = authoritative || claims.slice().sort((a, b) =>
+        (Number(b[1].verified) - Number(a[1].verified)) || ((b[1].tokens || 0) - (a[1].tokens || 0)))[0];
+      rows.push(best[1]);
     }
   } catch { /* empty → [] */ }
 
@@ -1045,7 +1056,11 @@ async function memberSquadIds(env, instanceId) {
 }
 
 async function writeMemberSquads(env, instanceId, ids) {
-  if (ids.length) await env.TOTALS.put(SQUAD_MEMBER_KEY(instanceId), JSON.stringify(ids));
+  // Dedup at the single write point: callers append (`[...mine, squad.id]`) and
+  // the membership guards check squad.members, not this index, so a re-join
+  // after index drift could otherwise accumulate duplicate squad ids here.
+  const uniq = [...new Set(ids)];
+  if (uniq.length) await env.TOTALS.put(SQUAD_MEMBER_KEY(instanceId), JSON.stringify(uniq));
   else await env.TOTALS.delete(SQUAD_MEMBER_KEY(instanceId));
 }
 
@@ -1193,9 +1208,11 @@ export async function handleSquadsMine(request, env) {
   const who = await resolveMemberId(request, env, body);
   if (who.error) return who.error;
   const ids = await memberSquadIds(env, who.instanceId);
+  // Fetch the member's squads concurrently — one wall-clock round-trip instead
+  // of one serial KV get per squad (capped at SQUAD_MAX_PER_USER).
+  const fetched = await Promise.all(ids.map((id) => getSquad(env, id)));
   const squads = [];
-  for (const id of ids) {
-    const s = await getSquad(env, id);
+  for (const s of fetched) {
     if (!s || !s.members.includes(who.instanceId)) continue; // index drift — heal below
     squads.push({ id: s.id, name: s.name, code: s.code, members: s.members.length, owner: s.ownerId === who.instanceId });
   }
@@ -1212,11 +1229,11 @@ export async function handleSquadGet(url, env) {
   const squad = await getSquad(env, url.searchParams.get('id'));
   if (!squad) return jsonError(404, 'no such squad');
 
+  // Fetch member profiles concurrently — one wall-clock round-trip instead of
+  // one serial KV get per member (squads cap at SQUAD_MAX_MEMBERS).
   const profiles = new Map();
-  for (const m of squad.members) {
-    const p = await getProfile(env, m);
-    if (p) profiles.set(m, p);
-  }
+  const fetched = await Promise.all(squad.members.map((m) => getProfile(env, m)));
+  squad.members.forEach((m, i) => { if (fetched[i]) profiles.set(m, fetched[i]); });
   // Lazy prune: members whose profile expired (unverified 90d TTL) drop out.
   if (profiles.size !== squad.members.length) {
     squad.members = squad.members.filter((m) => profiles.has(m));
