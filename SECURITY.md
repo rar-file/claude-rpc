@@ -16,10 +16,10 @@ fetch-and-execute anywhere in `src/`.
 
 | Behavior | Where | Scope | Reversible? |
 | --- | --- | --- | --- |
-| Startup persistence | `src/install.js` → `addStartupEntry` | `HKCU` Run key, current user, no admin | Yes — `claude-rpc uninstall` / `removeStartupEntry` |
+| Startup persistence | `src/install.js` → `addStartupEntry` (Windows Run key); `src/hook.js` → `ensureDaemonRunning` (SessionStart self-heal, all platforms) | `HKCU` Run key (no admin) + a detached daemon (re)launched when you start a Claude Code session | Yes — `claude-rpc uninstall` / `removeStartupEntry`; disable self-heal with `autostart:false` |
 | Hook injection | `src/install.js` → `installHooks` | Only into Claude Code's own `settings.json`, only our own commands | Yes — `uninstallHooks` removes exactly what it added |
 | Outbound network | `src/community.js`, `src/gist.js`, `src/usage.js`, `src/notify.js`, `default-config.js` | Anonymous counters + (opt-in) profile/gist/webhook + own read-only OAuth-usage poll + GIF assets | Telemetry: `community off`. Profile: `profile off`. Gist/webhook: opt-in only. Usage: `usage.enabled:false`. |
-| Local subprocess | `reg.exe`, `wscript`, `git`, `gh`, `npm`, `claude`, `security`, notifiers | Static or escaped args, no shell interpolation of untrusted input | n/a |
+| Local subprocess | `reg.exe`, `wscript`, the daemon itself (`node`/packaged exe — via the Run key and the SessionStart self-heal), `git`, `gh`, `npm`, `claude`, `security`, notifiers | Static or escaped args, no shell interpolation of untrusted input | n/a |
 
 No credential access beyond the read-only Claude Code OAuth-token read for usage
 polling (§3d), no filesystem scanning outside `~/.claude-rpc` and Claude Code
@@ -47,8 +47,16 @@ HKCU\Software\Microsoft\Windows\CurrentVersion\Run
   not at wherever you happened to run the installer from — see
   `ensureCanonicalExe`.
 
-Non-Windows platforms get **no** persistence registration (`install()` warns
-and skips it).
+Non-Windows platforms get **no** Run-key/login registration (`install()` warns
+and skips it). Instead — on every platform, Windows included — the
+`SessionStart` hook **self-heals** the daemon: if none is running when you start
+a Claude Code session, the hook spawns one (detached, windowless), so presence
+is restored after a reboot, crash, or OS sleep exactly when you next use Claude.
+It is the same long-lived daemon launched the same way (`src/ensure-daemon.js` →
+`spawnDaemonDetached`), a no-op when a daemon is already running, and
+cooldown-guarded against spawn storms; the daemon's atomic single-instance claim
+reaps any duplicate. Disable it with `autostart:false` in config (then manage
+the daemon yourself via `claude-rpc start` / `stop`).
 
 ## 2. Hook injection into Claude Code
 
@@ -71,6 +79,11 @@ events: `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`,
   counters, and `git push`/`git commit` detection (for the "just shipped"
   card). It writes only to local state/log files. It does not read file
   *contents*, prompts, or responses beyond the usage counters Claude provides.
+- **`SessionStart` additionally self-heals the daemon:** if none is running it
+  spawns the (detached) daemon so presence is assured cross-platform — see §1
+  and `ensureDaemonRunning`. Best-effort, gated by `autostart` (default on). It
+  is the **only** hook event that launches a process; every other event just
+  writes state and acks.
 - **Scope:** the installer only ever touches entries whose command matches
   `isOurHookCommand` (contains `claude-rpc` or `hook.js`). It will not modify,
   reorder, or delete anyone else's hooks.

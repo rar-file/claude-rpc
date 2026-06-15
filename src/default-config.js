@@ -14,6 +14,12 @@ export const DEFAULT_CONFIG = {
   appName: "Claude Code",
   updateIntervalMs: 4000,
   rotationIntervalMs: 12000,
+  // Self-heal: the SessionStart hook (re)starts the daemon whenever it isn't
+  // already running, so presence is assured whenever you use Claude Code —
+  // surviving reboots, crashes, OS sleep, and platforms with no login-autostart
+  // entry (macOS/Linux). Set false to disable that and manage the daemon
+  // yourself with `claude-rpc start` / `stop`.
+  autostart: true,
   // Minimum gap (ms) between Discord SET_ACTIVITY writes. Discord hard-limits
   // activity updates (~5 per 20s); blowing past it makes the client EMPTY the
   // presence and stop updating until the writes stop. Claude Code fires hooks

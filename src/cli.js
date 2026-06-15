@@ -10,7 +10,7 @@ import process from 'node:process';
 if (process.platform === 'win32' && process.stdout.isTTY) {
   try { spawnSync('chcp.com', ['65001'], { stdio: 'ignore', windowsHide: true }); } catch { /* chcp absent (Wine, custom shell) — accept whatever code page is set */ }
 }
-import { DAEMON_SCRIPT, PID_PATH, STATE_PATH, LOG_PATH, AGGREGATE_PATH, CONFIG_PATH, IS_PACKAGED, IS_NPX, EXE_PATH, CANONICAL_EXE } from './paths.js';
+import { DAEMON_SCRIPT, PID_PATH, STATE_PATH, LOG_PATH, AGGREGATE_PATH, CONFIG_PATH, IS_PACKAGED, IS_NPX, EXE_PATH } from './paths.js';
 import { readActiveState } from './state.js';
 import { buildVars, fillTemplate, humanProject, humanTool, applyIdle, framePasses, fmtNum } from './format.js';
 import { scan, readAggregate, findLiveSessions, dayKey, weekKey } from './scanner.js';
@@ -26,6 +26,7 @@ import { addPrivateCwd, removePrivateCwd, listPrivateCwds, resolveVisibility } f
 import { parseDuration, setPause, clearPause, pauseUntil } from './pause.js';
 import { readUsageCache, fetchUsage, writeUsageCache, fmtResetTime, fmtResetDay } from './usage.js';
 import { loadConfig, hasUserConfig } from './config.js';
+import { spawnDaemonDetached } from './ensure-daemon.js';
 import * as lb from './leaderboard.js';
 import { VERSION } from './version.js';
 import { fail, tailLines, heat, sparkline, fmtDelta, topPercentile, EX_USER_ERROR, EX_BAD_STATE, EX_SYS_ERROR } from './ui.js';
@@ -96,16 +97,37 @@ function startDaemon({ quiet = false } = {}) {
     if (!quiet) console.log(`  ${c.yellow}!${c.reset}  ${'daemon running'.padEnd(16)}${c.dim}already up (pid ${pid}) · bounce it with ${c.reset}${c.cyan}claude-rpc restart${c.reset}`);
     return false;
   }
-  // In packaged mode the "daemon script" is the exe itself with a subcommand;
-  // in dev mode it's the src/daemon.js path passed to node. Prefer the
-  // canonical exe when it exists so we don't keep the user's Downloads copy
-  // locked open — the canonical install is the long-lived path.
-  const exe = (IS_PACKAGED && existsSync(CANONICAL_EXE)) ? CANONICAL_EXE : process.execPath;
-  const args = IS_PACKAGED ? ['daemon'] : [DAEMON_SCRIPT];
-  const child = spawn(exe, args, { detached: true, stdio: 'ignore', windowsHide: true });
-  child.unref();
+  // Shared spawn recipe (canonical-exe preference, detached, windowless, error
+  // listener) lives in ensure-daemon.spawnDaemonDetached so the CLI and the
+  // self-healing hook launch the daemon identically.
+  const child = spawnDaemonDetached();
+  if (!child || !child.pid) {
+    if (!quiet) console.log(`  ${c.red}✗${c.reset}  ${'daemon start'.padEnd(16)}${c.dim}spawn failed — check ${shortPath(LOG_PATH)} or run ${c.reset}${c.cyan}claude-rpc doctor${c.reset}`);
+    return false;
+  }
   if (!quiet) console.log(`  ${c.green}✓${c.reset}  ${'daemon launched'.padEnd(16)}${c.dim}pid ${c.reset}${c.cyan}${child.pid}${c.reset}${c.dim} · log ${shortPath(LOG_PATH)}${c.reset}`);
   return true;
+}
+
+// Confirm a freshly-spawned daemon actually came up, instead of trusting the
+// detached spawn (it can die a millisecond later — single-instance loss, a bad
+// path, a startup throw). Polls the pid file for liveness, since the daemon
+// claims it early in startup. Interactive callers (`start`) await this so the
+// user gets honest "it's up" / "it didn't come up" feedback rather than a
+// success message for a daemon that's already gone.
+async function confirmDaemonUp({ timeoutMs = 3000, intervalMs = 100 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    await new Promise((r) => setTimeout(r, intervalMs));
+    if (daemonPid()) {
+      console.log(`  ${c.green}✓${c.reset}  ${'daemon confirmed'.padEnd(16)}${c.dim}up — connecting to Discord${c.reset}`);
+      return true;
+    }
+    if (Date.now() >= deadline) {
+      console.log(`  ${c.yellow}!${c.reset}  ${'daemon check'.padEnd(16)}${c.dim}not up yet — see ${shortPath(LOG_PATH)} or run ${c.reset}${c.cyan}claude-rpc doctor${c.reset}`);
+      return false;
+    }
+  }
 }
 
 function stopDaemon({ quiet = false } = {}) {
@@ -1998,6 +2020,7 @@ process.on('unhandledRejection', (e) => {
             const child = spawn(process.execPath, [script || DAEMON_SCRIPT], {
               detached: true, stdio: 'ignore', windowsHide: true,
             });
+            child.on('error', () => {}); // never let a spawn ENOENT bubble as an unhandled crash
             child.unref();
             console.log(`  ${c.green}✓${c.reset}  ${'daemon launched'.padEnd(16)}${c.dim}pid ${c.reset}${c.cyan}${child.pid}${c.reset}${c.dim} · log ${shortPath(LOG_PATH)}${c.reset}`);
           } else {
@@ -2017,7 +2040,7 @@ process.on('unhandledRejection', (e) => {
     case 'upgrade-config':
       if (!migrateConfig()) console.log(`  ${c.green}✓${c.reset}  config already current — nothing to migrate`);
       break;
-    case 'start':     startDaemon(); break;
+    case 'start':     if (startDaemon()) await confirmDaemonUp(); break;
     case 'stop':      stopDaemon(); break;
     case 'restart':   restartDaemon(); break;
     case 'status': {

@@ -4,6 +4,8 @@ import { dirname } from 'node:path';
 import { updateState, resetState, pushUnique, shortFile } from './state.js';
 import { detectLastCommitSubject, detectGitBranch } from './git.js';
 import { EVENTS_LOG_PATH } from './paths.js';
+import { loadConfig } from './config.js';
+import { ensureDaemonRunning } from './ensure-daemon.js';
 
 // Precedence when a command ships more than one way (`git commit && git push`
 // → push). Highest first.
@@ -153,6 +155,20 @@ export function processHookEvent(event, input = {}) {
         model: input.model?.id || input.model || 'claude',
         status: 'idle',
       });
+      // Self-heal the daemon. A reboot, crash, OS sleep, or closed terminal can
+      // leave nothing running, so the card silently never appears — and on
+      // macOS/Linux there's no login-autostart entry at all (only Windows wires
+      // a Run key). Every Claude Code session begins with this hook, so make it
+      // (best-effort) guarantee the daemon is up: presence is then assured
+      // exactly when you're using Claude, on every platform. ensureDaemonRunning
+      // is a no-op when a daemon is already alive and is cooldown-guarded against
+      // spawn storms; the daemon's atomic claim reaps any duplicate. Opt out
+      // with `autostart:false` in config.
+      try {
+        let autostart = true;
+        try { autostart = loadConfig().autostart !== false; } catch { /* unreadable config — default on */ }
+        ensureDaemonRunning({ autostart });
+      } catch { /* presence is best-effort — never break the user's turn */ }
       break;
     }
     case 'UserPromptSubmit': {

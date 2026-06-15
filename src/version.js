@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ROOT } from './paths.js';
 
-const BAKED = '0.19.2';
+const BAKED = '0.20.1';
 
 function readPkgVersion() {
   try {

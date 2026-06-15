@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { writeFileSync, readFileSync, existsSync, unlinkSync, watch, appendFileSync, mkdirSync, statSync, renameSync } from 'node:fs';
+import { existsSync, unlinkSync, watch, appendFileSync, mkdirSync, statSync, renameSync } from 'node:fs';
 import { basename, dirname } from 'node:path';
 import { Client } from './discord-ipc.js';
 import { readState, sweepStaleStateTmp, listSessionStates, sweepStaleSessionStates } from './state.js';
@@ -16,6 +16,7 @@ import { humanProject } from './format.js';
 import { CONFIG_PATH, STATE_PATH, PID_PATH, LOG_PATH, STATE_DIR, AGGREGATE_PATH, PAUSE_PATH } from './paths.js';
 import { readUsageCache, pollUsage } from './usage.js';
 import { pollDecision, pollIntervalMs } from './watch-poll.js';
+import { claimSingleInstance } from './ensure-daemon.js';
 
 if (!existsSync(STATE_DIR)) mkdirSync(STATE_DIR, { recursive: true });
 
@@ -50,6 +51,19 @@ function log(...args) {
   }
   process.stdout.write(line);
 }
+
+// Last-resort resilience. A presence daemon is best-effort and long-lived — it
+// must never die from an unexpected error in a non-critical path (a scan edge
+// case, a transient IPC oddity, a stray rejection). Log and keep running:
+// staying up is the entire point, and the periodic ticks/watchdog re-converge
+// from almost anything. Installed before any other startup work so even a boot
+// error is captured rather than killing us silently.
+process.on('uncaughtException', (e) => {
+  try { log('uncaughtException (continuing):', e?.stack || e?.message || String(e)); } catch { /* logging itself failed — nothing more we can do */ }
+});
+process.on('unhandledRejection', (e) => {
+  try { log('unhandledRejection (continuing):', e?.stack || e?.message || String(e)); } catch { /* see above */ }
+});
 
 // Wrap loadConfig so a parse/IO failure logs once and the daemon keeps
 // running on baked-in defaults. The Electron settings GUI saves the file
@@ -119,25 +133,19 @@ let displayedSessionId = null;
 // either case would make startTimestamp jump on every rotation.
 let effectiveSessionStart = null;
 
-// Single-instance guard. The CLI checks before spawning, but off-path launches
-// (a login-startup entry racing a manual start; a packaged exe beside a dev
-// run) could start a second daemon that fights over setActivity every ~4s and
-// double-counts the additive community total. If a live daemon already owns the
-// PID file, step aside; a stale PID (owner gone) means take over.
-try {
-  if (existsSync(PID_PATH)) {
-    const existing = parseInt(readFileSync(PID_PATH, 'utf8'), 10);
-    if (existing && existing !== process.pid) {
-      let alive = false;
-      try { process.kill(existing, 0); alive = true; } catch { /* stale PID — take over */ }
-      if (alive) {
-        log(`Another daemon (pid ${existing}) is already running — exiting.`);
-        process.exit(0);
-      }
-    }
-  }
-} catch { /* unreadable PID file — fall through and claim it */ }
-writeFileSync(PID_PATH, String(process.pid));
+// Single-instance guard — an ATOMIC claim (see ensure-daemon.claimSingleInstance).
+// Many launchers can fire at once now that the SessionStart hook self-heals the
+// daemon: a manual `start`, a Windows Run entry, and several concurrent sessions'
+// hooks could all spawn a daemon in the same instant. A second daemon would
+// fight over setActivity every ~4s and double-count the additive community
+// total. The old read-then-write guard had a window where two starters both saw
+// "no live owner" and both wrote their pid; the exclusive-create claim closes it
+// so exactly one survives. A live owner → we exit; a stale pid → we reclaim it.
+const ownerPid = claimSingleInstance();
+if (ownerPid) {
+  log(`Another daemon (pid ${ownerPid}) is already running — exiting.`);
+  process.exit(0);
+}
 
 // Reclaim any per-pid state tmp files orphaned by a hard-killed writer, plus
 // per-session state files from sessions that ended long ago.

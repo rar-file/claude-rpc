@@ -2,6 +2,18 @@
 
 All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.20.1] - 2026-06-15
+
+**Added**
+
+- **Self-healing startup — the daemon comes up whenever you use Claude Code, on every platform.** Until now the daemon started only from `setup`/`start` or, on Windows, a login Run-key entry — macOS/Linux had no autostart at all, and a reboot, crash, or OS sleep on *any* platform left the card silently dark until you manually restarted it (the "startup is iffy" reports). The `SessionStart` hook now self-heals: if no daemon is running when a session begins, it spawns one (detached, windowless, best-effort). Presence is assured exactly when it matters — when you're using Claude — with no 24/7 background daemon required. It's a no-op when a daemon is already up and is cooldown-guarded against spawn storms. Opt out with the new `autostart` config key (default `true`) and manage the daemon yourself.
+
+**Fixed**
+
+- **Two daemons can no longer start at once.** The single-instance guard did a non-atomic read-then-write of the pid file, so two launchers firing in the same instant (a manual `start` racing the new self-heal, or several concurrent sessions' hooks) could both see "no live owner" and both run — two daemons fighting over the card every ~4s and double-counting community totals. It's now an atomic exclusive-create claim (`ensure-daemon.claimSingleInstance`): exactly one daemon wins, the rest detect it and exit, and a stale pid from a crashed daemon is reclaimed.
+- **The daemon no longer dies silently on an unexpected error.** It had no `uncaughtException` / `unhandledRejection` handlers, so a stray throw in any path could end hours of uptime with nothing in the log. Both are now caught, logged, and survived — a presence daemon is best-effort and should stay up.
+- **`claude-rpc start` tells the truth.** It spawned the daemon detached and printed "launched" even if the process died a millisecond later (bad path, single-instance loss, startup throw), and a spawn `ENOENT` could bubble as an unhandled crash. The spawn recipe is now shared with the hook, spawn errors are caught, and `start` confirms the daemon actually came up (polling the pid file) before reporting success.
+
 ## [0.19.2] - 2026-06-15
 
 **Fixed**
