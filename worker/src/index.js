@@ -1104,6 +1104,15 @@ export async function handleSquadJoin(request, env) {
   const mine = await memberSquadIds(env, who.instanceId);
   if (mine.length >= SQUAD_MAX_PER_USER) return jsonError(409, `you're already in ${SQUAD_MAX_PER_USER} squads — leave one first`);
 
+  // Squad membership is a best-effort read-modify-write of the whole squad blob
+  // (read above -> mutate squad.members -> write back), with no locking or
+  // compare-and-set — same race class as addInt. A concurrent join/leave on the
+  // SAME squad can interleave and clobber one another, silently losing a
+  // membership change. Unlike board:index (repaired at read time in
+  // handleLeaderboard) there is no read-time repair here, so the loss persists
+  // until the next write. Acceptable because squads are small and joins/leaves
+  // are human-paced and rare; true atomicity would mean moving the squad to a
+  // Durable Object. Same caveat applies to handleSquadLeave below.
   squad.members.push(who.instanceId);
   await env.TOTALS.put(SQUAD_KEY(squad.id), JSON.stringify(squad));
   await writeMemberSquads(env, who.instanceId, [...mine, squad.id]);
@@ -1129,6 +1138,8 @@ export async function handleSquadLeave(request, env) {
   const squad = await getSquad(env, body.squadId);
   if (!squad || !squad.members.includes(who.instanceId)) return jsonError(404, 'not a member of that squad');
 
+  // Same best-effort read-modify-write race as handleSquadJoin: no compare-and-set,
+  // so a concurrent join on this squad can clobber this removal (or vice-versa).
   squad.members = squad.members.filter((m) => m !== who.instanceId);
   const mine = (await memberSquadIds(env, who.instanceId)).filter((s) => s !== squad.id);
   await writeMemberSquads(env, who.instanceId, mine);
