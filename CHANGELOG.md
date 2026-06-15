@@ -2,6 +2,14 @@
 
 All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.20.4] - 2026-06-15
+
+**Changed**
+
+- **The interactive `claude-rpc status` dashboard is a full redesign.** It went from a thin column pinned to the top-left into a full-screen, two-column framed dashboard on the alternate screen buffer (your terminal is restored on quit), centered and size-capped so it reads as a tidy panel on a large window instead of a strip glued to the edge. The header has room to breathe and the tab bar is centered. NO_COLOR still degrades to box-only, and the static `status --dump` output is unchanged.
+- **Week tab now shows a rolling last 7 days** — a daily bar with hours for each of the past seven days, plus a 7-day totals panel including spend — instead of a Mon–Sun calendar grid that was mostly empty `—` early in the week.
+- **Cost tab adds per-project spend** — a "by project" table alongside "by model", plus a today / week / month-to-date / forecast strip.
+
 ## [0.20.3] - 2026-06-15
 
 **Fixed**
