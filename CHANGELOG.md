@@ -2,6 +2,12 @@
 
 All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.19.1] - 2026-06-15
+
+**Fixed**
+
+- **Hooks no longer fail with `claude-rpc: command not found` under nvm.** Claude Code runs hooks through `/bin/sh`, whose minimal PATH — under nvm — contains neither `claude-rpc` nor `node` (there's no system node). The wired commands (`claude-rpc hook <event>` for npm installs, bare `node "<hook.js>"` for dev) both depend on PATH, so every Pre/PostToolUse hook errored. `setup` now writes the **absolute** node (`process.execPath`) + absolute `hook.js` for npm and dev installs alike (the packaged exe was already self-contained) — PATH-independent, and it also moots the old Windows PATHEXT/`.cmd` shell workaround in `verifyHookPipe`. Survives `npm update` and nvm version switches; re-run `setup` only if the node version used at setup is later removed.
+
 ## [0.19.0] - 2026-06-15
 
 Audit-remainder cleanup pass — the reliability/security tail the v0.17 sweep left behind, plus DRY/test-hardening to slim the surface. One live crash fixed.

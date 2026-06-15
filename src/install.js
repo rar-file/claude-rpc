@@ -92,11 +92,16 @@ export function installHooks(exePath) {
   //   npm     → `claude-rpc hook <event>`       (bin shim resolves through PATH;
   //              survives `npm update` and nvm version switches)
   //   dev     → `node "<src/hook.js>" <event>`  (cloned-source iteration)
+  // Hook commands must resolve under Claude Code's hook shell — `/bin/sh` with a
+  // minimal PATH that, under nvm, has neither `claude-rpc` nor `node` on it (no
+  // system node). So use the ABSOLUTE node (process.execPath) + absolute hook.js
+  // for both npm and dev installs; only the packaged exe is self-contained. This
+  // survives `npm update` (HOOK_SCRIPT is stable) and an nvm version switch (nvm
+  // keeps prior versions on disk); re-run setup only if that node is removed.
+  const node = process.execPath.replace(/\\/g, '/');
   const cmdFor = IS_PACKAGED
     ? (event) => `"${exePath}" hook ${event}`
-    : IS_NPM_INSTALL
-      ? (event) => `claude-rpc hook ${event}`
-      : (event) => `node "${HOOK_SCRIPT.replace(/\\/g, '/')}" ${event}`;
+    : (event) => `"${node}" "${HOOK_SCRIPT.replace(/\\/g, '/')}" ${event}`;
 
   for (const event of EVENTS) {
     const bucket = settings.hooks[event] = settings.hooks[event] || [];
@@ -464,18 +469,12 @@ export function migrateConfig({ silent = false } = {}) {
 // command and report success, leaving the user to discover the breakage
 // the next time they open Claude Code. Returns { ok, detail }.
 function verifyHookPipe(exePath) {
-  const cmd  = IS_PACKAGED ? exePath
-              : IS_NPM_INSTALL ? 'claude-rpc'
-              : process.execPath;
-  const args = IS_PACKAGED || IS_NPM_INSTALL
-              ? ['hook', 'SessionStart']
-              : [HOOK_SCRIPT, 'SessionStart'];
-  // Windows + npm-install: the global bin is `claude-rpc.cmd` (a batch shim),
-  // and Node's spawn doesn't apply PATHEXT — calling `claude-rpc` raw fails
-  // with ENOENT. shell:true makes cmd.exe do the resolution, mirroring how
-  // Claude Code actually invokes the hook string at runtime. Args are static
-  // and trusted; no injection surface.
-  const useShell = IS_NPM_INSTALL && process.platform === 'win32';
+  // Spawn exactly what installHooks wired: the packaged exe, or the absolute
+  // node + hook.js. Both are absolute, so there's no PATH/PATHEXT/shell
+  // resolution — it works under the same minimal hook shell Claude Code uses
+  // (the reason the old `claude-rpc` / bare-`node` forms failed under nvm).
+  const cmd  = IS_PACKAGED ? exePath : process.execPath;
+  const args = IS_PACKAGED ? ['hook', 'SessionStart'] : [HOOK_SCRIPT, 'SessionStart'];
   let result;
   try {
     result = spawnSync(cmd, args, {
@@ -483,7 +482,6 @@ function verifyHookPipe(exePath) {
       encoding: 'utf8',
       timeout: 3000,
       windowsHide: true,
-      shell: useShell,
     });
   } catch (e) {
     return { ok: false, detail: `spawn failed: ${e.message}` };

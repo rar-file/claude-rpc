@@ -368,28 +368,24 @@ test('ensureCanonicalExe: dev mode returns input unchanged', () => {
   assert.equal(out, '/path/to/foo');
 });
 
-// ── verifyHookPipe shell-flag regression ──────────────────────────────
+// ── PATH-independent hook commands + verifyHookPipe (v0.19.1) ──────────
 //
-// v0.6.0 shipped a Windows-npm bug: `spawnSync('claude-rpc', [...])` fails
-// with ENOENT because Node doesn't apply PATHEXT, and npm globals on
-// Windows are `claude-rpc.cmd` shims. Fix in v0.6.1 was to set
-// `shell: true` on the spawn options when running under npm-install +
-// Windows. The grep-test below pins the fix in source so a future
-// refactor can't silently re-introduce it.
+// Claude Code runs hooks through `/bin/sh` with a minimal PATH that, under nvm,
+// has neither `claude-rpc` nor `node` on it (no system node) — so the old
+// `claude-rpc hook` / bare-`node` commands hit "command not found". Hooks and
+// the verifier now spawn the ABSOLUTE node (process.execPath) + absolute
+// hook.js, which also moots the old Windows PATHEXT/`.cmd` shell hack. Grep-pin
+// it so a refactor can't silently re-introduce a PATH dependency.
 
-test('verifyHookPipe sets shell:true for Windows+npm mode', async () => {
+test('hooks + verifyHookPipe spawn the absolute node, not a PATH-resolved bin', async () => {
   const { readFileSync } = await import('node:fs');
   const { join, dirname } = await import('node:path');
   const { fileURLToPath } = await import('node:url');
   const root = join(dirname(fileURLToPath(import.meta.url)), '..');
   const src = readFileSync(join(root, 'src', 'install.js'), 'utf8');
-  // The verifier must compute a shell flag from the install mode + platform
-  // and pass it to spawnSync. A grep is the cheapest way to assert that
-  // without booting a real Windows npm shim.
-  assert.match(src, /shell:\s*useShell|shell:\s*process\.platform\s*===\s*['"]win32['"]/,
-    'verifyHookPipe must pass a shell flag to spawnSync');
-  assert.match(src, /IS_NPM_INSTALL\s*&&\s*process\.platform\s*===\s*['"]win32['"]/,
-    'shell flag must gate on npm-install + Windows');
+  assert.match(src, /process\.execPath/, 'spawns the absolute node (PATH-independent)');
+  assert.doesNotMatch(src, /claude-rpc hook \$\{event\}/, 'no PATH-dependent `claude-rpc hook` command');
+  assert.doesNotMatch(src, /shell:\s*useShell/, 'no Windows shell-shim hack needed anymore');
   // The ack must be JSON-parsed and asserted, not substring-matched (Reliability #17).
   assert.match(src, /ack\??\.continue\s*!==\s*true/,
     'verifyHookPipe must assert parsed ack.continue === true, not substring-match "continue"');
