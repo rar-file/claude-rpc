@@ -439,8 +439,15 @@ function parseChunkInto(text, summary, pstate) {
 // null) falls back to a from-scratch parse.
 export function parseTranscript(filePath, prev = null) {
   const st = statSync(filePath);
+  // Append only if this is the SAME file that grew: the current size must be
+  // >= the size at the last parse (mirrors readSessionTokens). The old check,
+  // `st.size >= prev._offset`, was too weak — a rewrite to a size between the
+  // consumed offset and the prior file size would wrongly append onto stale
+  // counts (the leading bytes are now different content), silently corrupting
+  // lifetime stats. A cache entry predating _size has no size to compare, so it
+  // falls back to a full re-parse (which then stamps _size going forward).
   const canAppend = !!(prev && prev._parse && typeof prev._offset === 'number'
-    && st.size >= prev._offset);
+    && typeof prev._size === 'number' && st.size >= prev._size);
   const summary = canAppend ? structuredClone(prev) : blankTranscriptSummary();
   const pstate = canAppend
     ? { recentIds: (prev._parse.recentIds || []).slice(), lastRec: prev._parse.lastRec || null }
@@ -481,6 +488,7 @@ export function parseTranscript(filePath, prev = null) {
     // else: a partial line mid-write — leave it for the next (append) read.
   }
   summary._offset = offset;
+  summary._size = st.size; // file size at this parse — guards the append fast-path above
   summary._parse = { recentIds: pstate.recentIds, lastRec: pstate.lastRec };
   return summary;
 }

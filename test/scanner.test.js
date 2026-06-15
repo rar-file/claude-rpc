@@ -4,7 +4,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync, appendFileSync, mkdtempSync, mkdirSync, rmSync, utimesSync } from 'node:fs';
+import { writeFileSync, appendFileSync, mkdtempSync, mkdirSync, rmSync, utimesSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -344,6 +344,32 @@ test('parseTranscript: trailing partial line is left for the next read', () => {
   appendFileSync(path, 'kens":5,"output_tokens":0}}}\n');
   const s = parseTranscript(path, prev);
   assert.equal(s.inputTokens, 15, 'completed line counted exactly once');
+  rmSync(dir, { recursive: true });
+});
+
+test('parseTranscript: a rewritten file in the [offset, size) window is NOT appended (no stale carryover)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rpc-scan-'));
+  const path = join(dir, 's.jsonl');
+  const rec = (i) => JSON.stringify({ type: 'assistant', timestamp: '2026-05-22T10:00:00Z',
+    message: { id: 'm' + i, model: 'm', usage: { input_tokens: i, output_tokens: 0 }, content: [] } });
+  // One complete record (counted) plus a long unterminated partial line, so the
+  // consumed offset stops far below the file size — this is what makes the weak
+  // `size >= offset` guard exploitable.
+  writeFileSync(path, rec(10) + '\n' + 'x'.repeat(2000));
+  const prev = parseTranscript(path);
+  assert.equal(prev.inputTokens, 10, 'only the complete line counted');
+  assert.ok(prev._offset < prev._size, 'trailing partial leaves offset below size');
+
+  // Rewrite the whole file with different, smaller content whose size lands
+  // between the old offset and the old size — the window the old guard would
+  // have wrongly treated as an append onto stale counts.
+  writeFileSync(path, rec(3) + '\n' + rec(0) + '\n');
+  const sz = statSync(path).size;
+  assert.ok(sz > prev._offset && sz < prev._size, 'rewrite size sits in the danger window');
+
+  const after = parseTranscript(path, prev);
+  assert.equal(after.inputTokens, 3, 'full re-parse: only the rewritten content, no stale 10 carried over');
+  assert.equal(after.inputTokens, parseTranscript(path).inputTokens, 'matches a from-scratch parse');
   rmSync(dir, { recursive: true });
 });
 
