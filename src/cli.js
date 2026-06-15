@@ -12,22 +12,57 @@ if (process.platform === 'win32' && process.stdout.isTTY) {
 }
 import { DAEMON_SCRIPT, PID_PATH, STATE_PATH, LOG_PATH, AGGREGATE_PATH, CONFIG_PATH, IS_PACKAGED, IS_NPX, EXE_PATH } from './paths.js';
 import { readActiveState } from './state.js';
-import { buildVars, fillTemplate, humanProject, humanTool, applyIdle, framePasses, fmtNum } from './format.js';
-import { scan, readAggregate, findLiveSessions, dayKey, weekKey } from './scanner.js';
-import { weekGrid } from './week.js';
 import { runHookCli } from './hook.js';
-import { install as runInstall, uninstall as runUninstall, isInstalled, migrateConfig, installHooks, ensureCanonicalExe, installMcp, uninstallMcp, setupOutro } from './install.js';
-import { startTui } from './tui.js';
-import { generateInsights } from './insights.js';
-import { maybeNudge, pickTodayMilestone } from './nudge.js';
-import { badgeSvg } from './badge.js';
-import { fmtCost } from './pricing.js';
-import { addPrivateCwd, removePrivateCwd, listPrivateCwds, resolveVisibility } from './privacy.js';
 import { parseDuration, setPause, clearPause, pauseUntil } from './pause.js';
-import { readUsageCache, fetchUsage, writeUsageCache, fmtResetTime, fmtResetDay } from './usage.js';
 import { loadConfig, hasUserConfig } from './config.js';
 import { spawnDaemonDetached } from './ensure-daemon.js';
-import * as lb from './leaderboard.js';
+
+// ── Lazy-loaded heavy module graph ───────────────────────────────────────────
+// format→scanner→pricing→languages→git→usage (plus install/tui/insights/nudge/
+// badge/privacy/leaderboard) is ~60ms of module-load that the fast-exit commands
+// (--version, --help, start, stop, restart) never touch. We declare the bindings
+// here and fill them via loadStats() only for commands that actually fan out into
+// the stats/format/install code, so daemon-control and version stay near-instant.
+// (The repo already lazy-imports cold deps like doctor.js/card.js/mcp.js inside
+// their handlers — this just extends that to the graph the main switch needs.)
+let buildVars, fillTemplate, humanProject, humanTool, applyIdle, framePasses, fmtNum;
+let scan, readAggregate, findLiveSessions, dayKey, weekKey;
+let weekGrid;
+let runInstall, runUninstall, isInstalled, migrateConfig, installHooks, ensureCanonicalExe, installMcp, uninstallMcp, setupOutro;
+let startTui;
+let generateInsights;
+let maybeNudge, pickTodayMilestone;
+let badgeSvg;
+let fmtCost;
+let addPrivateCwd, removePrivateCwd, listPrivateCwds, resolveVisibility;
+let readUsageCache, fetchUsage, writeUsageCache, fmtResetTime, fmtResetDay;
+let lb;
+
+let statsLoaded = false;
+async function loadStats() {
+  if (statsLoaded) return;
+  // Load the graph concurrently — these are all leaf-ish modules with no
+  // ordering dependency, so Promise.all beats a sequential import chain.
+  const [fmt, scn, wk, inst, tui, ins, ndg, bdg, prc, priv, usg, leaderboard] = await Promise.all([
+    import('./format.js'), import('./scanner.js'), import('./week.js'),
+    import('./install.js'), import('./tui.js'), import('./insights.js'),
+    import('./nudge.js'), import('./badge.js'), import('./pricing.js'),
+    import('./privacy.js'), import('./usage.js'), import('./leaderboard.js'),
+  ]);
+  ({ buildVars, fillTemplate, humanProject, humanTool, applyIdle, framePasses, fmtNum } = fmt);
+  ({ scan, readAggregate, findLiveSessions, dayKey, weekKey } = scn);
+  ({ weekGrid } = wk);
+  ({ install: runInstall, uninstall: runUninstall, isInstalled, migrateConfig, installHooks, ensureCanonicalExe, installMcp, uninstallMcp, setupOutro } = inst);
+  ({ startTui } = tui);
+  ({ generateInsights } = ins);
+  ({ maybeNudge, pickTodayMilestone } = ndg);
+  ({ badgeSvg } = bdg);
+  ({ fmtCost } = prc);
+  ({ addPrivateCwd, removePrivateCwd, listPrivateCwds, resolveVisibility } = priv);
+  ({ readUsageCache, fetchUsage, writeUsageCache, fmtResetTime, fmtResetDay } = usg);
+  lb = leaderboard;
+  statsLoaded = true;
+}
 import { VERSION } from './version.js';
 import { fail, tailLines, heat, sparkline, fmtDelta, topPercentile, EX_USER_ERROR, EX_BAD_STATE, EX_SYS_ERROR } from './ui.js';
 import { randomUUID } from 'node:crypto';
@@ -1972,6 +2007,12 @@ process.on('unhandledRejection', (e) => {
 // ESM (dev) and CommonJS (esbuild → SEA bundle) — CJS doesn't allow
 // top-level await.
 (async () => {
+  // Fast-exit commands touch none of the lazy stats/format/install graph, so
+  // skip the module load and keep them instant. Everything else loads it once
+  // up front, which makes every binding available to the handlers below exactly
+  // as before. (daemon/serve/wrapped/hook only dynamic-import their own module.)
+  const FAST_PATHS = new Set(['--version', '-V', '-v', '--help', '-h', 'help', 'start', 'stop', 'restart', 'hook', 'daemon', 'serve', 'wrapped']);
+  if (!FAST_PATHS.has(cmd)) await loadStats();
   switch (cmd) {
     case '--version':
     case '-V':
