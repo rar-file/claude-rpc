@@ -25,7 +25,7 @@
 [![Node 18+](https://img.shields.io/badge/node-%3E%3D18-43853d.svg?logo=node.js&logoColor=white)](https://nodejs.org)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-hooks-d97757.svg)](https://claude.com/claude-code)
 [![Discord RPC](https://img.shields.io/badge/Discord-RPC-5865F2.svg?logo=discord&logoColor=white)](https://discord.com/developers/docs/topics/rpc)
-[![Release](https://img.shields.io/github/v/release/rar-file/claude-rpc?color=4c1)](https://github.com/rar-file/claude-rpc/releases/latest)
+[![Release](https://img.shields.io/npm/v/claude-rpc?color=4c1&label=release&logo=npm&logoColor=white)](https://github.com/rar-file/claude-rpc/releases/latest)
 [![npm downloads](https://img.shields.io/npm/dm/claude-rpc?color=cb3837&logo=npm&logoColor=white&label=downloads)](https://www.npmjs.com/package/claude-rpc)
 
 </div>
