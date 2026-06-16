@@ -41,3 +41,6 @@ docs/AUDIT-*.md
 # launch board local creds + queue (never commit)
 tools/launch-board/.data/
 *.vsix
+
+# promotion / social kit drafts — kept local, never committed
+/promo/
