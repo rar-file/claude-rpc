@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "claude-rpc",
+  "owner": {
+    "name": "RARcodes",
+    "url": "https://github.com/rar-file"
+  },
+  "metadata": {
+    "description": "Discord Rich Presence for Claude Code — install the claude-rpc daemon straight from Claude Code."
+  },
+  "plugins": [
+    {
+      "name": "claude-rpc",
+      "source": "./plugin",
+      "description": "Discord Rich Presence for Claude Code. Auto-installs the claude-rpc npm package and runs its setup on first session.",
+      "category": "integrations"
+    }
+  ]
+}

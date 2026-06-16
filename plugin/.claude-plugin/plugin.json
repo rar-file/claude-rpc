@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "claude-rpc",
+  "displayName": "claude-rpc — Discord Rich Presence",
+  "version": "0.1.0",
+  "description": "Discord Rich Presence for Claude Code. On its first session this plugin runs the project's own installer (npx claude-rpc@latest setup) — wiring the hooks, starting the daemon, and registering login autostart — then stays out of the way.",
+  "author": { "name": "Archer Simmons" },
+  "homepage": "https://github.com/rar-file/claude-rpc#readme",
+  "repository": "https://github.com/rar-file/claude-rpc",
+  "license": "MIT",
+  "keywords": ["discord", "rich-presence", "presence", "claude-code", "stats", "hooks", "daemon"]
+}
