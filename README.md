@@ -258,6 +258,17 @@ Frames have a `requires` field; the daemon skips a frame when any of its require
 
 The full default config is in [`src/default-config.js`](src/default-config.js) — that's the canonical list of every key. ~140 template variables are available; `claude-rpc vars` is the source of truth.
 
+## claude code plugin
+
+Prefer to install from inside Claude Code? There's a [plugin](plugin/) for that:
+
+```text
+/plugin marketplace add rar-file/claude-rpc
+/plugin install claude-rpc@claude-rpc
+```
+
+It's a thin bootstrapper — on the first session it just runs `npx claude-rpc@latest setup` for you (the same install as above), then stays out of the way. macOS / Linux / WSL; on Windows use the portable exe. Nothing extra is added to your sessions — the plugin is a single `SessionStart` hook with no model-context cost.
+
 ## commands
 
 `claude-rpc --help` lists them all — and after `setup` you rarely need any.
