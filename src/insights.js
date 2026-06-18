@@ -274,22 +274,26 @@ export function generateInsights(aggregate, opts = {}) {
 
   if (!C.length) return ['Not enough data yet — keep coding and check back tomorrow.'];
 
-  // Weight + seeded jitter: headlines (≥90) reliably lead; the mid-tier rotates
-  // so repeat runs surface a fresh mix. Default seed = clock → fresh each run.
+  // Weighted random draw WITHOUT replacement. Weight sets how often (and how
+  // early) a line tends to surface, but every run is a genuinely fresh mix —
+  // including the top line — rather than the same weight-sorted five. Default
+  // seed = clock → fresh each run; pass opts.seed for a deterministic order.
+  // Topic keeps near-duplicates (two streak lines, etc.) out of the same draw.
   const rand = rng(opts.seed != null ? opts.seed : Date.now());
-  for (const c of C) c.score = c.w + rand() * 22;
-  C.sort((x, y) => y.score - x.score);
-
-  // Take the top `limit`, but at most one line per topic so near-duplicates
-  // (two streak lines, peak-weekday + weekday-rhythm) never appear together.
   const limit = opts.limit ?? 5;
+  const pool = C.slice();
   const seen = new Set();
   const out = [];
-  for (const c of C) {
+  while (out.length < limit && pool.length) {
+    let total = 0;
+    for (const c of pool) total += c.w;
+    let r = rand() * total;
+    let idx = 0;
+    while (idx < pool.length - 1 && (r -= pool[idx].w) > 0) idx++;
+    const [c] = pool.splice(idx, 1);
     if (c.topic && seen.has(c.topic)) continue;
     if (c.topic) seen.add(c.topic);
     out.push(c.text);
-    if (out.length >= limit) break;
   }
   return out;
 }

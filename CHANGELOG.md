@@ -2,6 +2,12 @@
 
 All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.24.1] - 2026-06-18
+
+**Fixed**
+
+- **`insights` now actually rotates.** In 0.24.0 the high-weight headlines (a big week trend, an active streak) were sticky — the small jitter couldn't move them — so the first few lines looked the same every run. Selection is now a **weighted random draw without replacement**: a line's weight still sets how often and how early it tends to appear, but every run is a genuinely fresh mix, top line included. Deterministic with `opts.seed`; topic de-dup unchanged.
+
 ## [0.24.0] - 2026-06-18
 
 **Changed**

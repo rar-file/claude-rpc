@@ -97,7 +97,7 @@ test('generateInsights: surfaces the new signal types', () => {
   assert.match(all, /New personal best/, 'bestDay set today');
   assert.match(all, /pages of a paperback/, 'lines → book pages');
   assert.match(all, /from cache/, 'cache efficiency');
-  assert.match(all, /claude-rpc/, 'top project');
+  assert.match(all, /claude-rpc|worked across \d+ projects/, 'project signal (either form)');
 });
 
 test('generateInsights: model name is prettified (opus-4-8 → Opus 4.8)', () => {
