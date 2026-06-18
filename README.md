@@ -193,7 +193,7 @@ claude-rpc community on           # explicit consent flow (upgraders / re-enable
 claude-rpc community report       # one-shot manual flush (testing)
 ```
 
-Each report sends only: a `sessionsDelta`, a `tokensDelta`, the claude-rpc version, OS family (`linux`/`darwin`/`win32`), and the anonymous UUID v4. No prompts, paths, models, repos, costs, usernames, or hostnames — the Worker's [`validateReport`](worker/src/index.js) is the schema of record. The full Worker source is in this repo so the privacy claim is auditable.
+Each report sends only: a `sessionsDelta`, a `tokensDelta`, the claude-rpc version, OS family (`linux`/`darwin`/`win32`), and the anonymous UUID v4. No prompts, paths, models, repos, costs, usernames, or hostnames — the Worker's [`validateReport`](worker/src/index.js) is the schema of record. The full Worker source is in this repo so the privacy claim is auditable. Every worker route — path, params, response — is documented in [`docs/WORKER-API.md`](docs/WORKER-API.md).
 
 For a complete account of the sensitive things claude-rpc does — startup persistence, hook injection, every outbound request, and the exact telemetry payload — see [`SECURITY.md`](SECURITY.md). It's also the reference for supply-chain scanner findings (Socket.dev et al.): the flagged persistence and hook-injection behaviors are inherent to the tool and documented there.
 
@@ -273,7 +273,7 @@ Frames have a `requires` field; the daemon skips a frame when any of its require
 }
 ```
 
-The full default config is in [`src/default-config.js`](src/default-config.js) — that's the canonical list of every key. ~140 template variables are available; `claude-rpc vars` is the source of truth.
+The full default config is in [`src/default-config.js`](src/default-config.js) — that's the canonical list of every key. Over 200 template variables are available; `claude-rpc vars` is the authoritative list.
 
 ## claude code plugin
 
@@ -330,6 +330,36 @@ Exit codes: `0` ok · `1` user error · `2` system error · `3` wrong state. `--
 
 </details>
 
+<details>
+<summary><b>complete removal</b></summary>
+
+<br/>
+
+`claude-rpc uninstall` removes everything that *respawns or registers* the tool:
+its hooks from `~/.claude/settings.json` (only its own — third-party hooks are
+left untouched) and the login-autostart entry (`systemd --user` unit on Linux,
+LaunchAgent on macOS, `HKCU\…\Run` value + `.vbs` shim on Windows). After it
+runs, nothing brings the daemon back.
+
+It deliberately **leaves your data in place**: `config.json` (under the per-OS
+config dir), the stats in `~/.claude-rpc/`, and the transient files in the temp
+dir (which clear on reboot anyway). Two things it does *not* touch, by design:
+
+- a daemon already running this session keeps running until `claude-rpc stop` or
+  reboot (the autostart-managed one is stopped; a manually `start`ed one isn't);
+- the MCP server, if you wired it — that's a separate `claude-rpc mcp uninstall`.
+
+For a clean wipe on macOS/Linux:
+
+```sh
+claude-rpc mcp uninstall   # only if you ran `mcp install`
+claude-rpc stop
+claude-rpc uninstall
+rm -rf ~/.claude-rpc        # stats; plus the per-OS config dir if you want it gone
+```
+
+</details>
+
 ## troubleshooting
 
 **First step is always `claude-rpc doctor`** — it checks Node, hook registration, daemon liveness, Discord IPC, aggregate freshness, and privacy resolution, with a one-line fix hint per failure.
@@ -345,6 +375,39 @@ Exit codes: `0` ok · `1` user error · `2` system error · `3` wrong state. `--
 - **Old binary path baked into hooks.** Common after manual exe replacement. `claude-rpc setup` rewrites hook entries to point at the canonical install location.
 
 </details>
+
+## platform support
+
+**macOS and Linux are first-class.** The daemon reacts to on-disk changes with a
+directory watcher (`fs.watch` over FSEvents/inotify — instant) *and* an mtime
+poll as a lazy backstop, so an event is never missed. Login autostart is a
+per-user [`launchd` LaunchAgent](src/install.js) on macOS and a
+[`systemd --user` service](src/install.js) on Linux; both start the daemon at
+login without `sudo` and don't fight a manual `claude-rpc stop`.
+
+**Windows is supported** — grab the portable exe (no Node required), then
+`claude-rpc setup`. One caveat documented honestly: `fs.watch` on Windows drops
+events when a writer commits via atomic rename (which the state file, pause file,
+scanner, and settings GUI all do), so on Windows the **mtime poll is effectively
+the primary path** and runs an order of magnitude faster (every ~3s vs ~30s
+elsewhere) to compensate. It's a reliable fallback, not yet the native-watch
+confidence macOS/Linux get — closing that gap is on the [roadmap](ROADMAP.md).
+Autostart is an `HKCU\…\Run` entry launched through a windowless `.vbs` shim (no
+scheduled task, by design — see [`SECURITY.md`](SECURITY.md)).
+
+Everything else — the scanner, dashboards, cards, the worker client — is
+platform-neutral. CI runs the full suite on Node 18/20/22 and builds the macOS
+and Windows binaries every release.
+
+## versioning
+
+What's a stable contract and what's an internal detail you shouldn't build on:
+[`VERSIONING.md`](VERSIONING.md). Short version — the worker HTTP API, the CLI
+(commands, flags, exit codes), the `config.json` schema, the `claude-rpc vars`
+template variables, and the local data formats are stable and semver-governed;
+daemon internals, the scan cache, the worker's KV layout, and exact wording are
+not. The worker's HTTP surface is documented in
+[`docs/WORKER-API.md`](docs/WORKER-API.md).
 
 ## development
 
