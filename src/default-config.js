@@ -28,6 +28,17 @@ export const DEFAULT_CONFIG = {
   // collapse to the latest and flush when the gap expires. 4s stays safely
   // under the limit; lower values risk Discord throttling the card.
   minActivityGapMs: 4000,
+  // Hard sliding-window cap on Discord writes, on top of minActivityGapMs. The
+  // gap alone only spaces *consecutive* writes — with a 4s gap a 20s window can
+  // still catch 6 writes (floor(20000/4000)+1) once several triggers (the
+  // rotation tick, a scan, a live-session change, a config reload) coincide,
+  // and that 6th write is what makes Discord EMPTY the presence (the card
+  // collapses to just the app name + elapsed timer, no details or art). This
+  // bounds the COUNT per window: no more than maxActivityWrites writes per
+  // activityWindowMs, whatever fires. Default 4-per-20s leaves a write of
+  // headroom under Discord's ~5-per-20s ceiling.
+  maxActivityWrites: 4,
+  activityWindowMs: 20000,
   rescanIntervalSec: 300,
   idleThresholdSec: 60,
   // Time (minutes) of no hook activity AND no live transcripts on disk before

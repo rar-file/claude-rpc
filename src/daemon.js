@@ -117,6 +117,15 @@ let lastSentHash = '';
 let lastSentAt = 0;       // ms of the last write ATTEMPT (success or fail → back off either way)
 let pendingSend = null;   // { kind, activity, hash, logMsg } coalesced during the gap; latest wins
 let flushTimer = null;
+// Timestamps (ms) of recent write ATTEMPTS (set + clear both hit Discord), for
+// the sliding-window rate cap below. The per-write gap alone leaves the daemon
+// riding Discord's ~5-per-20s SET_ACTIVITY ceiling — many triggers fire and a
+// 4s gap still permits 6 writes in some 20s windows, which makes Discord EMPTY
+// the presence (card → app name + bare timer). This bounds the COUNT per window
+// regardless of how many triggers fire. Deliberately NOT cleared by
+// resetTransmit (a scan/session/config refresh forces a re-render but must not
+// reset the rate budget, or those refreshes could burst us past the limit).
+let recentSends = [];
 // Last status we acted on for outbound side-effects (webhook / desktop notify).
 // Tracked separately from the render hash so we fire once per transition.
 let lastNotifiedStatus = null;
@@ -407,10 +416,22 @@ function pushPresence() {
 }
 
 // Minimum gap between Discord writes, read live so a config reload takes effect.
-// Floored at 2s as a sanity minimum; the 4s default keeps us under Discord's
-// ~5-per-20s SET_ACTIVITY limit (see default-config.minActivityGapMs).
+// Floored at 2s as a sanity minimum. The gap spaces consecutive writes; the
+// sliding-window cap below is what actually bounds writes-per-window so we stay
+// under Discord's ~5-per-20s SET_ACTIVITY limit (see default-config).
 function activityGapMs() {
   return Math.max(2000, config.minActivityGapMs || 4000);
+}
+
+// Sliding-window rate cap parameters, read live like the gap. Defaults to 4
+// writes per 20s — one under Discord's ~5-per-20s SET_ACTIVITY ceiling, so we
+// stay clear of it even if Discord counts its window inclusively or our clock
+// drifts. Floored so a bad config can't disable the protection entirely.
+function activityWindowMs() {
+  return Math.max(5000, config.activityWindowMs || 20000);
+}
+function maxActivityWrites() {
+  return Math.max(2, config.maxActivityWrites || 4);
 }
 
 // Sentinel for a clear — can never collide with a real activity hash, since
@@ -425,6 +446,7 @@ function transmit(kind, activity, logMsg) {
   const d = throttleDecision({
     hash, lastSentHash, lastSentAt,
     now: Date.now(), gapMs: activityGapMs(), flushPending: !!flushTimer,
+    recentSends, windowMs: activityWindowMs(), maxPerWindow: maxActivityWrites(),
   });
   if (d.action === 'skip') { pendingSend = null; return; }
   if (d.action === 'send') { doSend({ kind, activity, hash, logMsg }); return; }
@@ -451,6 +473,12 @@ function flushPendingSend() {
 // by the next push rather than being recorded as success and stranded.
 async function doSend({ kind, activity, hash, logMsg }) {
   lastSentAt = Date.now();
+  // Record the attempt and drop anything older than the window — this is the
+  // ledger throttleDecision reads to enforce the per-window cap. Counts every
+  // attempt (set AND clear) since both are SET_ACTIVITY writes to Discord.
+  recentSends.push(lastSentAt);
+  const cutoff = lastSentAt - activityWindowMs();
+  if (recentSends[0] <= cutoff) recentSends = recentSends.filter((t) => t > cutoff);
   try {
     if (kind === 'clear') await client.user.clearActivity();
     else await client.user.setActivity(activity);

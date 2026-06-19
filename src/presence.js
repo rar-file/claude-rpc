@@ -113,9 +113,35 @@ export function shouldShowGithubButton(p, state) {
 //   - 'defer' : inside the gap, or a flush is already queued — coalesce to the
 //               LATEST payload and let the caller flush it in `waitMs`, so the
 //               final state of every burst still lands, once, under the limit
-export function throttleDecision({ hash, lastSentHash, lastSentAt, now, gapMs, flushPending }) {
+//
+// The per-write `gapMs` only spaces *consecutive* writes; it does NOT bound
+// writes-per-window. With gapMs == windowMs/maxPerWindow (the 4s default sits
+// exactly on Discord's ~5-per-20s ceiling) a 20s window can still catch
+// floor(windowMs/gapMs)+1 == 6 gap-spaced writes — one over the limit — because
+// many independent triggers (the rotation tick re-rendering {toolElapsed}, a
+// background scan, a live-session change, a config reload) each want to write.
+// That extra write is exactly what makes Discord EMPTY the presence (the card
+// collapses to just the app name + elapsed timer). So when `recentSends` (the
+// timestamps of recent writes, set+clear) and `maxPerWindow` are supplied we
+// add a hard sliding-window cap on top of the gap: defer until the oldest write
+// in the window expires, guaranteeing no more than `maxPerWindow` writes in any
+// `windowMs` no matter how many triggers fire. Omitting them keeps the old
+// gap-only behavior (used by tests that predate the cap).
+export function throttleDecision({ hash, lastSentHash, lastSentAt, now, gapMs, flushPending, recentSends, windowMs, maxPerWindow }) {
   if (hash === lastSentHash) return { action: 'skip', waitMs: 0 };
-  const waitMs = Math.max(0, (lastSentAt || 0) + gapMs - now);
+  let waitMs = Math.max(0, (lastSentAt || 0) + gapMs - now);
+  if (maxPerWindow && windowMs && Array.isArray(recentSends)) {
+    // Strict window (age < windowMs) so a write exactly windowMs old has already
+    // fallen out — matches a "requests in the last 20s" limiter and keeps the
+    // boundary case from sneaking a write over the line.
+    const inWindow = recentSends.filter((t) => t > now - windowMs);
+    if (inWindow.length >= maxPerWindow) {
+      // The oldest write we must let expire before another may go out. Once it
+      // ages past windowMs the window drops below the cap and we can send.
+      const oldest = inWindow[inWindow.length - maxPerWindow];
+      waitMs = Math.max(waitMs, oldest + windowMs - now);
+    }
+  }
   if (waitMs === 0 && !flushPending) return { action: 'send', waitMs: 0 };
   return { action: 'defer', waitMs };
 }

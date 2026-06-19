@@ -230,3 +230,69 @@ test('throttleDecision: a burst coalesces — each change re-defers to the lates
     flushPending = true; // the daemon arms exactly one timer for the burst
   }
 });
+
+// ── throttleDecision: sliding-window cap ───────────────────────────────
+// The per-write gap rides Discord's ~5-per-20s ceiling; the window cap is what
+// keeps a 6th write (the one that EMPTIES the presence) from ever going out.
+const WINDOW = 20_000;
+const MAX = 4;
+
+test('throttleDecision: window cap blocks a gap-eligible write once the window is full', () => {
+  const now = 1_000_000;
+  // Four writes already in the last 20s — at the cap. The gap has elapsed, so
+  // gap-only logic would send; the window cap must defer instead.
+  const recentSends = [now - 16_000, now - 12_000, now - 8_000, now - 4_000];
+  const d = throttleDecision({
+    hash: 'B', lastSentHash: 'A', lastSentAt: now - GAP, now,
+    gapMs: GAP, flushPending: false, recentSends, windowMs: WINDOW, maxPerWindow: MAX,
+  });
+  assert.equal(d.action, 'defer', 'a 5th write inside the window is held back');
+  // Deferred until the oldest in-window write ages out of the 20s window.
+  assert.equal(d.waitMs, (now - 16_000) + WINDOW - now, 'waits for the oldest to expire');
+});
+
+test('throttleDecision: window with room still sends when the gap allows', () => {
+  const now = 1_000_000;
+  const recentSends = [now - 18_000, now - 8_000, now - 4_000]; // 3 < MAX
+  const d = throttleDecision({
+    hash: 'B', lastSentHash: 'A', lastSentAt: now - GAP, now,
+    gapMs: GAP, flushPending: false, recentSends, windowMs: WINDOW, maxPerWindow: MAX,
+  });
+  assert.equal(d.action, 'send', 'under the cap → the gap governs and we send');
+});
+
+test('throttleDecision: writes that aged out of the window do not count toward the cap', () => {
+  const now = 1_000_000;
+  // Five recent sends but two are already older than the window — only three
+  // remain in-window, so we are under the cap and may send.
+  const recentSends = [now - 30_000, now - 21_000, now - 9_000, now - 6_000, now - 5_000];
+  const d = throttleDecision({
+    hash: 'B', lastSentHash: 'A', lastSentAt: now - GAP, now,
+    gapMs: GAP, flushPending: false, recentSends, windowMs: WINDOW, maxPerWindow: MAX,
+  });
+  assert.equal(d.action, 'send', 'expired writes are not counted');
+});
+
+test('throttleDecision: window cap never overrides an identical-hash skip', () => {
+  const now = 1_000_000;
+  const recentSends = [now - 1, now - 2, now - 3, now - 4]; // full window
+  const d = throttleDecision({
+    hash: 'A', lastSentHash: 'A', lastSentAt: now - 1, now,
+    gapMs: GAP, flushPending: false, recentSends, windowMs: WINDOW, maxPerWindow: MAX,
+  });
+  assert.deepEqual(d, { action: 'skip', waitMs: 0 }, 'nothing to send → no wait, no write');
+});
+
+test('throttleDecision: the larger of gap-wait and window-wait wins', () => {
+  const now = 1_000_000;
+  // Window is full and its expiry is far out; the gap also has not elapsed.
+  // The decision must wait the longer of the two.
+  const recentSends = [now - 2_000, now - 1_500, now - 1_000, now - 500];
+  const d = throttleDecision({
+    hash: 'B', lastSentHash: 'A', lastSentAt: now - 1_000, now,
+    gapMs: GAP, flushPending: false, recentSends, windowMs: WINDOW, maxPerWindow: MAX,
+  });
+  const windowWait = (now - 2_000) + WINDOW - now; // 18_000
+  assert.equal(d.action, 'defer');
+  assert.equal(d.waitMs, windowWait, 'window wait (18s) dominates the 3s gap wait');
+});
