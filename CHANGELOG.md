@@ -2,6 +2,13 @@
 
 All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.0.2] - 2026-06-19
+
+**Fixed**
+
+- **Discord presence no longer blanks out under bursty activity.** Added a hard sliding-window rate cap (default 4 writes / 20s) on top of the existing inter-write gap, so a burst of triggers (a finishing scan + a live-session change + a config reload landing together) can no longer push a 6th write into Discord's 5-per-20s window and make it empty the card down to a bare app name + timer. The daemon keeps a `recentSends` ledger that counts both set and clear and deliberately survives `resetTransmit`. Both knobs are config-tunable; the gap-only behavior is preserved when the new params are omitted.
+- **Windows: child processes no longer flash a console window.** `windowsHide` is now set on every Windows-reachable child spawn. The recurring background flasher was the privacy/username-leak `gh` probe; the same fix also covers the gist publish, `claude mcp add/remove`, the `npm install -g` / `npm view` self-promote + staleness checks, and the dashboard browser-opener.
+
 ## [1.0.1] - 2026-06-18
 
 First stable release — the public surface is now a semver-governed contract.
