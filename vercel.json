@@ -12,6 +12,12 @@
       "has": [{ "type": "host", "value": "claude-rpc.vercel.app" }],
       "destination": "https://claude-rpc.com/:path*",
       "permanent": true
+    },
+    {
+      "source": "/:path*",
+      "has": [{ "type": "host", "value": "www.claude-rpc.com" }],
+      "destination": "https://claude-rpc.com/:path*",
+      "permanent": true
     }
   ],
   "rewrites": [
