@@ -1,0 +1,5 @@
+# Safety net: if `vercel` is ever run from this directory again by accident,
+# never upload local dev credentials or wrangler state.
+.dev.vars
+.wrangler
+node_modules
