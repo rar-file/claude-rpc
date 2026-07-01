@@ -7,7 +7,7 @@
 # url + sha256 with `node scripts/brew-formula.mjs` and commit it to that tap.
 class ClaudeRpc < Formula
   desc "Discord Rich Presence for Claude Code — live model, project, tokens & lifetime stats"
-  homepage "https://claude-rpc.vercel.app"
+  homepage "https://claude-rpc.com"
   url "https://registry.npmjs.org/claude-rpc/-/claude-rpc-0.13.7.tgz"
   sha256 "c1ed587790d90c0adddbdd256d75c7429bc54f92591f67dcbde10dd559246ea2"
   license "MIT"

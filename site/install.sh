@@ -1,6 +1,6 @@
 #!/bin/sh
 # claude-rpc installer
-#   curl -fsSL https://claude-rpc.vercel.app/install | sh
+#   curl -fsSL https://claude-rpc.com/install | sh
 #
 # Strategy, in order of preference:
 #   1. Node 18+ present  → install the npm package globally (works everywhere).

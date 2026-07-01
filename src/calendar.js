@@ -86,7 +86,7 @@ export function renderCalendar(aggregate, { weeks = 53, generatedAt = new Date()
   <text x="${W - 170}" y="${H - 10}" font-family="JetBrains Mono, ui-monospace, monospace" font-size="9" fill="${PALETTE.inkFaint}">less</text>
   ${legend}
   <text x="${W - 28}" y="${H - 10}" font-family="JetBrains Mono, ui-monospace, monospace" font-size="9" fill="${PALETTE.inkFaint}">more</text>
-  <text x="${padX}" y="${H - 8}" font-family="JetBrains Mono, ui-monospace, monospace" font-size="9" fill="${PALETTE.inkFaint}">claude-rpc.vercel.app · v${VERSION}</text>
+  <text x="${padX}" y="${H - 8}" font-family="JetBrains Mono, ui-monospace, monospace" font-size="9" fill="${PALETTE.inkFaint}">claude-rpc.com · v${VERSION}</text>
 </svg>`;
 }
 

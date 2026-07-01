@@ -20,7 +20,7 @@
   // Landing-page CTA used by the finale share. The dashboard is served on
   // localhost, so sharing `location.href` hands the recipient a dead link —
   // the finale shares this public URL + a stats summary instead.
-  const LANDING = 'https://claude-rpc.vercel.app/?ref=wrapped';
+  const LANDING = 'https://claude-rpc.com/?ref=wrapped';
   let _shareText = '';   // built in the finale slide, consumed by wireFinale
 
   // ── build the story slides from the wrapped payload ──────────
@@ -131,7 +131,7 @@
             ${cell('Lines', (d.linesNet >= 0 ? '+' : '−') + fmtNum(Math.abs(d.linesNet)), 'grass')}
             ${cell('Hotspot', d.hotspot ? esc(d.hotspot.name) : '—')}
           </div>
-          <div class="foot">made with claude-rpc · claude-rpc.vercel.app</div>
+          <div class="foot">made with claude-rpc · claude-rpc.com</div>
         </div>
         <div class="actions">
           <button class="btn primary" id="w-replay">↺ replay</button>

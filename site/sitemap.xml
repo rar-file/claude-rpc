@@ -1,52 +1,52 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
-    <loc>https://claude-rpc.vercel.app/</loc>
+    <loc>https://claude-rpc.com/</loc>
     <lastmod>2026-06-16</lastmod><changefreq>weekly</changefreq>
     <priority>1.0</priority>
   </url>
   <url>
-    <loc>https://claude-rpc.vercel.app/community</loc>
+    <loc>https://claude-rpc.com/community</loc>
     <lastmod>2026-06-06</lastmod><changefreq>daily</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://claude-rpc.vercel.app/leaderboard</loc>
+    <loc>https://claude-rpc.com/leaderboard</loc>
     <lastmod>2026-06-06</lastmod><changefreq>daily</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://claude-rpc.vercel.app/examples/</loc>
+    <loc>https://claude-rpc.com/examples/</loc>
     <lastmod>2026-06-06</lastmod><changefreq>monthly</changefreq>
     <priority>0.5</priority>
   </url>
   <url>
-    <loc>https://claude-rpc.vercel.app/blog</loc>
+    <loc>https://claude-rpc.com/blog</loc>
     <lastmod>2026-06-16</lastmod><changefreq>weekly</changefreq>
     <priority>0.6</priority>
   </url>
   <url>
-    <loc>https://claude-rpc.vercel.app/blog/now-a-plugin</loc>
+    <loc>https://claude-rpc.com/blog/now-a-plugin</loc>
     <lastmod>2026-06-16</lastmod><changefreq>monthly</changefreq>
     <priority>0.5</priority>
   </url>
   <url>
-    <loc>https://claude-rpc.vercel.app/blog/three-weeks</loc>
+    <loc>https://claude-rpc.com/blog/three-weeks</loc>
     <lastmod>2026-06-13</lastmod><changefreq>monthly</changefreq>
     <priority>0.5</priority>
   </url>
   <url>
-    <loc>https://claude-rpc.vercel.app/blog/ship-week</loc>
+    <loc>https://claude-rpc.com/blog/ship-week</loc>
     <lastmod>2026-06-13</lastmod><changefreq>monthly</changefreq>
     <priority>0.5</priority>
   </url>
   <url>
-    <loc>https://claude-rpc.vercel.app/blog/zero-deps</loc>
+    <loc>https://claude-rpc.com/blog/zero-deps</loc>
     <lastmod>2026-06-13</lastmod><changefreq>monthly</changefreq>
     <priority>0.5</priority>
   </url>
   <url>
-    <loc>https://claude-rpc.vercel.app/blog/how-it-works</loc>
+    <loc>https://claude-rpc.com/blog/how-it-works</loc>
     <lastmod>2026-06-13</lastmod><changefreq>monthly</changefreq>
     <priority>0.5</priority>
   </url>

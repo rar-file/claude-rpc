@@ -46,7 +46,7 @@ function frame({ line, tok }, cursorOn) {
     <rect x="86" y="256" width="150" height="30" rx="6" fill="#5865F2"/>
     <text x="161" y="276" font-size="14" font-weight="700" fill="#ffffff" text-anchor="middle">Get claude-rpc</text>
     <!-- footer -->
-    <text x="${W - 60}" y="332" font-size="14" font-weight="700" fill="#6b6357" text-anchor="end">claude-rpc.vercel.app</text>
+    <text x="${W - 60}" y="332" font-size="14" font-weight="700" fill="#6b6357" text-anchor="end">claude-rpc.com</text>
   </g>
 </svg>`;
 }

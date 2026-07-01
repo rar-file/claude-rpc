@@ -218,7 +218,7 @@ function activate(context) {
     if (setupNeeded()) {
       const items = [
         { label: '$(rocket) Set up claude-rpc (one command)', detail: 'npx claude-rpc@latest setup — installs, wires Claude Code\'s hooks, starts the Discord daemon', act: () => runInTerminal('claude-rpc setup', 'npx claude-rpc@latest setup') },
-        { label: '$(globe) What is claude-rpc?', act: () => vscode.env.openExternal(vscode.Uri.parse('https://claude-rpc.vercel.app/?ref=vscode')) },
+        { label: '$(globe) What is claude-rpc?', act: () => vscode.env.openExternal(vscode.Uri.parse('https://claude-rpc.com/?ref=vscode')) },
         { label: '$(refresh) Refresh', act: render },
       ];
       const pick = await vscode.window.showQuickPick(items, { placeHolder: 'Claude RPC — companion CLI not detected' });

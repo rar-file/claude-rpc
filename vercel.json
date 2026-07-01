@@ -6,6 +6,14 @@
   "outputDirectory": "site",
   "cleanUrls": true,
   "trailingSlash": false,
+  "redirects": [
+    {
+      "source": "/:path*",
+      "has": [{ "type": "host", "value": "claude-rpc.vercel.app" }],
+      "destination": "https://claude-rpc.com/:path*",
+      "permanent": true
+    }
+  ],
   "rewrites": [
     { "source": "/install", "destination": "/install.sh" },
     { "source": "/u/:handle", "destination": "/u" },

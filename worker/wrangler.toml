@@ -22,4 +22,4 @@ id = "6ca3b87cd4cc46469008d28558701dac"
 #   https://claude-rpc-totals.claude-rpc.workers.dev/auth/callback
 [vars]
 GITHUB_CLIENT_ID = "Ov23liFCtlBWX8BHepyh"
-SITE_ORIGIN = "https://claude-rpc.vercel.app"
+SITE_ORIGIN = "https://claude-rpc.com"

@@ -135,7 +135,7 @@ export function renderProfileCard(aggregate, { handle = '', generatedAt = new Da
   <!-- footer -->
   <text x="40" y="${H - 18}"
         font-family="JetBrains Mono, ui-monospace, monospace"
-        font-size="11" fill="${PALETTE.inkFaint}">${escapeXml(`best streak ${t.longestStreak}d · ≈${fmtCost(t.cost)} · claude-rpc.vercel.app`)}</text>
+        font-size="11" fill="${PALETTE.inkFaint}">${escapeXml(`best streak ${t.longestStreak}d · ≈${fmtCost(t.cost)} · claude-rpc.com`)}</text>
 </svg>`;
 }
 

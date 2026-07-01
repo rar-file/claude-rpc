@@ -2,6 +2,12 @@
 
 All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.0.3] - 2026-07-02
+
+**Changed**
+
+- **The project lives at [claude-rpc.com](https://claude-rpc.com) now.** Every URL the project emits — CLI hints (`profile`, `link`, `squad`), the SVG card/badge/calendar/poster footers, the worker's OAuth redirect and error messages, the site's canonical/OG tags, sitemap, install one-liner, README, Homebrew formula, and the VS Code extension — points at the new domain. The old `claude-rpc.vercel.app` address 301-redirects to claude-rpc.com, so existing links, badges, and the previous `curl … /install | sh` one-liner keep working.
+
 ## [1.0.2] - 2026-06-19
 
 **Fixed**

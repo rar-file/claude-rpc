@@ -15,7 +15,7 @@
 
 **Discord Rich Presence for [Claude Code](https://claude.com/claude-code)** — your live model, project, tokens, and lifetime stats, driven by the hooks Claude Code already fires.
 
-**[claude-rpc.vercel.app →](https://claude-rpc.vercel.app)** — see it in one page.
+**[claude-rpc.com →](https://claude-rpc.com)** — see it in one page.
 
 [![community · sessions](https://claude-rpc-totals.claude-rpc.workers.dev/sessions.svg)](#community-totals) &nbsp; [![community · tokens](https://claude-rpc-totals.claude-rpc.workers.dev/tokens.svg)](#community-totals)
 
@@ -53,7 +53,7 @@ That installs `claude-rpc` globally, wires the hooks into Claude Code, and start
 **Prefer a one-liner that figures it out for you?**
 
 ```sh
-curl -fsSL https://claude-rpc.vercel.app/install | sh
+curl -fsSL https://claude-rpc.com/install | sh
 ```
 
 Detects Node (installs the npm package) or falls back to the prebuilt Apple-Silicon binary, then runs `setup` for you.
@@ -149,9 +149,9 @@ claude-rpc readme --raw | pbcopy  # straight to your clipboard
 **Live card + badges, paste once.** With a public profile (`claude-rpc profile set --handle <you> && claude-rpc profile on`), your stats are served as an always-current card (and badges) from the community worker — no `gh`, no gist, nothing to re-run:
 
 ```md
-[![Claude Code stats](https://claude-rpc-totals.claude-rpc.workers.dev/card/<you>.svg)](https://claude-rpc.vercel.app/u/<you>)
+[![Claude Code stats](https://claude-rpc-totals.claude-rpc.workers.dev/card/<you>.svg)](https://claude-rpc.com/u/<you>)
 
-[![Claude Code hours](https://claude-rpc-totals.claude-rpc.workers.dev/badge/<you>.svg?metric=hours)](https://claude-rpc.vercel.app/?ref=badge)
+[![Claude Code hours](https://claude-rpc-totals.claude-rpc.workers.dev/badge/<you>.svg?metric=hours)](https://claude-rpc.com/?ref=badge)
 ```
 
 The card shows tokens, sessions, active hours and streak; badge `metric=` is one of `tokens · sessions · hours · streak` (optional `&label=` to retitle). Both refresh themselves as the daemon flushes your profile (~every 30 min). Your profile page at `/u/<you>` has a one-click "copy" for the whole block.

@@ -107,7 +107,7 @@ export function renderProfileCard(p) {
   const name = rawName.length > 22 ? `${rawName.slice(0, 21)}…` : rawName;
   const verified = has && !!p.verified;
   const sub = has ? (verified ? 'Claude Code · verified' : 'Claude Code') : 'no public profile yet';
-  const gh = has && p.githubUser ? `github.com/${p.githubUser}` : 'claude-rpc.vercel.app';
+  const gh = has && p.githubUser ? `github.com/${p.githubUser}` : 'claude-rpc.com';
   const dim = PALETTE.inkFaint;
 
   const boxes = has

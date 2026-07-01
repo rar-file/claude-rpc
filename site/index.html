@@ -6,7 +6,7 @@
 <title>claude-rpc — Discord Rich Presence (RPC) for Claude Code</title>
 <meta name="description" content="Open-source Discord Rich Presence (RPC) for Claude Code. A tiny Node daemon puts your live session — model, project, current tool, tokens, lifetime stats — into your Discord profile. Free on GitHub and npm; one-command install." />
 
-<link rel="canonical" href="https://claude-rpc.vercel.app/" />
+<link rel="canonical" href="https://claude-rpc.com/" />
 <meta name="keywords" content="claude code, discord rich presence, discord rpc, claude code hooks, anthropic, developer stats, cli, coding stats, claude wrapped" />
 <meta name="theme-color" content="#d97757" />
 <meta name="author" content="Archer Simmons" />
@@ -15,8 +15,8 @@
 <meta property="og:title" content="claude-rpc — your Claude Code sessions, live on Discord" />
 <meta property="og:description" content="Live model, project, tokens and lifetime stats from Claude Code, in your Discord profile. Built solo. Install in one command: npx claude-rpc@latest setup" />
 <meta property="og:type" content="website" />
-<meta property="og:url" content="https://claude-rpc.vercel.app/" />
-<meta property="og:image" content="https://claude-rpc.vercel.app/img/og.png" />
+<meta property="og:url" content="https://claude-rpc.com/" />
+<meta property="og:image" content="https://claude-rpc.com/img/og.png" />
 <meta property="og:image:width" content="1200" />
 <meta property="og:image:height" content="630" />
 <meta property="og:image:alt" content="claude-rpc — Discord Rich Presence for Claude Code. Install with: npx claude-rpc@latest setup" />
@@ -24,7 +24,7 @@
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="claude-rpc — your Claude Code sessions, live on Discord" />
 <meta name="twitter:description" content="Live model, project, tokens and lifetime stats from Claude Code, in your Discord profile. Install in one command: npx claude-rpc@latest setup" />
-<meta name="twitter:image" content="https://claude-rpc.vercel.app/img/og.png" />
+<meta name="twitter:image" content="https://claude-rpc.com/img/og.png" />
 
 <!-- Structured data → Google rich result + better discoverability -->
 <script type="application/ld+json">
@@ -36,7 +36,7 @@
   "description": "Discord Rich Presence (RPC) for Claude Code — live model, project, tokens, and lifetime stats driven by Claude Code's hooks. Open source on GitHub.",
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "macOS, Windows, Linux",
-  "url": "https://claude-rpc.vercel.app/",
+  "url": "https://claude-rpc.com/",
   "downloadUrl": "https://www.npmjs.com/package/claude-rpc",
   "softwareHelp": "https://github.com/rar-file/claude-rpc#readme",
   "license": "https://github.com/rar-file/claude-rpc/blob/main/LICENSE",
@@ -753,7 +753,7 @@
     text-transform: uppercase; letter-spacing: 0.08em;
   }
   .final-cta::after {
-    content: "v1.0.2";
+    content: "v1.0.3";
     position: absolute; bottom: 18px; right: 22px;
     font-family: var(--font-mono); font-size: 0.78rem;
     color: var(--ink-faint);
@@ -834,7 +834,7 @@
   <div class="brand">
     <span class="brand-mark"><img src="https://cdn.qualit.ly/clawd-working-building.gif" alt="clawd character" /></span>
     <span class="name">claude-rpc</span>
-    <span class="vstamp" id="nav-version">v1.0.2</span>
+    <span class="vstamp" id="nav-version">v1.0.3</span>
   </div>
   <div class="nav-links">
     <a href="#download">download</a>
@@ -881,7 +881,7 @@
     </div>
     <p class="install-note">one command — installs globally, wires Claude Code's hooks, and starts the daemon. No Node? <a href="#download">grab the desktop app ↓</a></p>
     <div class="hero-meta">
-      <span><span class="ok">●</span> <span id="latest-tag">v1.0.2</span></span>
+      <span><span class="ok">●</span> <span id="latest-tag">v1.0.3</span></span>
       <span class="dot">·</span>
       <span>MIT</span>
       <span class="dot">·</span>
@@ -992,7 +992,7 @@
 
   <div class="preview-wrap">
     <div>
-      <span class="sticker tilt-r">v1.0.2 · presence.byStatus</span>
+      <span class="sticker tilt-r">v1.0.3 · presence.byStatus</span>
       <div class="status-tabs" id="status-tabs">
         <span class="status-tab active" data-status="working">working</span>
         <span class="status-tab" data-status="thinking">thinking</span>
@@ -1225,6 +1225,7 @@
       <div class="meta" id="changelog-meta">latest first · <a href="https://github.com/rar-file/claude-rpc/releases">all releases →</a></div>
     </div>
     <ul id="changelog-list">
+      <li><span class="v">v1.0.3</span> <span class="note">the project moved home to <strong>claude-rpc.com</strong> — every CLI hint, card footer, badge link, and page now points here; old <code>claude-rpc.vercel.app</code> links redirect.</span></li>
       <li><span class="v">v1.0.2</span> <span class="note">presence no longer blanks under bursty activity (hard sliding-window write cap, default 4/20s), and Windows child processes stop flashing a console window.</span></li>
       <li><span class="v">v1.0.1</span> <span class="note">first stable release — the public surface (worker API, CLI, config schema, template vars, data formats) is now a semver-governed contract. See <code>VERSIONING.md</code>.</span></li>
       <li><span class="v">v0.24.0</span> <span class="note"><code>claude-rpc insights</code> — ~20 rotating generators (chronotype, personal-best day, weekend rhythm, model mix, cache-reuse, tenure milestones) with a fresh mix each run.</span></li>

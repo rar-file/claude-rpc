@@ -32,7 +32,7 @@
   <text x="138" y="493" class="mono" font-size="28" fill="#f4ede0">npx claude-rpc setup</text>
 
   <!-- footer url -->
-  <text x="80" y="585" class="mono" font-size="22" font-weight="700" fill="#6b6357">claude-rpc.vercel.app</text>
+  <text x="80" y="585" class="mono" font-size="22" font-weight="700" fill="#6b6357">claude-rpc.com</text>
   <text x="1120" y="585" class="mono" font-size="22" fill="#9a9183" text-anchor="end">MIT · macOS · Windows · Linux</text>
 
   <!-- presence-card motif, right side -->

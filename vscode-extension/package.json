@@ -2,7 +2,7 @@
   "name": "claude-rpc-presence",
   "displayName": "Claude RPC Presence",
   "description": "Live Claude Code status in the status bar \u2014 what Claude is doing (working / thinking / waiting on you), session tokens, and lifetime stats, read from claude-rpc's state files. Pause or resume the Discord card without leaving the editor. Tracks Claude Code only \u2014 never your editor activity.",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "publisher": "rarfile",
   "license": "MIT",
   "repository": {

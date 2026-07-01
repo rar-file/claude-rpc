@@ -965,7 +965,7 @@ function jsonOk(body, cacheControl = 'no-store') {
 // signed tokens (auth.js) carrying ONLY the public GitHub login.
 
 const GH_KEY = (login) => `gh:${String(login).toLowerCase()}`;
-const DEFAULT_SITE_ORIGIN = 'https://claude-rpc.vercel.app';
+const DEFAULT_SITE_ORIGIN = 'https://claude-rpc.com';
 
 function siteOrigin(env) {
   return (env.SITE_ORIGIN || DEFAULT_SITE_ORIGIN).replace(/\/+$/, '');
@@ -1524,7 +1524,7 @@ export async function handlePairStart(request, env) {
     const id = await resolveCanonical(env, body.instanceId);
     const prof = await getProfile(env, id);
     if (!prof || !prof.verified || !normGithub(prof.githubUser)) {
-      return jsonError(403, 'only a verified machine can mint link codes — verify this one first, or mint in the browser: claude-rpc.vercel.app/link');
+      return jsonError(403, 'only a verified machine can mint link codes — verify this one first, or mint in the browser: claude-rpc.com/link');
     }
     login = prof.githubUser;
   }
@@ -1539,9 +1539,9 @@ export async function handlePairClaim(request, env) {
   if (!isUuidish(body.instanceId)) return jsonError(400, 'instanceId must be a UUID');
   if (!(await ipRateOk(env, clientIp(request)))) return jsonError(429, 'rate limited (ip)');
   const code = normPairCode(body.code);
-  if (!code) return jsonError(400, 'link code looks wrong — it\'s the 6 characters from `claude-rpc link` on your main machine (or claude-rpc.vercel.app/link)');
+  if (!code) return jsonError(400, 'link code looks wrong — it\'s the 6 characters from `claude-rpc link` on your main machine (or claude-rpc.com/link)');
   const login = await env.TOTALS.get(PAIR_KEY(code));
-  if (!login) return jsonError(404, 'code expired or unknown — run `claude-rpc link` on your main machine for a fresh one, or claude-rpc.vercel.app/link');
+  if (!login) return jsonError(404, 'code expired or unknown — run `claude-rpc link` on your main machine for a fresh one, or claude-rpc.com/link');
 
   // If this login already belongs to another machine, MERGE rather than steal.
   // applyVerifiedLink handles both the merge and the first-link cases; a

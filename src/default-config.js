@@ -241,7 +241,7 @@ export const DEFAULT_CONFIG = {
       // ?ref=discord lets the landing page attribute installs that originate
       // from a presence card. (When the cwd is a github repo the daemon also
       // prepends a "View on GitHub →" button, so both can show.)
-      { label: "Get claude-rpc →", url: "https://claude-rpc.vercel.app/?ref=discord" },
+      { label: "Get claude-rpc →", url: "https://claude-rpc.com/?ref=discord" },
     ],
   },
   statusIcons: {

@@ -1066,7 +1066,7 @@ function doReadme(argv) {
   const raw = argv.includes('--raw') || argv.includes('--plain');
   const cfg = loadConfig();
   const endpoint = (cfg.community?.endpoint || 'https://claude-rpc-totals.claude-rpc.workers.dev').replace(/\/+$/, '');
-  const site = 'https://claude-rpc.vercel.app';
+  const site = 'https://claude-rpc.com';
   const profile = cfg.profile || {};
   const handle = profile.handle;
   const live = !!profile.enabled && lb.isValidHandle(handle);
@@ -1287,7 +1287,7 @@ async function doExport(argv) {
 // `claude-rpc squad join <code>`
 // `claude-rpc squad` / `squad status`  → standings for every squad you're in
 // `claude-rpc squad leave [id]`
-// The web flow (claude-rpc.vercel.app + GitHub login) drives the same worker
+// The web flow (claude-rpc.com + GitHub login) drives the same worker
 // endpoints; the CLI authenticates with the community instanceId it already has.
 
 function squadAuth() {
@@ -1332,7 +1332,7 @@ function squadAuth() {
   return { cfg, endpoint, instanceId, post, get };
 }
 
-function squadPageUrl(id) { return `https://claude-rpc.vercel.app/squad/${id}`; }
+function squadPageUrl(id) { return `https://claude-rpc.com/squad/${id}`; }
 
 function printSquadInvite(squad) {
   console.log('');
@@ -1431,11 +1431,11 @@ async function doSquadCmd(argv) {
 //                              one-time code, no browser needed
 //   claude-rpc link <code>     on the NEW machine → claims it, merging this
 //                              install into the same leaderboard identity
-// The browser fallback lives at claude-rpc.vercel.app/link (log in with
+// The browser fallback lives at claude-rpc.com/link (log in with
 // GitHub → same code) for when the other machine isn't handy. Claiming
 // verifies the profile (✓) and unlocks managing squads from the browser.
 
-const LINK_PAGE = 'https://claude-rpc.vercel.app/link';
+const LINK_PAGE = 'https://claude-rpc.com/link';
 
 // Mint side: this machine asks the worker for a code. The worker only obliges
 // when this install's canonical profile is verified — the ✓ a claim grants
@@ -1638,7 +1638,7 @@ function profileNextStep() {
   const p = loadConfig().profile || {};
   const next = profileSteps(p).find((s) => !s.done);
   if (!next) {
-    console.log(`     ${c.dim}→  all set — you're live at${c.reset} ${c.cyan}https://claude-rpc.vercel.app/u/${encodeURIComponent(p.handle)}${c.reset}`);
+    console.log(`     ${c.dim}→  all set — you're live at${c.reset} ${c.cyan}https://claude-rpc.com/u/${encodeURIComponent(p.handle)}${c.reset}`);
   } else if (next.key === 'verify') {
     console.log(`     ${c.dim}→  next: run${c.reset} ${c.cyan}claude-rpc link${c.reset} ${c.dim}on a machine that's already verified, then${c.reset} ${c.cyan}claude-rpc link <code>${c.reset} ${c.dim}here — first machine? ${LINK_PAGE}${c.reset}`);
   } else {
@@ -1649,7 +1649,7 @@ function profileNextStep() {
 function profileStatus() {
   const p = (loadConfig().profile) || {};
   const handleOk = lb.isValidHandle(p.handle);
-  const boardUrl = handleOk ? `https://claude-rpc.vercel.app/u/${encodeURIComponent(p.handle)}` : '';
+  const boardUrl = handleOk ? `https://claude-rpc.com/u/${encodeURIComponent(p.handle)}` : '';
 
   console.log('');
   console.log(`  ${c.bold}${c.magenta}◆ profile${c.reset}  ${c.dim}— public leaderboard identity${c.reset}`);
@@ -1776,7 +1776,7 @@ async function profilePublish() {
   console.log(`  ${c.dim}publishing @${cfg.profile.handle} to the board…${c.reset}`);
   const r = await flushProfile(cfg);
   if (r.ok) {
-    console.log(`  ${c.green}✓${c.reset}  published — see it at ${c.cyan}https://claude-rpc.vercel.app/u/${encodeURIComponent(cfg.profile.handle)}${c.reset}`);
+    console.log(`  ${c.green}✓${c.reset}  published — see it at ${c.cyan}https://claude-rpc.com/u/${encodeURIComponent(cfg.profile.handle)}${c.reset}`);
   } else if (r.reason === 'rate-limited') {
     console.log(`  ${c.yellow}!${c.reset}  rate-limited — already published in the last minute; the board has you`);
   } else {

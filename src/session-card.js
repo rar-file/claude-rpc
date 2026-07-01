@@ -60,7 +60,7 @@ export function renderSessionCard(vars = {}, { generatedAt = new Date() } = {}) 
   ${statCell(C[1], 184, 'Est. cost', String(cost), PALETTE.blurple)}
   ${statCell(C[2], 184, 'Reads', String(v.filesRead ?? 0))}
 
-  <text x="40" y="${H - 16}" font-family="JetBrains Mono, ui-monospace, monospace" font-size="10" fill="${PALETTE.inkFaint}">${escapeXml(`${v.currentFilePretty ? 'last: ' + v.currentFilePretty + ' · ' : ''}claude-rpc.vercel.app · v${VERSION}`)}</text>
+  <text x="40" y="${H - 16}" font-family="JetBrains Mono, ui-monospace, monospace" font-size="10" fill="${PALETTE.inkFaint}">${escapeXml(`${v.currentFilePretty ? 'last: ' + v.currentFilePretty + ' · ' : ''}claude-rpc.com · v${VERSION}`)}</text>
 </svg>`;
 }
 

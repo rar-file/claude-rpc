@@ -35,7 +35,7 @@ function makeEnv() {
     SESSION_SECRET: SECRET,
     GITHUB_CLIENT_ID: 'cid123',
     GITHUB_CLIENT_SECRET: 'shh',
-    SITE_ORIGIN: 'https://claude-rpc.vercel.app',
+    SITE_ORIGIN: 'https://claude-rpc.com',
   };
 }
 
@@ -131,7 +131,7 @@ test('auth/callback exchanges the code and redirects to the site with a session 
   const res = await handleAuthCallback(url, env, githubMock('octocat'));
   assert.equal(res.status, 302);
   const dest = res.headers.get('Location');
-  assert.ok(dest.startsWith('https://claude-rpc.vercel.app/leaderboard#token='), dest);
+  assert.ok(dest.startsWith('https://claude-rpc.com/leaderboard#token='), dest);
   const token = decodeURIComponent(dest.match(/#token=([^&]+)/)[1]);
   assert.equal((await verifyToken(token, 'sess', SECRET)).gh, 'octocat');
 });
