@@ -678,7 +678,11 @@ export async function handleProfile(request, env) {
       // holder keeps their stats under a derived handle.
       let alt = null;
       for (const suffix of [owner.slice(0, 4), owner.slice(0, 8), owner.slice(0, 12)]) {
-        const candidate = normHandle(`${handle}-${suffix}`);
+        // Truncate the base so the candidate fits normHandle's 32-char cap —
+        // otherwise every candidate for a long handle nulls out and the
+        // verified owner gets a bogus 409 instead of reclaiming their name.
+        const base = handle.slice(0, Math.max(2, 32 - suffix.length - 1));
+        const candidate = normHandle(`${base}-${suffix}`);
         if (candidate && !(await env.TOTALS.get(HANDLE_KEY(candidate)))) { alt = candidate; break; }
       }
       if (!alt) return jsonError(409, 'handle taken');
@@ -816,7 +820,13 @@ export async function handleLeaderboard(url, env) {
   };
   rows.sort((a, b) => (Number(b.verified) - Number(a.verified)) || (valueOf(b) - valueOf(a)));
   // publicProfile strips index-internal fields (updatedAt) from the response.
-  const top = rows.slice(0, limit).map((r, i) => ({ rank: i + 1, ...publicProfile(r) }));
+  // The unverified ranking cap also bounds the DISPLAYED token count — a
+  // self-reported 1T-token row shouldn't render a number it doesn't rank at.
+  const top = rows.slice(0, limit).map((r, i) => {
+    const row = { rank: i + 1, ...publicProfile(r) };
+    if (!r.verified && typeof row.tokens === 'number') row.tokens = Math.min(row.tokens, UNVERIFIED_TOKENS_CAP);
+    return row;
+  });
 
   return new Response(JSON.stringify({
     schemaVersion: SCHEMA_VERSION, metric: key, count: top.length, leaderboard: top, ts: Date.now(),
@@ -1002,7 +1012,10 @@ export async function handleAuthLogin(url, env) {
   // Open-redirect guard: the post-login return target must be a same-site
   // path, never a full URL.
   let ret = url.searchParams.get('return') || '/leaderboard';
-  if (!/^\/[\w\-/.]*$/.test(ret)) ret = '/leaderboard';
+  // Reject protocol-relative (`//host`) and traversal (`..`) forms too — the
+  // char-class regex alone admits both, and while the worker always prefixes
+  // a fixed origin today, the guard should be as strict as its comment claims.
+  if (!/^\/[\w\-/.]*$/.test(ret) || ret.startsWith('//') || ret.includes('..')) ret = '/leaderboard';
   const state = await mintToken('state', { ret }, env.SESSION_SECRET, STATE_TTL_MS);
   const gh = new URL('https://github.com/login/oauth/authorize');
   gh.searchParams.set('client_id', env.GITHUB_CLIENT_ID);
@@ -1421,17 +1434,45 @@ async function migrateSquadsToCanonical(env, fromId, toId) {
 async function mergeIntoCanonical(env, machineId, canonicalId, canonicalProfile) {
   const C = canonicalProfile;
   C.machines = ensureMachines(C, canonicalId);
-  // Fold N's standalone profile (if any) into C's slice map under N's id, so
-  // its lifetime totals are summed rather than lost. machineSlice re-clamps.
+  // Fold N's totals into C's slice map so its lifetime numbers are summed
+  // rather than lost. machineSlice re-clamps. When N is itself a canonical
+  // with member machines, fold each slice INDIVIDUALLY — folding the
+  // whole-profile SUM under machines[N] while members later re-publish their
+  // own slices into C would double-count them — and remember the members so
+  // their aliases can be repointed (resolveCanonical is single-hop; leaving
+  // alias:member → N would strand them on a deleted profile).
   const nProf = await getProfile(env, machineId);
+  const absorbed = [];
   if (nProf) {
-    C.machines[machineId] = machineSlice(nProf, C.machines[machineId]);
+    const slices = nProf.machines && typeof nProf.machines === 'object' && Object.keys(nProf.machines).length
+      ? nProf.machines
+      : { [machineId]: nProf };
+    for (const [mid, slice] of Object.entries(slices)) {
+      if (mid === canonicalId) continue;
+      C.machines[mid] = machineSlice(slice, C.machines[mid]);
+      if (mid !== machineId) absorbed.push(mid);
+    }
   }
   recomputeTotals(C);
   await env.TOTALS.put(PF_KEY(canonicalId), JSON.stringify(C)); // canonical → permanent (verified)
 
-  // Point N at C (single hop), then dismantle N's standalone identity.
+  // Point N (and any machines N had absorbed) at C, single hop each, then
+  // dismantle N's standalone identity.
   await env.TOTALS.put(ALIAS_KEY(machineId), canonicalId);
+  for (const mid of absorbed) {
+    try { await env.TOTALS.put(ALIAS_KEY(mid), canonicalId); } catch { /* best-effort */ }
+  }
+  // N may have been verified under a DIFFERENT login earlier; a dangling
+  // gh:<oldLogin> → N would now resolve through alias:N into C and hand that
+  // login C's whole identity. Delete only if it still points at N — in the
+  // common same-login flow gh:<login> points at C (or is re-put by the caller).
+  if (nProf && normGithub(nProf.githubUser)) {
+    try {
+      if ((await env.TOTALS.get(GH_KEY(nProf.githubUser))) === machineId) {
+        await env.TOTALS.delete(GH_KEY(nProf.githubUser));
+      }
+    } catch { /* best-effort */ }
+  }
   if (nProf && nProf.handle) {
     const holder = await env.TOTALS.get(HANDLE_KEY(nProf.handle));
     if (holder === machineId) { try { await env.TOTALS.delete(HANDLE_KEY(nProf.handle)); } catch { /* best-effort */ } }
@@ -1528,7 +1569,14 @@ export async function handlePairStart(request, env) {
     }
     login = prof.githubUser;
   }
-  const code = newInviteCode().slice(3); // 6 chars, same unambiguous alphabet
+  // Re-roll on collision: overwriting a live code would bind the first
+  // minter's claimant to the SECOND minter's login. One extra read per mint.
+  let code = null;
+  for (let i = 0; i < 4 && !code; i++) {
+    const candidate = newInviteCode().slice(3); // 6 chars, same unambiguous alphabet
+    if (!(await env.TOTALS.get(PAIR_KEY(candidate)))) code = candidate;
+  }
+  if (!code) return jsonError(503, 'could not mint a unique code — try again');
   await env.TOTALS.put(PAIR_KEY(code), login, { expirationTtl: PAIR_TTL_SECONDS });
   return jsonOk({ ok: true, code, expiresInSec: PAIR_TTL_SECONDS });
 }

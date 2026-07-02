@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync, existsSync, writeFileSync, mkdirSync, renameSync, openSync, readSync, closeSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync, existsSync, writeFileSync, mkdirSync, renameSync, openSync, readSync, closeSync, realpathSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 import { homedir } from 'node:os';
 import { CLAUDE_PROJECTS, SCAN_CACHE_PATH, AGGREGATE_PATH, DATA_DIR, EVENTS_LOG_PATH } from './paths.js';
@@ -9,7 +9,9 @@ import { classifyShip } from './ships.js';
 // Bumping this forces a full re-parse on next scan. Increment whenever the
 // per-transcript summary schema changes in a way old caches can't satisfy.
 // v5: per-day ships/shipKinds + per-day project attribution (recap).
-const CACHE_VERSION = 5;
+// v6: day/week/hour buckets carry firstTs/lastTs (they were declared but
+//     never assigned, leaving {startTimeLabel} permanently blank).
+const CACHE_VERSION = 6;
 
 // Cap counted gap between consecutive timestamps. Anything larger is treated
 // as the user walking away — we count only what's plausibly active time.
@@ -295,6 +297,15 @@ function parseChunkInto(text, summary, pstate) {
     const weekBucket = week ? (summary.byWeek[week] ||= blankDay()) : null;
     const hourBucket = hour !== null ? (summary.byHour[hour] ||= blankDay()) : null;
     const allBuckets = [dayBucket, weekBucket, hourBucket].filter(Boolean);
+    // First/last activity within each bucket — blankDay declares these and
+    // mergeDay merges them, but nothing assigned them, so "started 09:14"-style
+    // labels never rendered.
+    if (ts) {
+      for (const bucket of allBuckets) {
+        if (!bucket.firstTs || ts < bucket.firstTs) bucket.firstTs = ts;
+        if (!bucket.lastTs || ts > bucket.lastTs) bucket.lastTs = ts;
+      }
+    }
 
     if (r.type === 'assistant') {
       const turnModel = r.message?.model || summary.model;
@@ -711,7 +722,10 @@ function readCache() {
 function writeCache(cache) {
   ensureDataDir();
   cache._v = CACHE_VERSION;
-  const tmp = SCAN_CACHE_PATH + '.tmp';
+  // Pid-suffixed like state.js: the daemon's background rescan and a user-run
+  // `claude-rpc scan` can overlap, and a shared tmp name lets one writer's
+  // rename land a half-written file (or ENOENT the other's rename).
+  const tmp = `${SCAN_CACHE_PATH}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify(cache));
   renameSync(tmp, SCAN_CACHE_PATH);
 }
@@ -740,7 +754,7 @@ function readNotificationsByDay() {
 
 function writeAggregate(agg) {
   ensureDataDir();
-  const tmp = AGGREGATE_PATH + '.tmp';
+  const tmp = `${AGGREGATE_PATH}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify(agg, null, 2));
   renameSync(tmp, AGGREGATE_PATH);
 }
@@ -1103,6 +1117,18 @@ export function scan({ projectsDir, projectsDirs, onProgress, force = false, ext
   else {
     dirs.push(CLAUDE_PROJECTS);
     dirs.push(...discoverAltProjectDirs());
+  }
+  // Dedupe by REAL path, not path string: a symlinked alt location (e.g.
+  // ~/.config/claude → ~/.claude) otherwise walks the same transcripts twice
+  // under two absolute paths and exactly doubles every lifetime stat.
+  {
+    const seen = new Set();
+    for (let i = 0; i < dirs.length; i++) {
+      let key = dirs[i];
+      try { key = realpathSync(key); } catch { /* missing dir — keep literal */ }
+      if (seen.has(key)) { dirs.splice(i, 1); i--; continue; }
+      seen.add(key);
+    }
   }
   for (const d of extraDirs) if (!dirs.includes(d)) dirs.push(d);
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { existsSync, unlinkSync, watch, appendFileSync, mkdirSync, statSync, renameSync } from 'node:fs';
-import { basename, dirname } from 'node:path';
+import { existsSync, unlinkSync, watch, appendFileSync, mkdirSync, statSync, renameSync, readdirSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { Client } from './discord-ipc.js';
 import { readState, sweepStaleStateTmp, listSessionStates, sweepStaleSessionStates } from './state.js';
 import { makeRotationCursor, pickFrames, selectFrame, resolveLargeImageKey, shouldShowGithubButton, pickActiveSession, throttleDecision } from './presence.js';
@@ -291,10 +291,13 @@ function buildActivity(opts = {}) {
 
   if (state.status === 'stale') {
     effectiveSessionStart = null;
-  } else if (state.sessionStart) {
+  } else if (state.sessionStart && !state.borrowed) {
     effectiveSessionStart = state.sessionStart;
   } else if (!effectiveSessionStart) {
-    effectiveSessionStart = state.lastActivity || Date.now();
+    // Borrowed states carry a moving transcript mtime as sessionStart — seed
+    // the timer from the first observation and hold it, or the elapsed clock
+    // restarts every refreshLiveSessions tick.
+    effectiveSessionStart = state.sessionStart || state.lastActivity || Date.now();
   }
   if (config.showElapsed && effectiveSessionStart && state.status !== 'stale') {
     // Discord IPC expects millisecond timestamps (not seconds).
@@ -574,7 +577,15 @@ function watchFiles() {
   // every writer here (state.js, pause.js, the scanner, the settings GUI)
   // commits via tmp+rename.
   const targets = [
-    { path: STATE_PATH, label: 'state', onChange: pushPresence },
+    // Hooks write per-session state-<sid>.json (state.json only for legacy
+    // payloads without a session_id), so the state target matches the whole
+    // family — filtering on the literal 'state.json' made the instant watcher
+    // path dead for every real session, leaving only the poll tick.
+    {
+      path: STATE_PATH, label: 'state', onChange: pushPresence,
+      matches: (f) => /^state(-.+)?\.json$/.test(f),
+      scanDir: STATE_DIR,
+    },
     { path: PAUSE_PATH, label: 'pause', onChange: pushPresence },
     { path: CONFIG_PATH, label: 'config', onChange: () => {
       log('Config changed — reloading');
@@ -595,17 +606,38 @@ function watchFiles() {
   // poll only logs a "fallback caught it" line for events the watcher truly
   // missed, not for everything it already handled.
   const lastMtime = new Map();
-  const recordMtime = (path) => {
-    try { if (existsSync(path)) lastMtime.set(path, statSync(path).mtimeMs); }
-    catch { /* mid-rename; a later observation records it */ }
+  // Current mtime for a target: single file by default, or the max across a
+  // directory's matching files for family targets (state-<sid>.json). Max is
+  // monotone under writes, so pollDecision's `cur > prev` still works; a
+  // deleted session file lowers it, which correctly doesn't fire.
+  const statTarget = (t) => {
+    if (t.scanDir) {
+      let max;
+      try {
+        for (const name of readdirSync(t.scanDir)) {
+          if (!t.matches(name)) continue;
+          try {
+            const m = statSync(join(t.scanDir, name)).mtimeMs;
+            if (max === undefined || m > max) max = m;
+          } catch { /* file vanished mid-scan */ }
+        }
+      } catch { /* dir missing (pre-first-hook) */ }
+      return max;
+    }
+    try { return existsSync(t.path) ? statSync(t.path).mtimeMs : undefined; }
+    catch { return undefined; /* mid-rename; a later observation records it */ }
+  };
+  const recordMtime = (t) => {
+    const m = statTarget(t);
+    if (m !== undefined) lastMtime.set(t.path, m);
   };
   // Seed baselines so the first poll tick doesn't fire for files that merely
   // already existed when the daemon started.
-  targets.forEach((t) => recordMtime(t.path));
+  targets.forEach((t) => recordMtime(t));
 
   const fire = (t, viaPoll) => {
     if (viaPoll) log(`${t.label} changed — poll fallback caught an event fs.watch missed`);
-    recordMtime(t.path); // record before onChange so a re-entrant tick can't double-fire
+    recordMtime(t); // record before onChange so a re-entrant tick can't double-fire
     t.onChange();
   };
 
@@ -625,11 +657,12 @@ function watchFiles() {
   }
   for (const [dir, group] of groups) {
     if (!existsSync(dir)) continue;
-    const byName = new Map(group.map((t) => [basename(t.path), t]));
     let timer = null;
     try {
       watch(dir, (event, filename) => {
-        const hits = filename ? (byName.has(filename) ? [byName.get(filename)] : []) : group;
+        const hits = filename
+          ? group.filter((t) => (t.matches ? t.matches(String(filename)) : basename(t.path) === filename))
+          : group;
         if (!hits.length) return;
         clearTimeout(timer);
         timer = setTimeout(() => hits.forEach((t) => fire(t, false)), 250);
@@ -646,9 +679,7 @@ function watchFiles() {
   // until the next unrelated state change.
   setInterval(() => {
     for (const t of targets) {
-      let cur;
-      try { cur = existsSync(t.path) ? statSync(t.path).mtimeMs : undefined; }
-      catch { continue; /* mid-rename; next tick picks it up */ }
+      const cur = statTarget(t);
       const decision = pollDecision(lastMtime.get(t.path), cur);
       if (decision === 'seed') lastMtime.set(t.path, cur);
       else if (decision === 'fire') fire(t, true);

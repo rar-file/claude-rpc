@@ -853,3 +853,70 @@ test('handleProfileGet: cleans up the orphaned handle mapping on 404', async () 
   assert.equal(res.status, 404);
   assert.equal(await env.TOTALS.get('handle:' + profileBody.handle), null, 'mapping dropped');
 });
+
+// ── mergeIntoCanonical hygiene (via /pair/claim) ──────────────────────
+
+const { handlePairClaim } = await import('../src/index.js');
+
+const UUID_N = 'aaaaaaaa-1111-2222-3333-444444444444';
+const UUID_M = 'bbbbbbbb-1111-2222-3333-444444444444';
+const UUID_C = 'cccccccc-1111-2222-3333-444444444444';
+
+function pairClaimRequest(instanceId, code) {
+  return new Request('http://localhost/pair/claim', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ instanceId, code }),
+  });
+}
+
+function seedPf(kv, id, over = {}) {
+  kv.store.set(`pf:${id}`, { value: JSON.stringify({
+    handle: over.handle, name: over.handle, verified: !!over.verified,
+    githubUser: over.githubUser, tokens: over.tokens || 1000, sessions: 10,
+    activeMs: 3_600_000, streak: 1, updatedAt: Date.now(),
+    ...(over.machines ? { machines: over.machines } : {}),
+  }), ttl: null });
+}
+
+test('pair/claim merge: a machine previously verified under another login releases its gh: mapping', async () => {
+  const env = makeEnv();
+  const kv = env.TOTALS;
+  // Canonical C verified as alice; machine N previously verified as bob.
+  seedPf(kv, UUID_C, { handle: 'alice', verified: true, githubUser: 'alice' });
+  seedPf(kv, UUID_N, { handle: 'bobbox', verified: true, githubUser: 'bob' });
+  kv.store.set('gh:alice', { value: UUID_C, ttl: null });
+  kv.store.set('gh:bob', { value: UUID_N, ttl: null });
+  kv.store.set('pair:TESTCD', { value: 'alice', ttl: 600 });
+
+  const res = await handlePairClaim(pairClaimRequest(UUID_N, 'TESTCD'), env);
+  assert.equal(res.status, 200, await res.text());
+  assert.equal(await kv.get(`alias:${UUID_N}`), UUID_C, 'N aliased into C');
+  assert.equal(await kv.get('gh:bob'), null, 'stale gh:bob mapping removed — bob no longer resolves into C');
+  assert.equal(await kv.get('gh:alice'), UUID_C, 'alice still points at the canonical');
+});
+
+test('pair/claim merge: a canonical with member machines repoints their aliases and folds slices once', async () => {
+  const env = makeEnv();
+  const kv = env.TOTALS;
+  seedPf(kv, UUID_C, { handle: 'alice', verified: true, githubUser: 'alice' });
+  // N is itself a canonical: its own slice + member machine M's slice.
+  seedPf(kv, UUID_N, {
+    handle: 'oldteam', verified: true, githubUser: 'bob', tokens: 5000,
+    machines: {
+      [UUID_N]: { tokens: 3000, sessions: 6, activeMs: 1_000_000, streak: 1, updatedAt: Date.now() },
+      [UUID_M]: { tokens: 2000, sessions: 4, activeMs: 500_000, streak: 1, updatedAt: Date.now() },
+    },
+  });
+  kv.store.set('gh:alice', { value: UUID_C, ttl: null });
+  kv.store.set(`alias:${UUID_M}`, { value: UUID_N, ttl: null });
+  kv.store.set('pair:TESTCE', { value: 'alice', ttl: 600 });
+
+  const res = await handlePairClaim(pairClaimRequest(UUID_N, 'TESTCE'), env);
+  assert.equal(res.status, 200, await res.text());
+  assert.equal(await kv.get(`alias:${UUID_M}`), UUID_C, 'member machine repointed to the new canonical');
+  const merged = JSON.parse(await kv.get(`pf:${UUID_C}`));
+  assert.equal(merged.machines[UUID_M].tokens, 2000, 'member slice folded individually');
+  assert.equal(merged.machines[UUID_N].tokens, 3000, 'N contributes its OWN slice, not the double-counting profile sum');
+  assert.equal(merged.tokens, 1000 + 3000 + 2000, 'recomputed total sums slices exactly once');
+});

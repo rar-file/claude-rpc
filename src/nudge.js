@@ -26,9 +26,11 @@ function reached(value, list) {
 const fmt = (n) => n >= 1000 ? n.toLocaleString('en-US') : String(n);
 
 // Returns { key, weight, message } for the biggest milestone the aggregate has
-// crossed, or null. `weight` ranks across milestone types so we only ever show
-// the single most impressive one.
-export function pickShareNudge(agg) {
+// crossed that hasn't been shown yet, or null. `weight` ranks across milestone
+// types so we show the single most impressive UNSEEN one — without the `shown`
+// filter, a standing streak record (weight 1000+) re-won every pick, matched
+// the dedup, and permanently silenced every other milestone behind it.
+export function pickShareNudge(agg, shown = new Set()) {
   if (!agg || typeof agg !== 'object') return null;
   const out = [];
 
@@ -58,9 +60,10 @@ export function pickShareNudge(agg) {
     message: `${fmt(h)}+ hours on Claude Code. Your year-in-review is ready — \`claude-rpc serve\` then open /wrapped and hit Share.`,
   });
 
-  if (!out.length) return null;
-  out.sort((a, b) => b.weight - a.weight);
-  return out[0];
+  const fresh = out.filter((n) => !shown.has(n.key));
+  if (!fresh.length) return null;
+  fresh.sort((a, b) => b.weight - a.weight);
+  return fresh[0];
 }
 
 // A quiet, local celebration line for `claude-rpc today`. Complements the
@@ -88,15 +91,22 @@ export function pickTodayMilestone(agg, todayTokens = 0) {
   return null;
 }
 
-function readLastKey(path = NUDGE_STATE) {
-  try { return JSON.parse(readFileSync(path, 'utf8')).key || null; }
-  catch { return null; }
+// Set of every nudge key already shown. Older state files stored a single
+// `key`; fold it in so upgrading doesn't re-show the last nudge.
+function readShownKeys(path = NUDGE_STATE) {
+  try {
+    const raw = JSON.parse(readFileSync(path, 'utf8'));
+    const keys = Array.isArray(raw.shown) ? raw.shown : [];
+    if (raw.key) keys.push(raw.key);
+    return new Set(keys.filter((k) => typeof k === 'string'));
+  } catch { return new Set(); }
 }
 
-function writeLastKey(key, path = NUDGE_STATE) {
+function writeShownKeys(shown, path = NUDGE_STATE) {
   try {
     mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, JSON.stringify({ key, ts: Date.now() }));
+    // Cap the history — milestone lists are finite, 100 is plenty.
+    writeFileSync(path, JSON.stringify({ shown: [...shown].slice(-100), ts: Date.now() }));
   } catch { /* best-effort */ }
 }
 
@@ -104,9 +114,10 @@ function writeLastKey(key, path = NUDGE_STATE) {
 // dedup. Returns a string to print, or null. Marks the nudge as shown.
 export function maybeNudge(agg, config = {}, { path = NUDGE_STATE } = {}) {
   if (config?.nudges?.enabled === false) return null;
-  const n = pickShareNudge(agg);
+  const shown = readShownKeys(path);
+  const n = pickShareNudge(agg, shown);
   if (!n) return null;
-  if (n.key === readLastKey(path)) return null;   // already shown this one
-  writeLastKey(n.key, path);
+  shown.add(n.key);
+  writeShownKeys(shown, path);
   return n.message;
 }

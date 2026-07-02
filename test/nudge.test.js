@@ -74,3 +74,12 @@ test('pickTodayMilestone: day anniversaries, token crossings take precedence', (
   assert.match(pickTodayMilestone(both, 200_000_000), /tokens today/, 'token crossing outranks the anniversary');
   assert.equal(pickTodayMilestone(null, 5), null);
 });
+
+test('pickShareNudge: a shown streak no longer masks other milestones', () => {
+  const agg = { streak: 7, longestStreak: 7, sessions: 120, activeMs: 0 };
+  const first = pickShareNudge(agg);
+  assert.equal(first.key, 'streak:7', 'streak record wins the first pick');
+  const second = pickShareNudge(agg, new Set(['streak:7']));
+  assert.equal(second.key, 'sessions:100', 'next-best milestone surfaces once the streak was shown');
+  assert.equal(pickShareNudge(agg, new Set(['streak:7', 'sessions:100'])), null);
+});

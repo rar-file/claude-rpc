@@ -7,7 +7,7 @@
 
 import { fmtCost } from './pricing.js';
 import { VERSION } from './version.js';
-import { fmtNum, fmtHours } from './fmt.js';
+import { fmtNum, fmtHours, localDateStamp } from './fmt.js';
 
 const W = 520;
 const H = 240;
@@ -94,7 +94,7 @@ export function renderProfileCard(aggregate, { handle = '', generatedAt = new Da
   const t = lifetime(aggregate);
   const lang = topLanguage(aggregate);
   const who = handle ? `@${String(handle).replace(/^@/, '')}` : 'on Claude Code';
-  const sub = `${who} · Day ${t.daysSinceFirst} · as of ${generatedAt.toISOString().slice(0, 10)}`;
+  const sub = `${who} · Day ${t.daysSinceFirst} · as of ${localDateStamp(generatedAt)}`;
   const netStr = `${t.linesNet >= 0 ? '+' : '−'}${fmtNum(Math.abs(t.linesNet))}`;
 
   // 3 columns × 2 rows of stats.

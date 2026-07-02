@@ -67,6 +67,23 @@ export function processHookEvent(event, input = {}) {
 
   switch (event) {
     case 'SessionStart': {
+      // Post-compaction continuation, NOT a new session: Claude Code re-fires
+      // SessionStart with source:'compact' after every compaction. Resetting
+      // here wiped the elapsed timer and message/tool/file counters mid-turn.
+      // Just clear the compacting marker and carry on; the turn that triggered
+      // the compaction resumes immediately, hence 'working'.
+      if (input.source === 'compact') {
+        update((s) => {
+          delete s.compactStartedAt;
+          delete s.compactTrigger;
+          s.status = 'working';
+          s.lastActivity = now;
+          s.claudeClosed = false;
+          if (!s.sessionStart) s.sessionStart = now;
+          return s;
+        });
+        break;
+      }
       reset({
         cwd: input.cwd || process.cwd(),
         model: input.model?.id || input.model || 'claude',
@@ -132,7 +149,7 @@ export function processHookEvent(event, input = {}) {
     case 'PostToolUse': {
       const toolName = input.tool_name || input.toolName || '';
       const toolInput = input.tool_input || input.toolInput || {};
-      const file = toolInput.file_path || toolInput.path || null;
+      const file = toolInput.file_path || toolInput.path || toolInput.notebook_path || null;
       // Just-shipped detection: any Bash command that contains `git push`
       // or `git commit`. Capture cwd + branch + last commit subject NOW
       // — by the time the daemon renders the next frame this info may be
@@ -227,8 +244,15 @@ export function processHookEvent(event, input = {}) {
       });
       break;
     }
+    case 'SubagentStop': {
+      // A subagent finishing is not the SESSION going idle — the parent turn
+      // is still running (often with sibling subagents in flight). Flipping to
+      // idle here showed "Standing by" mid-generation. Just record liveness;
+      // the parent's own Stop/PreToolUse hooks drive status.
+      setActivity({});
+      break;
+    }
     case 'Stop':
-    case 'SubagentStop':
     default: {
       setActivity({ status: 'idle', currentTool: null, currentFile: null });
     }

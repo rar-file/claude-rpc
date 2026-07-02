@@ -15,7 +15,7 @@ import { dayKey } from './scanner.js';
 import { fmtCost } from './pricing.js';
 import { rangeToDays, rangeLabel, pickWindow } from './badge.js';
 import { VERSION } from './version.js';
-import { fmtNum, fmtHours } from './fmt.js';
+import { fmtNum, fmtHours, localDateStamp } from './fmt.js';
 
 const W = 880;
 const H = 540;
@@ -237,7 +237,7 @@ export function renderCard(aggregate, { range = 'year', generatedAt = new Date()
   const linesNet = r.linesAdded - r.linesRemoved;
   const allTimeHours = ((aggregate?.activeMs || 0) / 3_600_000).toFixed(1);
 
-  const subtitle = `${escapeXml(r.daysActive)} active days / ${escapeXml(rangeLabel(range))} ending ${escapeXml(generatedAt.toISOString().slice(0, 10))}`;
+  const subtitle = `${escapeXml(r.daysActive)} active days / ${escapeXml(rangeLabel(range))} ending ${escapeXml(localDateStamp(generatedAt))}`;
 
   // Layout grid
   //   Title block          80 →  W-80

@@ -325,3 +325,55 @@ test('per-session: concurrent sessions write separate files; selection sticks th
     try { unlinkSync(statePathFor(B)); } catch { /* ignore */ }
   }
 });
+
+// ── SessionStart(source:'compact') continuity + SubagentStop + notebooks ──
+
+test('SessionStart with source:compact preserves the running session', () => {
+  const sid = 'compact-test';
+  processHookEvent('SessionStart', { session_id: sid, cwd: '/tmp/proj', model: { id: 'claude-opus-4-7' } });
+  processHookEvent('UserPromptSubmit', { session_id: sid });
+  processHookEvent('PostToolUse', { session_id: sid, tool_name: 'Edit', tool_input: { file_path: '/tmp/proj/a.js' } });
+  const before = readState(sid);
+  processHookEvent('PreCompact', { session_id: sid });
+  assert.equal(readState(sid).status, 'compacting');
+  processHookEvent('SessionStart', { session_id: sid, source: 'compact', cwd: '/tmp/proj' });
+  const after = readState(sid);
+  assert.equal(after.messages, before.messages, 'prompt counter survives compaction');
+  assert.equal(after.filesEdited.length, before.filesEdited.length, 'edited files survive compaction');
+  assert.equal(after.sessionStart, before.sessionStart, 'elapsed timer anchor survives compaction');
+  assert.equal(after.status, 'working', 'the compacted turn resumes as working');
+  assert.ok(after.compactStartedAt == null, 'compacting marker cleared');
+  try { unlinkSync(statePathFor(sid)); } catch {}
+});
+
+test('SessionStart WITHOUT source still resets (fresh session)', () => {
+  const sid = 'fresh-test';
+  processHookEvent('SessionStart', { session_id: sid, cwd: '/tmp/a' });
+  processHookEvent('UserPromptSubmit', { session_id: sid });
+  processHookEvent('SessionStart', { session_id: sid, cwd: '/tmp/b' });
+  assert.equal(readState(sid).messages, 0);
+  assert.equal(readState(sid).cwd, '/tmp/b');
+  try { unlinkSync(statePathFor(sid)); } catch {}
+});
+
+test('SubagentStop does not flip the session to idle', () => {
+  const sid = 'subagent-test';
+  processHookEvent('SessionStart', { session_id: sid, cwd: '/tmp/proj' });
+  processHookEvent('PreToolUse', { session_id: sid, tool_name: 'Agent', tool_input: {} });
+  const busy = readState(sid).status;
+  processHookEvent('SubagentStop', { session_id: sid });
+  assert.equal(readState(sid).status, busy, 'parent status untouched by a finishing subagent');
+  processHookEvent('Stop', { session_id: sid });
+  assert.equal(readState(sid).status, 'idle', 'a real Stop still idles');
+  try { unlinkSync(statePathFor(sid)); } catch {}
+});
+
+test('PostToolUse counts NotebookEdit via notebook_path', () => {
+  const sid = 'nb-test';
+  processHookEvent('SessionStart', { session_id: sid, cwd: '/tmp/proj' });
+  processHookEvent('PostToolUse', { session_id: sid, tool_name: 'NotebookEdit', tool_input: { notebook_path: '/tmp/proj/analysis.ipynb' } });
+  const s = readState(sid);
+  assert.equal(s.filesEdited.length, 1, 'notebook edit tracked');
+  assert.match(s.filesEdited[0], /analysis\.ipynb/);
+  try { unlinkSync(statePathFor(sid)); } catch {}
+});

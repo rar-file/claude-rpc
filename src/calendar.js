@@ -3,6 +3,7 @@
 // `claude-rpc calendar --out cal.svg [--gist]`.
 
 import { dayKey } from './scanner.js';
+import { localDateStamp } from './fmt.js';
 import { VERSION } from './version.js';
 
 const PALETTE = {
@@ -80,7 +81,7 @@ export function renderCalendar(aggregate, { weeks = 53, generatedAt = new Date()
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Claude Code activity calendar">
   <rect width="${W}" height="${H}" fill="${PALETTE.paper}"/>
   <text x="${padX}" y="28" font-family="Space Grotesk, Inter, system-ui, sans-serif" font-size="20" font-weight="800" fill="${PALETTE.ink}">a year on Claude Code</text>
-  <text x="${padX}" y="44" font-family="JetBrains Mono, ui-monospace, monospace" font-size="11" fill="${PALETTE.inkMute}">${escapeXml(activeDays)} active days · ${escapeXml(totalHours)}h · as of ${generatedAt.toISOString().slice(0, 10)}</text>
+  <text x="${padX}" y="44" font-family="JetBrains Mono, ui-monospace, monospace" font-size="11" fill="${PALETTE.inkMute}">${escapeXml(activeDays)} active days · ${escapeXml(totalHours)}h · as of ${localDateStamp(generatedAt)}</text>
   ${monthLabels}
   ${cells}
   <text x="${W - 170}" y="${H - 10}" font-family="JetBrains Mono, ui-monospace, monospace" font-size="9" fill="${PALETTE.inkFaint}">less</text>

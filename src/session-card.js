@@ -4,6 +4,7 @@
 // `claude-rpc session-card --out s.svg`.
 
 import { VERSION } from './version.js';
+import { localDateStamp } from './fmt.js';
 
 const W = 520;
 const H = 230;
@@ -47,7 +48,7 @@ export function renderSessionCard(vars = {}, { generatedAt = new Date() } = {}) 
   <rect x="0.75" y="0.75" width="${W - 7}" height="${H - 9}" fill="url(#dg)"/>
 
   <text x="40" y="50" font-family="Space Grotesk, Inter, system-ui, sans-serif" font-size="28" font-weight="800" letter-spacing="-1" fill="${PALETTE.ink}">${escapeXml(v.project || 'this session')}</text>
-  <text x="40" y="72" font-family="JetBrains Mono, ui-monospace, monospace" font-size="12" fill="${PALETTE.inkMute}">${escapeXml(`${v.modelPretty || 'Claude'} · ${v.duration || '0s'} · ${generatedAt.toISOString().slice(0, 10)}`)}</text>
+  <text x="40" y="72" font-family="JetBrains Mono, ui-monospace, monospace" font-size="12" fill="${PALETTE.inkMute}">${escapeXml(`${v.modelPretty || 'Claude'} · ${v.duration || '0s'} · ${localDateStamp(generatedAt)}`)}</text>
   ${v.modelPretty ? tape(W - 150, 28, String(v.modelPretty)) : ''}
 
   <line x1="40" y1="92" x2="${W - 40}" y2="92" stroke="${PALETTE.ink}" stroke-width="1" opacity="0.18"/>

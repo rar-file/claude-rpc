@@ -31,3 +31,11 @@ export function fmtHours(ms) {
   const hours = mins / 60;
   return hours < 10 ? `${hours.toFixed(1)}h` : `${Math.round(hours)}h`;
 }
+
+// Local calendar date "YYYY-MM-DD" — the same day the scanner's byDay buckets
+// key on. Card/calendar/profile stamps used toISOString(), which is UTC and
+// labels the data with the wrong day for any non-UTC user near midnight.
+export function localDateStamp(d = new Date()) {
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}

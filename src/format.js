@@ -805,6 +805,10 @@ function borrowLiveSession(state, liveSessions, now) {
   return {
     ...state,
     status: 'working',
+    // sessionStart here is a moving transcript mtime, not a real anchor — the
+    // flag lets the daemon pin its elapsed timer to the first observation
+    // instead of restarting it every 30s refresh.
+    borrowed: true,
     cwd: recent.cwd || state.cwd || '',
     sessionStart: recent.mtime || now,
     lastActivity: recent.mtime || now,

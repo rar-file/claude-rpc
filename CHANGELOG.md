@@ -2,6 +2,45 @@
 
 All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.1.1] - 2026-07-02
+
+Sixteen logic fixes from a full-codebase review (three parallel deep passes over the pipeline, the CLI, and the worker), plus two funnel fixes. No behavior was intentionally changed beyond what's listed.
+
+**Fixed — presence pipeline**
+
+- **Compaction no longer resets the session.** Claude Code re-fires SessionStart with `source:'compact'` after every compaction; the hook treated it as a brand-new session, wiping the elapsed timer and message/tool/file counters mid-turn. It now just clears the compacting marker and carries on.
+- **The state watcher watches the right files.** Hooks write per-session `state-<sid>.json`, but the daemon's instant watcher and mtime-poll only tracked the legacy `state.json` — every status change waited for the next poll tick instead of firing immediately. Both paths now cover the whole state family.
+- **A finishing subagent no longer idles the card.** SubagentStop flipped the parent session to "Standing by" while sibling agents (or the parent's own generation) were still running.
+- **Borrowed sessions stop restarting the elapsed timer.** When presence borrows a live hookless session, its start anchor is a moving transcript mtime; the daemon now pins the timer to the first observation.
+- **Notebook edits count.** PostToolUse ignored `notebook_path`, so NotebookEdit never incremented the live files-edited counter (the scanner side already counted them).
+
+**Fixed — scanner (cache v6; first scan after updating re-parses once)**
+
+- **Symlinked project dirs no longer double every stat.** Alt roots (e.g. `~/.config/claude` symlinked to `~/.claude`) were deduped by path string, not real path — every transcript parsed twice, exactly doubling sessions/hours/tokens.
+- **Day buckets now record first/last activity**, so "started 09:14"-style labels render (the fields were declared and merged but never assigned).
+- **Concurrent scans can't corrupt the cache** — scan-cache/aggregate tmp files are pid-suffixed like state.json, so a daemon rescan overlapping a user-run `scan` can't land a half-written file.
+
+**Fixed — CLI**
+
+- **`badge --gist`, `calendar --gist`, and `github-stat --gist` no longer overwrite each other.** All three published to the same `claude.svg`; each artifact kind now keeps its own stable file in the shared gist (existing badge URLs keep working).
+- **`--flag=value` works everywhere** the error hint suggested it (badge, card, github-stat, statusline, calendar, session-card, export), and `export --out` validates its value instead of swallowing the next flag.
+- **`community report` exits non-zero when the flush fails**, so `claude-rpc community report || alert` actually alerts.
+- **Chart labels align:** the hour histogram's labels drifted a column per group (a 4-char pitch under 1-char bars) and the heatmap's month header drifted a column per week — plus Mar/May both truncated to "Ma". Both now render on the true column pitch with full month names.
+- **`profile set --github` keeps the ✓ on a case-only respelling** of the same GitHub account.
+- **SVG stamps use your local date** — card/calendar/profile/session-card footers stamped the UTC day, mislabeling the window for any non-UTC user.
+- **Share nudges unstick:** a standing streak record permanently suppressed every other milestone; shown nudges are now remembered individually so the next-best one surfaces.
+
+**Fixed — worker** (identity/merge hygiene; deployed)
+
+- Re-linking a machine that was previously verified under a different GitHub login now releases the old `gh:` mapping instead of letting that login resolve into the new identity.
+- Merging a canonical that had absorbed other machines now repoints those machines' aliases and folds their slices exactly once (they used to strand on a deleted profile).
+- A verified user with a long GitHub name (≥28 chars) can now reclaim their handle from an unverified squatter (the suffixed alternate always overflowed the 32-char cap and 409'd).
+- Pair codes re-roll on collision instead of silently rebinding an in-flight claim to the wrong login; the leaderboard's displayed token count for unverified rows is bounded by the same cap it ranks at; the OAuth `return` guard also rejects `//host` and `..` forms.
+
+**Site**
+
+- The download section now also lists Homebrew and the `curl | sh` one-liner; sitemap `/examples` entry no longer 308s.
+
 ## [1.1.0] - 2026-07-02
 
 **Added**

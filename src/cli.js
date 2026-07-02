@@ -116,6 +116,19 @@ function takeValue(v, flag) {
   return v;
 }
 
+// Expand `--flag=value` into two tokens so every takeValue-based parser
+// accepts the escape hatch takeValue's error message promises. Split on the
+// FIRST `=` only — values may contain their own (`--template={a}={b}`).
+function splitEqArgs(argv) {
+  const out = [];
+  for (const a of argv) {
+    const eq = typeof a === 'string' && a.startsWith('--') ? a.indexOf('=') : -1;
+    if (eq > 2) out.push(a.slice(0, eq), a.slice(eq + 1));
+    else out.push(a);
+  }
+  return out;
+}
+
 function startDaemon({ quiet = false } = {}) {
   const pid = daemonAlive();
   if (pid) {
@@ -241,8 +254,9 @@ function renderHourHistogram(byHour, opts = {}) {
     const ch = heightChars[idx];
     colored.push(h === opts.peakHour ? `${c.bold}${heat(1)}${ch}${c.reset}` : `${heat(ms / max)}${ch}${c.reset}`);
   }
-  // Hour labels under every 3rd hour.
-  const labels = '00  03  06  09  12  15  18  21  ';
+  // Hour labels under every 3rd hour — 3-char pitch to match the 1-char-per-
+  // hour bars above (a 4-char pitch drifted the labels a column per group).
+  const labels = '00 03 06 09 12 15 18 21';
   return [
     `  ${colored.join('')}`,
     `  ${c.dim}${labels}${c.reset}`,
@@ -302,8 +316,26 @@ function renderHeatmap(byDay, days = 91) {
       lastMonth = d.getMonth();
     }
   }
-  // Build header (3-letter months stretched across columns).
-  const header = labelRow.map((s) => (s + '   ').slice(0, 2)).join(' ');
+  // Build header on the SAME 2-chars-per-column pitch as the body rows
+  // (joining with a space drifted month labels a column per week, ~6 columns
+  // off by the right edge — and 2-char truncation made Mar/May both "Ma").
+  // Full 3-letter names are stamped into a char grid; months are always ≥4
+  // columns apart so an overhanging name can't collide with the next label.
+  const headerChars = new Array(cols * 2).fill(' ');
+  const stamps = [];
+  labelRow.forEach((s, col) => {
+    const name = String(s).trim(); // labelRow is prefilled with '  ' blanks
+    if (name) stamps.push({ name, col });
+  });
+  for (let i = 0; i < stamps.length; i++) {
+    const { name, col } = stamps[i];
+    const next = stamps[i + 1];
+    // Window-edge crowding: a month with a single week in view sits right
+    // next to the following month's label — yield to the newer month.
+    if (next && next.col * 2 < col * 2 + name.length + 1) continue;
+    for (let k = 0; k < name.length && col * 2 + k < headerChars.length; k++) headerChars[col * 2 + k] = name[k];
+  }
+  const header = headerChars.join('').replace(/\s+$/, '');
 
   const dayLabels = [' ', 'M', ' ', 'W', ' ', 'F', ' '];
   const lines = [`     ${c.dim}${header}${c.reset}`];
@@ -887,6 +919,7 @@ async function doRecap(argv) {
 }
 
 function parseBadgeArgs(argv) {
+  argv = splitEqArgs(argv);
   const out = { metric: 'hours', range: '7d', out: '', gist: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -921,11 +954,18 @@ async function doBadge(argv) {
 // Publish the rendered badge to a GitHub gist and emit the README-ready
 // markdown snippet. First successful publish records id+owner in
 // config.json so subsequent runs UPDATE that gist (raw URL stays stable).
-async function publishBadgeToGist(svg, opts) {
+async function publishBadgeToGist(svg, opts, kind = 'badge') {
   const { publishGistFile, gistMarkdown } = await import('./gist.js');
   const cfg = loadConfig();
   const stored = cfg.gist || {};
-  const filename = stored.filename || 'claude.svg';
+  // One shared gist, but a filename PER ARTIFACT KIND — badge, calendar, and
+  // github-stat used to all write `claude.svg`, so publishing one silently
+  // replaced whichever the user had embedded. The legacy single `filename`
+  // stays with the badge (the original artifact); other kinds get their own
+  // stable file the first time they publish.
+  const files = stored.files || {};
+  const filename = files[kind]
+    || (kind === 'badge' ? (stored.filename || 'claude.svg') : `claude-${kind}.svg`);
   try {
     const result = await publishGistFile({
       svg,
@@ -943,8 +983,11 @@ async function publishBadgeToGist(svg, opts) {
       ...(userCfg.gist || {}),
       id: result.id,
       owner: result.owner,
-      filename,
+      files: { ...((userCfg.gist || {}).files || {}), [kind]: filename },
     };
+    // Keep the legacy field pointing at the badge so an older CLI version
+    // reading `gist.filename` still updates the right file.
+    if (kind === 'badge') userCfg.gist.filename = filename;
     if (stored.public !== undefined) userCfg.gist.public = stored.public;
     writeUserConfig(userCfg);
     const wasUpdate = !!stored.id;
@@ -968,6 +1011,7 @@ async function publishBadgeToGist(svg, opts) {
 // for a range (year / month / week / all-time). Output is SVG only;
 // screenshot or convert to PNG offline if needed.
 function parseCardArgs(argv) {
+  argv = splitEqArgs(argv);
   const out = { range: 'year', out: '' };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -998,6 +1042,7 @@ async function doCard(argv) {
 // for a profile README. `--gist` publishes it to a gist (raw URL stays stable
 // across re-runs) so the README image auto-refreshes when you re-run it.
 function parseGithubStatArgs(argv) {
+  argv = splitEqArgs(argv);
   const out = { out: '', gist: false, handle: '' };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -1017,7 +1062,7 @@ async function doGithubStat(argv) {
   const { renderProfileCard } = await import('./profile.js');
   const svg = renderProfileCard(aggregate, { handle: opts.handle });
   if (opts.gist) {
-    await publishBadgeToGist(svg, { metric: 'profile', range: 'all-time' });
+    await publishBadgeToGist(svg, { metric: 'profile', range: 'all-time' }, 'github-stat');
     return;
   }
   if (opts.out) {
@@ -1043,6 +1088,7 @@ function liveVars() {
 // statusline — a compact one-line status for tmux / starship / shell prompts
 // and Claude Code's own statusline. `--template "..."` overrides the format.
 function doStatusline(argv) {
+  argv = splitEqArgs(argv);
   let tpl = '{statusVerbose} · {project} · {modelPretty}{tokensLabelPad}';
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--template' || argv[i] === '-t') tpl = takeValue(argv[++i], '--template');
@@ -1054,6 +1100,7 @@ function doStatusline(argv) {
 
 // Activity calendar — GitHub-contributions-style year heatmap SVG.
 async function doCalendar(argv) {
+  argv = splitEqArgs(argv);
   const opts = { out: '', gist: false };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--out' || argv[i] === '-o') opts.out = takeValue(argv[++i], '--out');
@@ -1063,7 +1110,7 @@ async function doCalendar(argv) {
   if (!aggregate) fail('no aggregate yet — nothing to render', { hint: 'run `claude-rpc scan` first', code: EX_BAD_STATE });
   const { renderCalendar } = await import('./calendar.js');
   const svg = renderCalendar(aggregate, {});
-  if (opts.gist) return publishBadgeToGist(svg, { metric: 'calendar', range: 'year' });
+  if (opts.gist) return publishBadgeToGist(svg, { metric: 'calendar', range: 'year' }, 'calendar');
   if (opts.out) {
     writeFileSync(opts.out, svg);
     console.log(`  ${c.green}✓${c.reset}  wrote ${c.cyan}${opts.out}${c.reset}  ${c.dim}(${svg.length} bytes)${c.reset}`);
@@ -1072,6 +1119,7 @@ async function doCalendar(argv) {
 
 // Per-session recap card — current/most-recent session as a shareable SVG.
 async function doSessionCard(argv) {
+  argv = splitEqArgs(argv);
   const opts = { out: '' };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--out' || argv[i] === '-o') opts.out = takeValue(argv[++i], '--out');
@@ -1286,10 +1334,12 @@ function doResume() {
 // pipes cleanly into jq / a spreadsheet import.
 
 async function doExport(argv) {
+  argv = splitEqArgs(argv);
   const csv = argv.includes('--csv');
   let out = '';
-  const i = argv.findIndex((a) => a === '--out' || a === '-o');
-  if (i !== -1) out = argv[i + 1] || '';
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--out' || argv[i] === '-o') out = takeValue(argv[++i], '--out');
+  }
   const aggregate = readAggregate();
   if (!aggregate) {
     fail('no aggregate yet — nothing to export', { hint: 'run `claude-rpc scan` first', code: EX_BAD_STATE });
@@ -1629,7 +1679,13 @@ async function communityReport() {
   } else if (result.ok) {
     console.log(`  ${c.cyan}·${c.reset}  ${c.dim}${result.reason}${c.reset}`);
   } else {
-    console.log(`  ${c.yellow}!${c.reset}  flush did not complete  ${c.dim}(${result.reason}${result.error ? ': ' + result.error : ''})${c.reset}`);
+    // Scripts rely on the exit code (`claude-rpc community report || alert`),
+    // so a failed flush must exit non-zero, not just print a warning.
+    console.log('');
+    return fail('flush did not complete', {
+      hint: `${result.reason}${result.error ? ': ' + result.error : ''}`,
+      code: EX_SYS_ERROR,
+    });
   }
   console.log('');
 }
@@ -1745,8 +1801,10 @@ function profileSet(argv) {
       next.githubUser = u;
     }
     // The ✓ belongs to the account that was verified — switching accounts
-    // means re-verifying.
-    if (next.githubUser !== (userCfg.profile || {}).githubUser) delete next.verified;
+    // means re-verifying. GitHub usernames are case-insensitive, so a
+    // case-only respelling of the same account keeps the badge.
+    const prevGh = String((userCfg.profile || {}).githubUser || '').toLowerCase();
+    if (String(next.githubUser || '').toLowerCase() !== prevGh) delete next.verified;
   }
 
   userCfg.profile = next;
