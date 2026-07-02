@@ -905,6 +905,35 @@
   </div>
 </header>
 
+<!-- ─────────────────────────────────────────────────── FILM -->
+<section id="film">
+  <span class="kicker">29 seconds</span>
+  <h2>see it move.</h2>
+  <div class="film-wrap">
+    <div class="film-polaroid">
+      <div class="film-tape"></div>
+      <video src="/img/launch.mp4" poster="/img/og.png" autoplay muted loop playsinline
+             width="1920" height="1080" aria-label="29-second tour: the live Discord card, ship celebrations, the stats layer, and the one-line install"></video>
+      <div class="film-caption">the whole thing, no sound needed · <a href="/img/launch.mp4" download>grab the mp4</a></div>
+    </div>
+  </div>
+</section>
+<style>
+  #film { text-align: center; }
+  .film-wrap { display: flex; justify-content: center; margin-top: 34px; }
+  .film-polaroid {
+    background: #fbf7ee; padding: 16px 16px 12px; border-radius: 6px; position: relative;
+    box-shadow: 0 24px 60px rgba(43,39,34,0.22); transform: rotate(-0.6deg); max-width: 960px;
+  }
+  .film-tape {
+    position: absolute; top: -14px; left: 50%; transform: translateX(-50%) rotate(-2deg);
+    width: 150px; height: 30px; background: rgba(217,119,87,0.32); border-radius: 3px;
+  }
+  .film-polaroid video { width: 100%; height: auto; border-radius: 4px; display: block; }
+  .film-caption { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.78rem; color: var(--ink-mute, #6b6357); padding: 10px 2px 4px; }
+  .film-caption a { color: var(--rust-3, #b8552f); }
+</style>
+
 <!-- ─────────────────────────────────────────────────── DOWNLOAD -->
 <section id="download">
   <span class="kicker">grab the binary</span>
