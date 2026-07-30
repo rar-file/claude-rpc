@@ -2,6 +2,13 @@
 
 All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.4.0] - 2026-07-30
+
+**Added**
+
+- **`setup` ends with one explicit question: `connect GitHub? [y/N]`.** Answering **y** runs the same opt-in flow that already existed (`profile verify`): handle defaults to your GitHub login (renameable with `profile set --handle`), a first scan runs if needed so real totals land instead of zeros, and the gist dance verifies you via the `gh` CLI — no `gh` login and it prints the two ways to finish (claude-rpc.com/link, or `gh auth login` + `claude-rpc profile verify`). Answering **n** (or Enter, the default) sends nothing and stores only a local `ghConnectAsked` marker so setup never asks again. Non-interactive setups, `setup --link` (already a connect), and already-verified machines are never asked. The prompt says "public" because that's what it is — there is deliberately no private identity tier; both the question and that rule are documented in `SECURITY.md` §3c.
+- `src/gist.js` gains `ghLogin()` (the account the `gh` CLI is authed as), and the gist-verification dance moved from `profileVerify` into a shared `gistVerifyDance` that reports failures instead of exiting — so a verify hiccup during setup ends with "setup itself is done, retry with `claude-rpc profile verify`" rather than a failed-looking install. `profile verify` behaves exactly as before.
+
 ## [1.3.1] - 2026-07-06
 
 Four presence-liveness fixes adopted from a community fork — thanks
