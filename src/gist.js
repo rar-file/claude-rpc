@@ -73,6 +73,16 @@ export function hasGh() {
   }
 }
 
+// The login of the account `gh` is authed as, or null when gh is missing or
+// logged out. `gh api user` needs auth, so a non-zero status covers both.
+export function ghLogin() {
+  try {
+    const r = gh(['api', 'user', '--jq', '.login'], { encoding: 'utf8' });
+    if (r.status === 0) return (r.stdout || '').trim() || null;
+  } catch { /* same "not available" signals as hasGh */ }
+  return null;
+}
+
 function ghCreate(filePath, description, isPublic) {
   const args = ['gist', 'create', filePath, '--desc', description];
   if (isPublic) args.push('--public');

@@ -208,6 +208,16 @@ anonymous 3a report, this one carries your chosen public identity. The
 It sends absolute totals (not deltas) and is idempotent worker-side (a SET, not
 an add). `profile off` stops it.
 
+**The setup-time "connect GitHub?" question.** Since v1.4, an interactive
+`claude-rpc setup` ends with one explicit y/N: *connect GitHub?* Answering
+**y** runs the standard opt-in flow above (public profile, handle defaulting
+to your GitHub login, gist verification) — nothing beyond that flow's
+documented payload. Answering **n** (or Enter, the default) sends nothing and
+stores only a local `ghConnectAsked` marker so setup never asks again;
+non-interactive setups are never asked. There is no private identity tier:
+the only way claude-rpc ever learns a GitHub identity is this same public,
+consented profile flow.
+
 **Claude Wrapped (opt-in one-shot, never automatic).** `claude-rpc wrapped
 --publish` publishes a year-in-review blob under your profile handle to
 `<endpoint>/wrapped`, rendered at `claude-rpc.com/wrapped/<handle>`. It never

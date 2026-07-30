@@ -72,7 +72,7 @@ claude-rpc setup
 
 That's the whole pitch.
 
-> `setup` registers a Windows startup entry and wires hooks into Claude Code's `settings.json`, and the daemon reports anonymous totals by default. All of it is reversible (`claude-rpc uninstall`, `community off`) and fully documented in [`SECURITY.md`](SECURITY.md) — read it first if you want to know exactly what runs.
+> `setup` registers a Windows startup entry and wires hooks into Claude Code's `settings.json`, and the daemon reports anonymous totals by default. It ends with one optional y/N — *connect GitHub?* — which publishes a verified public [leaderboard](https://claude-rpc.com/leaderboard) profile only if you say yes (asked once; Enter skips). All of it is reversible (`claude-rpc uninstall`, `community off`, `profile off`) and fully documented in [`SECURITY.md`](SECURITY.md) — read it first if you want to know exactly what runs.
 
 The Discord *desktop* app must be running. The browser client doesn't expose the local IPC bridge that Rich Presence uses.
 

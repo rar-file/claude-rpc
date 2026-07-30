@@ -2001,28 +2001,26 @@ async function profilePublish() {
   }
 }
 
-// GitHub verification: ask the worker for a one-time token, publish it in a
-// public gist (reusing the gist helper), then have the worker confirm it.
-async function profileVerify() {
-  const cfg = loadConfig();
+// The gist-verification dance shared by `profile verify` and setup's optional
+// GitHub-connect question: worker token → public proof gist → worker check →
+// persist the verified identity locally. Prints its own progress lines (they
+// read the same in both contexts) and returns { ok, who } on success. It never
+// exits: hard failures come back as { ok: false, fatal: {label, hint, code} }
+// so profileVerify can fail() loudly while setup — where the whole step is
+// optional — shrugs and finishes the install.
+async function gistVerifyDance(cfg) {
   const profile = cfg.profile || {};
   const community = cfg.community || {};
-  // No --github required up front: the worker treats it as a hint only and
-  // takes the authoritative identity from whoever owns the proof gist —
-  // and publishing that gist already requires gh auth, so the account is
-  // known by the time it matters.
-  if (!profile.githubUser) {
-    console.log(`  ${c.dim}no --github set — your verified identity will be the account that owns the proof gist${c.reset}`);
-  }
   if (!community.instanceId) {
-    return fail('enable the profile first', { hint: 'claude-rpc profile on', code: EX_BAD_STATE });
+    return { ok: false, fatal: { label: 'enable the profile first', hint: 'claude-rpc profile on', code: EX_BAD_STATE } };
   }
   const endpoint = (community.endpoint || '').replace(/\/+$/, '');
   if (!endpoint) {
-    return fail('no community endpoint configured', {
+    return { ok: false, fatal: {
+      label: 'no community endpoint configured',
       hint: 'config.json is missing community.endpoint — re-run `claude-rpc setup` to restore the default',
       code: EX_BAD_STATE,
-    });
+    } };
   }
 
   const post = async (path, body) => {
@@ -2043,7 +2041,9 @@ async function profileVerify() {
     }
     console.log(`  ${c.dim}requesting a verification token…${c.reset}`);
     const start = await post('/verify/start', { instanceId: community.instanceId, githubUser: profile.githubUser || null });
-    if (!start.json?.token) return fail(`verify/start failed: ${start.json?.error || start.status}`, { code: EX_SYS_ERROR });
+    if (!start.json?.token) {
+      return { ok: false, fatal: { label: `verify/start failed: ${start.json?.error || start.status}`, code: EX_SYS_ERROR } };
+    }
     const token = start.json.token;
 
     const { publishGistFile } = await import('./gist.js');
@@ -2071,14 +2071,100 @@ async function profileVerify() {
       if (who && profile.githubUser && who.toLowerCase() !== profile.githubUser.toLowerCase()) {
         console.log(`     ${c.dim}(your gist is owned by @${who}, so the profile now uses that account)${c.reset}`);
       }
-    } else {
-      console.log(`  ${c.yellow}!${c.reset}  not confirmed: ${check.json?.error || check.status}`);
-      console.log(`     ${c.dim}↳ make sure the gist is public, then re-run ${c.reset}${c.cyan}claude-rpc profile verify${c.reset}`);
+      return { ok: true, who };
     }
+    // Soft outcome (matches historical behavior): the message tells the user
+    // how to finish, and the process still exits 0.
+    console.log(`  ${c.yellow}!${c.reset}  not confirmed: ${check.json?.error || check.status}`);
+    console.log(`     ${c.dim}↳ make sure the gist is public, then re-run ${c.reset}${c.cyan}claude-rpc profile verify${c.reset}`);
+    return { ok: false };
   } catch (e) {
-    return fail(`verification failed: ${e.message}`, {
+    return { ok: false, fatal: {
+      label: `verification failed: ${e.message}`,
       hint: 'needs `gh` logged in or GH_TOKEN with gist scope', code: EX_SYS_ERROR,
-    });
+    } };
+  }
+}
+
+// GitHub verification: ask the worker for a one-time token, publish it in a
+// public gist (reusing the gist helper), then have the worker confirm it.
+async function profileVerify() {
+  const cfg = loadConfig();
+  // No --github required up front: the worker treats it as a hint only and
+  // takes the authoritative identity from whoever owns the proof gist —
+  // and publishing that gist already requires gh auth, so the account is
+  // known by the time it matters.
+  if (!cfg.profile?.githubUser) {
+    console.log(`  ${c.dim}no --github set — your verified identity will be the account that owns the proof gist${c.reset}`);
+  }
+  const r = await gistVerifyDance(cfg);
+  if (r.fatal) return fail(r.fatal.label, { hint: r.fatal.hint || '', code: r.fatal.code });
+}
+
+// ── Setup-time GitHub connect ────────────────────────────────────────────
+// One explicit y/N at the end of `setup`, asked at most once ever (the answer
+// is remembered either way, and `claude-rpc link` / `profile verify` stay
+// available whenever). Saying y publishes a verified PUBLIC profile — handle
+// defaulting to the GitHub login — because that is the only "connected" state
+// the worker has: there is deliberately no silent or private identity tier
+// (SECURITY.md documents this). Declining changes nothing.
+async function setupGhConnect() {
+  const cfg = loadConfig();
+  if (cfg.profile?.verified) return;                          // already connected
+  if (!process.stdin.isTTY || !process.stdout.isTTY) return;  // piped/CI setup — never block on a prompt
+  if (!cfg.community?.instanceId) return;                     // no identity minted (dev tree) — nothing to verify
+  if (readJson(CONFIG_PATH, {}).profile?.ghConnectAsked) return;
+
+  console.log('');
+  console.log(`  ${c.bold}connect GitHub?${c.reset}  ${c.dim}optional — asked once, everything works without it${c.reset}`);
+  console.log(`    ${c.green}·${c.reset} verifies this install as your GitHub account ${c.dim}(public proof gist via the ${c.reset}gh${c.dim} CLI)${c.reset}`);
+  console.log(`    ${c.green}·${c.reset} publishes a ${c.bold}public${c.reset} profile at ${c.cyan}claude-rpc.com/u/<your-login>${c.reset} with the verified ✓`);
+  console.log(`      ${c.dim}totals only — tokens · sessions · hours · streak; never prompts, paths, or project names${c.reset}`);
+  const answer = (await prompt(`  connect? ${c.dim}[y/N]${c.reset} `)).trim();
+
+  // Remember that we asked before acting on the answer — setup never nags.
+  const userCfg = readJson(CONFIG_PATH, {});
+  userCfg.profile = { ...(userCfg.profile || {}), ghConnectAsked: true };
+  writeUserConfig(userCfg);
+
+  if (!/^y(es)?$/i.test(answer)) {
+    console.log(`  ${c.dim}skipped — connect later with ${c.reset}${c.cyan}claude-rpc link${c.reset}${c.dim} or ${c.reset}${c.cyan}claude-rpc profile verify${c.reset}`);
+    return;
+  }
+
+  const { ghLogin } = await import('./gist.js');
+  const login = lb.normalizeGithubUser(ghLogin());
+  if (!login) {
+    console.log(`  ${c.yellow}!${c.reset}  no logged-in ${c.cyan}gh${c.reset} CLI found — two ways to finish:`);
+    console.log(`     ${c.dim}browser:  log in at${c.reset} ${c.cyan}${LINK_PAGE}${c.reset} ${c.dim}and paste the${c.reset} ${c.cyan}claude-rpc link <code>${c.reset} ${c.dim}it shows${c.reset}`);
+    console.log(`     ${c.dim}terminal:${c.reset} ${c.cyan}gh auth login${c.reset} ${c.dim}then${c.reset} ${c.cyan}claude-rpc profile verify${c.reset}`);
+    return;
+  }
+
+  // Seed the local profile: handle defaults to the GitHub login (renameable
+  // any time with `profile set --handle`), publishing on so the daemon keeps
+  // the board row fresh from here out.
+  const handle = lb.isValidHandle(userCfg.profile?.handle) ? userCfg.profile.handle : lb.normalizeHandle(login);
+  if (!handle) {
+    console.log(`  ${c.yellow}!${c.reset}  couldn't derive a handle from @${login} — run ${c.cyan}claude-rpc profile set --handle <you>${c.reset} then ${c.cyan}claude-rpc profile verify${c.reset}`);
+    return;
+  }
+  userCfg.profile = { ...userCfg.profile, handle, githubUser: login, enabled: true };
+  writeUserConfig(userCfg);
+  console.log(`  ${c.dim}connecting as ${c.reset}${c.cyan}@${login}${c.reset}${c.dim} — handle ${c.reset}${c.cyan}${handle}${c.reset}`);
+
+  // A fresh install has no aggregate yet; publish real totals, not zeros.
+  if (!readAggregate()?.sessions) {
+    console.log(`  ${c.dim}first scan — counting your history…${c.reset}`);
+    doScan(false);
+  }
+
+  const r = await gistVerifyDance(loadConfig());
+  if (r.ok) {
+    console.log(`  ${c.green}✓${c.reset}  you're live at ${c.cyan}https://claude-rpc.com/u/${encodeURIComponent(handle)}${c.reset}`);
+  } else {
+    if (r.fatal) console.log(`  ${c.yellow}!${c.reset}  ${r.fatal.label}`);
+    console.log(`     ${c.dim}↳ setup itself is done — retry with ${c.reset}${c.cyan}claude-rpc profile verify${c.reset}`);
   }
 }
 
@@ -2452,6 +2538,9 @@ process.on('unhandledRejection', (e) => {
         } else if (argv.includes('--wrapped')) {
           console.log(`  ${c.yellow}!${c.reset}  --wrapped needs a profile — pair it with --link <code>, or run \`claude-rpc wrapped --publish\` after setup`);
         }
+        // Optional GitHub connect — one explicit y/N, asked at most once ever.
+        // The --link path above IS a connect, so it never double-asks.
+        if (!linkCode) await setupGhConnect();
       }
       setupOutro(target, changed);
       break;
