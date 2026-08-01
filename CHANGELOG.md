@@ -2,6 +2,13 @@
 
 All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.4.1] - 2026-08-01
+
+**Fixed**
+
+- **Presence no longer vanishes for good on Vesktop / Equibop / web clients (arRPC bridges)** ([#37](https://github.com/rar-file/claude-rpc/issues/37)). An unchanged frame was never re-sent — correct against Discord desktop, which holds an activity until told otherwise, but arRPC-style bridges *lose* the activity whenever their web client blips (an unfocused window getting background-throttled — the bspwm report in #37 — or a renderer reload) and never replay it: arRPC keeps no last-activity state. The daemon kept writing into a socket that acked everything, `doctor` read all-green, and the card stayed blank. The daemon now **re-asserts the current frame after a quiet interval**: 60s against Discord desktop (pure insurance), 20s when the handshake identifies a bridge — arRPC answers READY with its mock `arrpc` user, so detection is exact (`isBridgeUser` in `src/discord-ipc.js`). Re-asserts flow through the same gap + sliding-window rate limiting as every other write and never re-send an already-cleared presence. Tune with `presenceKeepaliveSec` (floored at 15; `0` disables). The honest limit: while the bridge's renderer is down, nothing *any* RPC app writes can display — the fix means the card is back within ~20s of the client being able to show it again, instead of whenever the frame next happened to change.
+- **`doctor` now names the client that answered the handshake.** When the daemon log shows an arRPC bridge, doctor adds a `discord client` info line (Vesktop/Equibop/web, not Discord desktop) with the caveat above — previously that setup was indistinguishable from Discord desktop, and every check read green while the profile showed nothing.
+
 ## [1.4.0] - 2026-07-30
 
 **Added**
