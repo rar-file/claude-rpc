@@ -8,8 +8,8 @@
 class ClaudeRpc < Formula
   desc "Discord Rich Presence for Claude Code — live model, project, tokens & lifetime stats"
   homepage "https://claude-rpc.com"
-  url "https://registry.npmjs.org/claude-rpc/-/claude-rpc-1.4.0.tgz"
-  sha256 "735ed9ed79b836c46fe57e1cd4266b5231f80485be67e4baa057017914a89e1f"
+  url "https://registry.npmjs.org/claude-rpc/-/claude-rpc-1.4.1.tgz"
+  sha256 "1436ee20f7c0e175e20c3267049905e706322d7d6331839b3c6942f9a714dcbe"
   license "MIT"
 
   depends_on "node"
