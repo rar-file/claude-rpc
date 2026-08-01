@@ -39,6 +39,16 @@ export const DEFAULT_CONFIG = {
   // headroom under Discord's ~5-per-20s ceiling.
   maxActivityWrites: 4,
   activityWindowMs: 20000,
+  // Presence keepalive (seconds). A frame that hasn't changed is normally
+  // never re-sent — correct against Discord desktop, which holds an activity
+  // until told otherwise. arRPC-style bridges (Vesktop/Equibop/web clients)
+  // instead LOSE the activity whenever their renderer blips (background
+  // throttling of an unfocused window, a reload) and never replay it, leaving
+  // the card blank while the daemon's writes are still acked. After this much
+  // write silence the daemon re-asserts the current frame. null = auto: 60s
+  // against Discord desktop, 20s when the handshake identifies a bridge.
+  // Floored at 15; set 0 to disable.
+  presenceKeepaliveSec: null,
   rescanIntervalSec: 300,
   idleThresholdSec: 60,
   // Time (minutes) of no hook activity AND no live transcripts on disk before

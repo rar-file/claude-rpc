@@ -309,3 +309,59 @@ test('throttleDecision: the larger of gap-wait and window-wait wins', () => {
   assert.equal(d.action, 'defer');
   assert.equal(d.waitMs, windowWait, 'window wait (18s) dominates the 3s gap wait');
 });
+
+// ── throttleDecision: keepalive re-assert ──────────────────────────────
+// arRPC-style bridges (Vesktop/Equibop/web) lose the activity when their web
+// client blips and never replay it — an identical frame skipped forever means
+// a card that stays blank while every write is acked (#37). keepaliveMs
+// re-opens the skip after that much wire silence.
+const KEEPALIVE = 20_000;
+
+test('throttleDecision: keepalive elapsed → identical hash sends again', () => {
+  const now = 1_000_000;
+  const d = throttleDecision({
+    hash: 'A', lastSentHash: 'A', lastSentAt: now - KEEPALIVE, now,
+    gapMs: GAP, flushPending: false, keepaliveMs: KEEPALIVE,
+  });
+  assert.equal(d.action, 'send', 'the wire may have dropped the frame — re-assert it');
+});
+
+test('throttleDecision: keepalive not yet due → identical hash still skips', () => {
+  const now = 1_000_000;
+  const d = throttleDecision({
+    hash: 'A', lastSentHash: 'A', lastSentAt: now - KEEPALIVE + 1, now,
+    gapMs: GAP, flushPending: false, keepaliveMs: KEEPALIVE,
+  });
+  assert.deepEqual(d, { action: 'skip', waitMs: 0 });
+});
+
+test('throttleDecision: keepalive omitted or 0 keeps the pure skip (back-compat)', () => {
+  const now = 9_999_999;
+  const omitted = throttleDecision({ hash: 'A', lastSentHash: 'A', lastSentAt: 1000, now, gapMs: GAP, flushPending: false });
+  assert.deepEqual(omitted, { action: 'skip', waitMs: 0 });
+  const zero = throttleDecision({ hash: 'A', lastSentHash: 'A', lastSentAt: 1000, now, gapMs: GAP, flushPending: false, keepaliveMs: 0 });
+  assert.deepEqual(zero, { action: 'skip', waitMs: 0 });
+});
+
+test('throttleDecision: a keepalive re-assert still respects the window cap', () => {
+  const now = 1_000_000;
+  // Due for a keepalive, but the window is at the cap — the re-assert must
+  // queue behind the rate limit like any other write, never breach it.
+  const recentSends = [now - 19_000, now - 18_000, now - 2_000, now - 1_000];
+  const d = throttleDecision({
+    hash: 'A', lastSentHash: 'A', lastSentAt: now - KEEPALIVE, now,
+    gapMs: GAP, flushPending: false, recentSends, windowMs: WINDOW, maxPerWindow: MAX,
+    keepaliveMs: KEEPALIVE,
+  });
+  assert.equal(d.action, 'defer', 'keepalive is subject to the same cap');
+});
+
+test('throttleDecision: keepalive never fires before the first successful write', () => {
+  // lastSentAt 0 + identical hash can only mean a fresh daemon whose state
+  // matches the empty sentinel — nothing is on the wire to re-assert.
+  const d = throttleDecision({
+    hash: '', lastSentHash: '', lastSentAt: 0, now: 9_999_999,
+    gapMs: GAP, flushPending: false, keepaliveMs: KEEPALIVE,
+  });
+  assert.deepEqual(d, { action: 'skip', waitMs: 0 });
+});

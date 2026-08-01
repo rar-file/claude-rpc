@@ -73,6 +73,21 @@ export function candidatePaths(platform = process.platform) {
   return out;
 }
 
+// arRPC — the open-source RPC bridge that Vesktop/Equibop bundle and web-client
+// setups run standalone — answers the handshake READY with a mock user instead
+// of the real account: id 1045800378228281345, username "arrpc". Detecting it
+// matters because bridges do NOT replay the current activity when their web
+// client reconnects (arRPC keeps no last-activity state), so presence silently
+// vanishes on any renderer blip — background throttling of an unfocused window,
+// a reload — until the daemon happens to write a *different* frame. The daemon
+// tightens its keepalive re-assert when this returns true.
+export const ARRPC_USER_ID = '1045800378228281345';
+export function isBridgeUser(user) {
+  if (!user) return false;
+  if (String(user.id || '') === ARRPC_USER_ID) return true;
+  return /^arrpc$/i.test(String(user.username || ''));
+}
+
 // Encode one IPC frame: 8-byte little-endian header + JSON body.
 export function encodeFrame(op, data) {
   const body = data === undefined ? Buffer.alloc(0) : Buffer.from(JSON.stringify(data));

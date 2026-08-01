@@ -130,8 +130,21 @@ export function shouldShowGithubButton(p, state) {
 // in the window expires, guaranteeing no more than `maxPerWindow` writes in any
 // `windowMs` no matter how many triggers fire. Omitting them keeps the old
 // gap-only behavior (used by tests that predate the cap).
-export function throttleDecision({ hash, lastSentHash, lastSentAt, now, gapMs, flushPending, recentSends, windowMs, maxPerWindow }) {
-  if (hash === lastSentHash) return { action: 'skip', waitMs: 0 };
+//
+// `keepaliveMs` (optional) re-opens the identical-hash skip after that much
+// wire silence. Against the real Discord client an unchanged frame never needs
+// re-sending — the client holds an activity until told otherwise — but arRPC-
+// style bridges (Vesktop/Equibop/web) lose the activity whenever their web
+// client blips and never replay it (arRPC keeps no last-activity state), so a
+// quiet single-frame status would stay invisible forever while every doctor
+// check reads green (#37). Once `now - lastSentAt >= keepaliveMs` the frame is
+// treated as changed and flows through the same gap/window limiting as any
+// other write. Omitted/0 keeps the pure skip.
+export function throttleDecision({ hash, lastSentHash, lastSentAt, now, gapMs, flushPending, recentSends, windowMs, maxPerWindow, keepaliveMs }) {
+  if (hash === lastSentHash) {
+    const due = keepaliveMs > 0 && lastSentAt > 0 && now - lastSentAt >= keepaliveMs;
+    if (!due) return { action: 'skip', waitMs: 0 };
+  }
   let waitMs = Math.max(0, (lastSentAt || 0) + gapMs - now);
   if (maxPerWindow && windowMs && Array.isArray(recentSends)) {
     // Strict window (age < windowMs) so a write exactly windowMs old has already

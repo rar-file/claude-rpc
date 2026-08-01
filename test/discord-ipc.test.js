@@ -24,6 +24,8 @@ const {
   OP_FRAME,
   OP_PING,
   OP_PONG,
+  ARRPC_USER_ID,
+  isBridgeUser,
 } = await import('../src/discord-ipc.js');
 
 // ── Frame encode / decode ────────────────────────────────────────────────
@@ -293,4 +295,20 @@ test('formatActivity omits party when size is one-ended or absent', () => {
   assert.equal('party' in formatActivity({ details: 'x' }).activity, false);
   // size needs both ends; a lone partySize is dropped (no id either → no party)
   assert.equal('party' in formatActivity({ details: 'x', partySize: 2 }).activity, false);
+});
+
+// ── Bridge detection (arRPC / Vesktop / Equibop) ─────────────────────────
+test('isBridgeUser: recognizes arRPC\'s mock READY user by id or username', () => {
+  // The exact shape arRPC's server sends in its READY dispatch.
+  assert.equal(isBridgeUser({ id: ARRPC_USER_ID, username: 'arrpc', discriminator: '0' }), true);
+  assert.equal(isBridgeUser({ id: 'something-else', username: 'arrpc' }), true, 'username alone suffices');
+  assert.equal(isBridgeUser({ id: ARRPC_USER_ID, username: 'renamed' }), true, 'id alone suffices');
+  assert.equal(isBridgeUser({ id: ARRPC_USER_ID }), true);
+});
+
+test('isBridgeUser: real accounts are not bridges', () => {
+  assert.equal(isBridgeUser({ id: '80351110224678912', username: 'rafii' }), false);
+  assert.equal(isBridgeUser({ id: '1', username: 'arrpc-fan' }), false, 'exact username match only');
+  assert.equal(isBridgeUser(null), false);
+  assert.equal(isBridgeUser({}), false);
 });

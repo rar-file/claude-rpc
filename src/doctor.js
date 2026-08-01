@@ -134,6 +134,21 @@ export function ipcStateFromLog(logText) {
   return ipc;
 }
 
+// Which client answered the RPC handshake, from the most recent "connected as"
+// line: 'arrpc' for an arRPC-style bridge (Vesktop/Equibop/web client — the
+// bridge's mock user is literally named arrpc), 'discord' for the real desktop
+// client, null when the log has no connect line. Most-recent-wins, like
+// ipcStateFromLog — a user who switches from Vesktop to stock Discord mid-run
+// should not keep the bridge caveat.
+export function bridgeFromLog(logText) {
+  let kind = null;
+  for (const line of String(logText || '').split('\n').slice(-200)) {
+    const m = line.match(/Discord RPC connected as\s+(\S+)/i);
+    if (m) kind = /arrpc/i.test(m[1]) ? 'arrpc' : 'discord';
+  }
+  return kind;
+}
+
 function checkConfig() {
   if (!existsSync(CONFIG_PATH)) {
     check('config.json present', 'fail', CONFIG_PATH,
@@ -310,11 +325,25 @@ function checkDaemonLog() {
   // Ns" / "login failed" / "disconnected" line means it dropped. Whichever
   // happened most recently wins.
   let ipc = 'unknown';
-  try { ipc = ipcStateFromLog(readFileSync(LOG_PATH, 'utf8')); }
-  catch { /* log unreadable — ipc stays 'unknown', warn renders */ }
+  let bridge = null;
+  try {
+    const logText = readFileSync(LOG_PATH, 'utf8');
+    ipc = ipcStateFromLog(logText);
+    bridge = bridgeFromLog(logText);
+  } catch { /* log unreadable — ipc stays 'unknown', warn renders */ }
   if (ipc === 'up') {
     check('discord IPC connection', 'pass',
       `connected · ${sizeKB} KB log · last write ${ageMin.toFixed(1)} min ago`);
+    if (bridge === 'arrpc') {
+      // The single most-reported "presence vanished but doctor is green" cause:
+      // an arRPC bridge acks every write on the socket, but loses the activity
+      // whenever its web client blips (unfocused window throttled, reload) and
+      // never replays it. The daemon's keepalive re-asserts within ~20s of the
+      // client being able to display again — but while the renderer is down,
+      // nothing any RPC app writes will show.
+      check('discord client', 'info', 'arRPC bridge (Vesktop/Equibop/web) — not Discord desktop',
+        'bridges drop presence while their window is unfocused/reloading; the daemon re-asserts it every ~20s. if the card stays gone, focus the client window — or use Discord desktop');
+    }
   } else if (ipc === 'down') {
     check('discord IPC connection', 'warn', 'daemon is reconnecting to Discord',
       'is the discord desktop client running? rpc only works via desktop, not browser', 'discord');

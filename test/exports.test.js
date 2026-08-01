@@ -12,7 +12,7 @@ const { calendarSvg } = await import('../src/calendar.js');
 const { cardSvg } = await import('../src/card.js');
 const { sessionCardSvg } = await import('../src/session-card.js');
 const { postWebhook, desktopNotify, sanitizeLabel } = await import('../src/notify.js');
-const { runDoctor, fixPlan, classifyClientId, ipcStateFromLog, classifyHookCommand } = await import('../src/doctor.js');
+const { runDoctor, fixPlan, classifyClientId, ipcStateFromLog, bridgeFromLog, classifyHookCommand } = await import('../src/doctor.js');
 
 const fakeAgg = {
   activeMs: 100 * 3_600_000,
@@ -217,4 +217,17 @@ test('ipcStateFromLog: most-recent line wins (up / down / unknown)', () => {
   assert.equal(ipcStateFromLog('Discord disconnected — retry in 5s'), 'down');
   assert.equal(ipcStateFromLog(['login failed', 'Discord RPC connected'].join('\n')), 'up', 'reconnect after drop → up');
   assert.equal(ipcStateFromLog(['Discord RPC connected', 'retry in 10s'].join('\n')), 'down', 'drop after connect → down');
+});
+
+test('bridgeFromLog: identifies arRPC bridges from the connect line, most-recent wins', () => {
+  assert.equal(bridgeFromLog(''), null, 'no connect line yet');
+  assert.equal(bridgeFromLog('Discord RPC connected as rafii'), 'discord');
+  // The daemon's bridge connect line (see daemon.js ready handler).
+  assert.equal(bridgeFromLog('Discord RPC connected as arrpc — arRPC-style bridge (Vesktop/Equibop/web client).'), 'arrpc');
+  assert.equal(
+    bridgeFromLog(['Discord RPC connected as arrpc — arRPC-style bridge', 'Discord RPC connected as rafii'].join('\n')),
+    'discord', 'switching from Vesktop to stock Discord drops the bridge caveat');
+  assert.equal(
+    bridgeFromLog(['Discord RPC connected as rafii', 'Discord RPC connected as arrpc — arRPC-style bridge'].join('\n')),
+    'arrpc');
 });

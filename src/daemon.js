@@ -2,7 +2,7 @@
 import './safe-stdio.js';
 import { existsSync, unlinkSync, watch, appendFileSync, mkdirSync, statSync, renameSync, readdirSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
-import { Client } from './discord-ipc.js';
+import { Client, isBridgeUser } from './discord-ipc.js';
 import { readState, sweepStaleStateTmp, listSessionStates, sweepStaleSessionStates } from './state.js';
 import { makeRotationCursor, pickFrames, selectFrame, resolveLargeImageKey, shouldShowGithubButton, pickActiveSession, throttleDecision } from './presence.js';
 import { buildVars, fillTemplate, framePasses, applyIdle, applyShipped, applyTrigger } from './format.js';
@@ -110,6 +110,11 @@ let claudeProcAlive = null;
 let client = null;
 let connected = false;
 let connecting = false; // login() in flight — see the watchdog note in connect()
+// True when the READY handshake identified an arRPC-style bridge (Vesktop/
+// Equibop/web client) rather than the real Discord desktop client — see
+// isBridgeUser in discord-ipc.js. Bridges never replay the current activity
+// after their web client blips, so the keepalive below runs tighter there.
+let bridgeClient = false;
 // ── Outbound presence throttle ──────────────────────────────────────────────
 // Discord rate-limits SET_ACTIVITY hard (~5 writes per 20s); a burst past it
 // makes the client blank the presence until the writes stop — the actual
@@ -491,6 +496,25 @@ function maxActivityWrites() {
   return Math.max(2, config.maxActivityWrites || 4);
 }
 
+// Presence keepalive — after this much wire silence, re-send the current frame
+// even though it hasn't changed. The real Discord client holds an activity
+// until told otherwise, so 60s there is pure insurance; arRPC-style bridges
+// lose the activity whenever their web client blips and never replay it, so
+// the interval tightens once the handshake identifies one (issue #37 — card
+// gone on Vesktop while every write is acked). config.presenceKeepaliveSec
+// overrides (floored at 15s); 0/false disables. Costs one SET_ACTIVITY per
+// interval at most — far under the 4-per-20s window cap.
+const KEEPALIVE_DESKTOP_SEC = 60;
+const KEEPALIVE_BRIDGE_SEC = 20;
+function presenceKeepaliveMs() {
+  const v = config.presenceKeepaliveSec;
+  if (v === 0 || v === false) return 0;
+  const sec = typeof v === 'number' && v > 0
+    ? Math.max(15, v)
+    : (bridgeClient ? KEEPALIVE_BRIDGE_SEC : KEEPALIVE_DESKTOP_SEC);
+  return sec * 1000;
+}
+
 // Sentinel for a clear — can never collide with a real activity hash, since
 // JSON.stringify of an activity object always begins with '{'.
 const CLEAR_HASH = 'cleared';
@@ -500,12 +524,18 @@ const CLEAR_HASH = 'cleared';
 // timer; 'skip' means the wire already shows this exact frame.
 function transmit(kind, activity, logMsg) {
   const hash = kind === 'clear' ? CLEAR_HASH : JSON.stringify(activity);
+  // Keepalive only re-asserts a VISIBLE frame — re-writing an already-cleared
+  // presence would burn rate-limited writes on a no-op, all night, every night.
+  const keepaliveMs = kind === 'clear' ? 0 : presenceKeepaliveMs();
+  const reassert = hash === lastSentHash; // only possible via keepalive expiry
   const d = throttleDecision({
     hash, lastSentHash, lastSentAt,
     now: Date.now(), gapMs: activityGapMs(), flushPending: !!flushTimer,
     recentSends, windowMs: activityWindowMs(), maxPerWindow: maxActivityWrites(),
+    keepaliveMs,
   });
   if (d.action === 'skip') { pendingSend = null; return; }
+  if (reassert) logMsg = `${logMsg} · keepalive re-assert`;
   if (d.action === 'send') { doSend({ kind, activity, hash, logMsg }); return; }
   // defer — remember the LATEST payload and flush it once when the gap expires.
   pendingSend = { kind, activity, hash, logMsg };
@@ -593,7 +623,15 @@ async function connect() {
     connected = true;
     // Reset backoff so the next outage also starts at RECONNECT_BASE_MS.
     reconnectDelayMs = RECONNECT_BASE_MS;
-    log('Discord RPC connected as', client.user?.username);
+    bridgeClient = isBridgeUser(client.user);
+    if (bridgeClient) {
+      // Doctor greps this line: "connected as" feeds ipcStateFromLog, "arrpc"
+      // feeds bridgeFromLog — keep both tokens if rewording.
+      log(`Discord RPC connected as ${client.user?.username} — arRPC-style bridge (Vesktop/Equibop/web client). ` +
+          `Bridges don't replay presence after their web client reconnects; keepalive re-asserts every ${Math.round(presenceKeepaliveMs() / 1000)}s.`);
+    } else {
+      log('Discord RPC connected as', client.user?.username);
+    }
     resetTransmit();
     pushPresence();
   });
