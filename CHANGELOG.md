@@ -2,6 +2,16 @@
 
 All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.4.2] - 2026-08-08
+
+**Fixed — Windows**
+
+- **The local dashboard (`serve`) could go stale and stop live-updating on Windows.** Its SSE watcher only used `fs.watch`, which drops events from the atomic-rename writes every state/aggregate write uses — unlike the daemon's own watcher, it had no polling backstop, so a missed event left the page frozen until an unrelated change happened to fire a refresh. It now polls as a fallback, same as the daemon.
+- **Desktop notifications could silently fail to appear on Windows.** The PowerShell toast script exited right after queuing the balloon tip instead of waiting for it to render, which could tear the notification icon down before Windows ever drew it.
+- **Reconnecting to Discord could take up to ~15s longer than necessary on Windows** when the client wasn't running yet — the 10 candidate named pipes were probed one at a time instead of concurrently.
+- **`writeState` could throw on Windows** under a transient rename lock (a watched directory briefly held by `ReadDirectoryChangesW` during an atomic rename) — this is now retried instead of failing the write.
+- Windows now actually runs in CI (a `windows-latest` job in the test matrix) — previously every Windows-only code path here was only ever exercised by a human running the release-built `.exe`, so regressions like the above could ship unnoticed until someone hit them.
+
 ## [1.4.1] - 2026-08-01
 
 **Fixed**
