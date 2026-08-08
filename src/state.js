@@ -3,7 +3,6 @@ import {
   mkdirSync,
   readFileSync,
   writeFileSync,
-  renameSync,
   openSync,
   closeSync,
   unlinkSync,
@@ -14,6 +13,7 @@ import {
 import { basename, join } from 'node:path';
 import { STATE_PATH, STATE_DIR } from './paths.js';
 import { pickActiveSession } from './presence.js';
+import { renameSyncRetry } from './atomic-rename.js';
 
 const DEFAULT_STATE = {
   sessionStart: null,
@@ -190,7 +190,7 @@ export function writeState(next, sessionId) {
   // atomic-rename guarantee intact even on the best-effort lockless path.
   const tmp = `${path}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify(next, null, 2));
-  renameSync(tmp, path);
+  renameSyncRetry(tmp, path);
 }
 
 // Best-effort sweep of orphaned per-pid tmp files (`state.json.<pid>.tmp`) left

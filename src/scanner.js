@@ -1,10 +1,11 @@
-import { readdirSync, readFileSync, statSync, existsSync, writeFileSync, mkdirSync, renameSync, openSync, readSync, closeSync, realpathSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync, existsSync, writeFileSync, mkdirSync, openSync, readSync, closeSync, realpathSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 import { homedir } from 'node:os';
 import { CLAUDE_PROJECTS, SCAN_CACHE_PATH, AGGREGATE_PATH, DATA_DIR, EVENTS_LOG_PATH } from './paths.js';
 import { languageOf } from './languages.js';
 import { costFor, pricingKeyFor } from './pricing.js';
 import { classifyShip } from './ships.js';
+import { renameSyncRetry } from './atomic-rename.js';
 
 // Bumping this forces a full re-parse on next scan. Increment whenever the
 // per-transcript summary schema changes in a way old caches can't satisfy.
@@ -783,7 +784,7 @@ function writeCache(cache) {
   // rename land a half-written file (or ENOENT the other's rename).
   const tmp = `${SCAN_CACHE_PATH}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify(cache));
-  renameSync(tmp, SCAN_CACHE_PATH);
+  renameSyncRetry(tmp, SCAN_CACHE_PATH);
 }
 
 // Per-day notification counts come from a hook-side append log, since
@@ -818,7 +819,7 @@ function writeAggregate(agg) {
   ensureDataDir();
   const tmp = `${AGGREGATE_PATH}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify(agg, null, 2));
-  renameSync(tmp, AGGREGATE_PATH);
+  renameSyncRetry(tmp, AGGREGATE_PATH);
 }
 
 export function readAggregate() {

@@ -139,12 +139,24 @@ test('candidatePaths returns the 10 named pipes on win32', () => {
 // A minimal server that speaks the Discord IPC protocol well enough to drive
 // the client through its whole lifecycle. Returns the socket path + a handle
 // to inspect what the client sent and to push frames back.
+// performance.now() floored to whole ms isn't unique enough on its own — two
+// servers started in the same test within the same millisecond collide on
+// path, and the second `listen()` unlinks + steals the first's socket file
+// out from under it. A per-call counter guarantees distinct paths regardless
+// of timing.
+// net.Server.listen() takes a filesystem path on posix but requires a named
+// pipe there on Windows (confirmed live in CI: a plain tmpdir path throws
+// EACCES) — same reason production candidatePaths() branches for win32.
+let fakeDiscordSeq = 0;
 function startFakeDiscord(t, { onHandshake, onFrame } = {}) {
-  const sockPath = path.join(os.tmpdir(), `fake-ipc-${process.pid}-${Math.floor(performance.now())}`);
-  try {
-    fs.unlinkSync(sockPath);
-  } catch {
-    /* fresh path */
+  const id = `fake-ipc-${process.pid}-${Math.floor(performance.now())}-${fakeDiscordSeq++}`;
+  const sockPath = process.platform === 'win32' ? `\\\\.\\pipe\\${id}` : path.join(os.tmpdir(), id);
+  if (process.platform !== 'win32') {
+    try {
+      fs.unlinkSync(sockPath);
+    } catch {
+      /* fresh path */
+    }
   }
   const received = [];
   let conn = null;
