@@ -15,6 +15,12 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { watchFile, sseClients, broadcast, addClient, removeClient } from '../src/server/sse.js';
 
 test('watchFile survives repeated atomic renames (stale-inode regression)', async (t) => {
+  // This exercises raw fs.watch, not the mtime-poll fallback (see
+  // watch-poll.js) — and fs.watch on Windows is documented to drop events
+  // from an atomic rename, which is the exact scenario here. That's not a
+  // regression to catch, it's the known gap the poll fallback exists to
+  // cover; asserting on the raw watcher's behavior would just be flaky.
+  if (process.platform === 'win32') return t.skip('fs.watch drops rename events on Windows — poll fallback covers this, see watch-poll.test.js');
   const dir = mkdtempSync(join(tmpdir(), 'sse-test-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
 

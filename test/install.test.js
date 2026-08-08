@@ -400,8 +400,8 @@ test('mcpServerCommand: resolves a runnable {command, args} ending in mcp', () =
   assert.equal(r.args[r.args.length - 1], 'mcp', 'last arg is the mcp subcommand');
 });
 
-// ── boot/login autostart file builders (macOS launchd, Linux systemd) ────
-const { systemdUnit, launchdPlist } = await import('../src/install.js');
+// ── boot/login autostart file builders (macOS launchd, Linux systemd, Windows) ─
+const { systemdUnit, launchdPlist, windowsRunCommand, windowsVbsShim } = await import('../src/install.js');
 
 test('systemdUnit: valid --user service that launches the daemon at login', () => {
   const u = systemdUnit({ exe: '/abs/node', args: ['/abs/daemon.js'] });
@@ -419,4 +419,20 @@ test('launchdPlist: RunAtLoad LaunchAgent carrying the daemon args', () => {
   assert.match(p, /<key>RunAtLoad<\/key><true\/>/, 'starts at login');
   assert.match(p, /<string>\/abs\/node<\/string>/);
   assert.match(p, /<string>\/abs\/daemon\.js<\/string>/);
+});
+
+test('windowsRunCommand: quotes each token so a space in the path stays one argument', () => {
+  const cmd = windowsRunCommand({ exe: 'C:\\Program Files\\claude-rpc\\claude-rpc.exe', args: ['daemon'] });
+  assert.equal(cmd, '"C:\\Program Files\\claude-rpc\\claude-rpc.exe" "daemon"');
+});
+
+test('windowsVbsShim: windowless WScript.Shell.Run carrying the daemon args', () => {
+  const vbs = windowsVbsShim({ exe: 'C:\\Program Files\\claude-rpc\\claude-rpc.exe', args: ['daemon'] });
+  assert.match(vbs, /^CreateObject\("WScript\.Shell"\)\.Run "/);
+  // Window style 0 + wait=False: launches hidden, doesn't block the caller.
+  assert.match(vbs, /, 0, False\r\n$/);
+  // Doubled quotes are VBS's escaped-quote syntax — each ""x"" must reach the
+  // shell as "x", so a space-containing path stays one token there too.
+  assert.match(vbs, /""C:\\Program Files\\claude-rpc\\claude-rpc\.exe""/);
+  assert.match(vbs, /""daemon""/);
 });

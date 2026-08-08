@@ -29,9 +29,9 @@ export function sanitizeLabel(s) {
  * @param {string} [body] - Notification body text.
  * @returns {boolean} true if a notifier was spawned, false on failure.
  */
-export function desktopNotify(title, body = '', { spawn: spawnFn = spawn } = {}) {
+export function desktopNotify(title, body = '', { spawn: spawnFn = spawn, platform: platformFn = platform } = {}) {
   try {
-    const p = platform();
+    const p = platformFn();
     // A missing notifier binary (e.g. no `notify-send`) makes spawn emit an
     // async 'error' event — with no listener that surfaces as an UNCAUGHT
     // exception that the sync try/catch below can't stop, which would crash
@@ -45,10 +45,17 @@ export function desktopNotify(title, body = '', { spawn: spawnFn = spawn } = {})
       const script = `display notification ${JSON.stringify(body)} with title ${JSON.stringify(title)}`;
       swallow(spawnFn('osascript', ['-e', script], { stdio: 'ignore', detached: true }));
     } else if (p === 'win32') {
+      // ShowBalloonTip is async — it returns as soon as the toast is queued,
+      // not once it's rendered. Without holding the process open, PowerShell
+      // reaches end-of-script and exits immediately after, tearing down the
+      // NotifyIcon before Windows ever draws the balloon, so it silently
+      // never appears. Sleep past the tip's own 5s display window before
+      // disposing, so the process outlives what it just asked for.
       const script = `Add-Type -AssemblyName System.Windows.Forms;`
         + `$n=New-Object System.Windows.Forms.NotifyIcon;`
         + `$n.Icon=[System.Drawing.SystemIcons]::Information;$n.Visible=$true;`
-        + `$n.ShowBalloonTip(5000, ${JSON.stringify(title)}, ${JSON.stringify(body)}, 'Info')`;
+        + `$n.ShowBalloonTip(5000, ${JSON.stringify(title)}, ${JSON.stringify(body)}, 'Info');`
+        + `Start-Sleep -Seconds 6;$n.Dispose()`;
       swallow(spawnFn('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], { stdio: 'ignore', detached: true, windowsHide: true }));
     } else {
       swallow(spawnFn('notify-send', ['-a', 'Claude Code', title, body], { stdio: 'ignore', detached: true }));

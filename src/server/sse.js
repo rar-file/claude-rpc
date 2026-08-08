@@ -3,9 +3,10 @@
 // Replaces the old 2-second poll. Two debounced fs.watch handles, one
 // shared client set.
 
-import { watch } from 'node:fs';
+import { watch, existsSync, statSync } from 'node:fs';
 import { dirname, basename } from 'node:path';
 import { STATE_PATH, AGGREGATE_PATH } from '../paths.js';
+import { pollDecision, pollIntervalMs } from '../watch-poll.js';
 
 export const sseClients = new Set();
 
@@ -60,14 +61,51 @@ export function watchFile(filePath, callback) {
   }
 }
 
+function statMtime(filePath) {
+  try {
+    return existsSync(filePath) ? statSync(filePath).mtimeMs : undefined;
+  } catch {
+    return undefined; // mid-rename; a later observation records it
+  }
+}
+
 export function watchSources() {
-  let stTimer = null, agTimer = null;
-  watchFile(STATE_PATH, () => {
-    clearTimeout(stTimer);
-    stTimer = setTimeout(() => broadcast({ type: 'state' }), 200);
-  });
-  watchFile(AGGREGATE_PATH, () => {
-    clearTimeout(agTimer);
-    agTimer = setTimeout(() => broadcast({ type: 'aggregate' }), 200);
-  });
+  const targets = [
+    { path: STATE_PATH, type: 'state' },
+    { path: AGGREGATE_PATH, type: 'aggregate' },
+  ];
+
+  // Last mtime we've reacted to, per target. Updated by BOTH the watcher and
+  // the poll fallback below, so a change one path already handled resolves
+  // to a no-op for the other instead of a duplicate broadcast — same shared-
+  // baseline trick the daemon's own watchFiles() uses.
+  const lastMtime = new Map();
+  const debounceTimers = new Map();
+  const recordMtime = (t) => {
+    const m = statMtime(t.path);
+    if (m !== undefined) lastMtime.set(t.path, m);
+  };
+  targets.forEach(recordMtime); // seed baselines before watching starts
+
+  const fire = (t) => {
+    recordMtime(t); // record before the debounced broadcast so a re-entrant tick can't double-fire
+    clearTimeout(debounceTimers.get(t.path));
+    debounceTimers.set(t.path, setTimeout(() => broadcast({ type: t.type }), 200));
+  };
+
+  for (const t of targets) watchFile(t.path, () => fire(t));
+
+  // Mtime-poll fallback. fs.watch drops atomic-rename events on Windows (see
+  // watch-poll.js), and unlike the daemon this watcher previously had no
+  // backstop at all — a missed event left the dashboard silently stale until
+  // some unrelated broadcast happened to fire. Same cadence as the daemon's
+  // fallback: fast on Windows, lazy on macOS/Linux.
+  setInterval(() => {
+    for (const t of targets) {
+      const cur = statMtime(t.path);
+      const decision = pollDecision(lastMtime.get(t.path), cur);
+      if (decision === 'seed') lastMtime.set(t.path, cur);
+      else if (decision === 'fire') fire(t);
+    }
+  }, pollIntervalMs());
 }

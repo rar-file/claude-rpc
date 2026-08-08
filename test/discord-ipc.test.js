@@ -247,6 +247,23 @@ test('a server PING is answered with a PONG echoing the payload', async (t) => {
   assert.deepEqual(pong.data, { token: 'ping-1' });
 });
 
+test('login connects concurrently across candidates, preferring the earliest path when several accept', async (t) => {
+  // Windows probes all 10 named-pipe candidates with no existence pre-check,
+  // so _openSocket races them instead of trying one at a time (worst case:
+  // up to 10× the per-candidate timeout). With two live fakes, the earlier
+  // path must still win — and the loser's socket must be destroyed, not leaked.
+  const first = await startFakeDiscord(t, { onHandshake: (s) => sendReady(s, { username: 'first' }) });
+  const second = await startFakeDiscord(t, { onHandshake: (s) => sendReady(s, { username: 'second' }) });
+  const client = new Client({ clientId: 'c', transport: { pathList: [first.sockPath, second.sockPath] } });
+  t.after(() => client.destroy());
+  await client.login();
+  assert.equal(client.user.username, 'first', 'earlier candidate wins even though both accept');
+  // The client-side destroy() sends a FIN the server observes asynchronously —
+  // give it a tick to propagate before checking the server saw its end close.
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(second.getConn().destroyed, true, 'the losing candidate is closed, not left open');
+});
+
 test('login rejects when no Discord socket can be reached', async (t) => {
   const client = new Client({
     clientId: 'c',

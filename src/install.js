@@ -200,6 +200,20 @@ export function launchdPlist({ exe, args }) {
   ].join('\n');
 }
 
+// Windows Run-key command + windowless .vbs shim content — pure, exported so
+// they're unit-testable without touching reg.exe/wscript or the real
+// filesystem (mirrors launchdPlist/systemdUnit above).
+export function windowsRunCommand({ exe, args }) {
+  return [exe, ...args].map((p) => `"${p}"`).join(' ');
+}
+
+export function windowsVbsShim({ exe, args }) {
+  // In a VBS string literal a doubled quote is an escaped quote, so each
+  // `""x""` below reaches the shell as `"x"`.
+  const vbsCmd = [exe, ...args].map((p) => `""${p}""`).join(' ');
+  return `CreateObject("WScript.Shell").Run "${vbsCmd}", 0, False\r\n`;
+}
+
 export function systemdUnit({ exe, args }) {
   const execStart = [exe, ...args].map((a) => `"${a}"`).join(' '); // quote each token (paths with spaces)
   return [
@@ -289,13 +303,10 @@ export async function addStartupEntry(exePath) {
   // a Run entry of `"node.exe" daemon` (no script path) and login-autostart
   // silently launched nothing.
   const launch = daemonLaunch(exePath);
-  let runCmd = [launch.exe, ...launch.args].map((p) => `"${p}"`).join(' ');
+  let runCmd = windowsRunCommand(launch);
   try {
     mkdirSync(CANONICAL_INSTALL_DIR, { recursive: true });
-    // In a VBS string literal a doubled quote is an escaped quote, so each
-    // `""x""` below reaches the shell as `"x"`.
-    const vbsCmd = [launch.exe, ...launch.args].map((p) => `""${p}""`).join(' ');
-    writeFileSync(STARTUP_VBS, `CreateObject("WScript.Shell").Run "${vbsCmd}", 0, False\r\n`);
+    writeFileSync(STARTUP_VBS, windowsVbsShim(launch));
     runCmd = `wscript.exe "${STARTUP_VBS}"`;
   } catch { /* couldn't write the shim — fall back to the direct (windowed) entry */ }
   await regCommand([

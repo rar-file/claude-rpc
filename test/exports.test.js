@@ -143,6 +143,27 @@ test('desktopNotify: spawns the platform notifier with title/body and swallows e
   assert.doesNotThrow(() => desktopNotify('x', 'y', { spawn: () => { throw new Error('boom'); } }));
 });
 
+test('desktopNotify: win32 balloon-tip script outlives ShowBalloonTip before disposing', () => {
+  // ShowBalloonTip returns as soon as the toast is *queued*, not once it's
+  // rendered — a script that exits right after tears down the NotifyIcon
+  // before Windows draws the balloon, so it silently never appears. Assert
+  // the script holds the process open (Start-Sleep) before Dispose().
+  const calls = [];
+  const fakeSpawn = (cmd, args) => {
+    calls.push({ cmd, args });
+    return { on() {}, unref() {} };
+  };
+  const result = desktopNotify('claude-rpc', 'test body', { spawn: fakeSpawn, platform: () => 'win32' });
+  assert.equal(result, true);
+  assert.equal(calls[0].cmd, 'powershell');
+  const script = calls[0].args[calls[0].args.length - 1];
+  assert.match(script, /ShowBalloonTip/);
+  const sleepIdx = script.indexOf('Start-Sleep');
+  const disposeIdx = script.indexOf('.Dispose()');
+  assert.ok(sleepIdx > script.indexOf('ShowBalloonTip'), 'sleeps after queuing the toast');
+  assert.ok(disposeIdx > sleepIdx, 'disposes only after the sleep, not immediately on script end');
+});
+
 test('sanitizeLabel: strips shell/PowerShell metacharacters, keeps readable text', () => {
   // The injection vector: a project dir named to trigger PowerShell evaluation.
   assert.equal(sanitizeLabel('proj$(calc.exe)'), 'projcalc.exe');

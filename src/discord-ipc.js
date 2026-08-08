@@ -184,29 +184,46 @@ export class Client extends EventEmitter {
     this._decode = null;
   }
 
+  // Try one candidate path; resolves the connected socket, or null on
+  // error/timeout. Never rejects — callers race/sequence these freely.
+  _tryConnect(p) {
+    return new Promise((resolve) => {
+      const s = net.createConnection(p);
+      let timer = null;
+      const cleanup = () => {
+        clearTimeout(timer);
+        s.removeListener('connect', onOk);
+        s.removeListener('error', onErr);
+      };
+      const onErr = () => { cleanup(); resolve(null); };
+      const onOk = () => { cleanup(); resolve(s); };
+      // A peer that accepts then stalls would otherwise never settle this
+      // candidate and block the rest each discovery cycle (and leak the fd).
+      timer = setTimeout(() => { cleanup(); s.destroy(); resolve(null); }, SOCKET_CONNECT_TIMEOUT_MS);
+      if (typeof timer === 'object' && 'unref' in timer) timer.unref();
+      s.once('connect', onOk);
+      s.once('error', onErr);
+    });
+  }
+
   async _openSocket() {
     const paths = this._pathList ?? candidatePaths();
-    for (const p of paths) {
-      const socket = await new Promise((resolve) => {
-        const s = net.createConnection(p);
-        let timer = null;
-        const cleanup = () => {
-          clearTimeout(timer);
-          s.removeListener('connect', onOk);
-          s.removeListener('error', onErr);
-        };
-        const onErr = () => { cleanup(); resolve(null); };
-        const onOk = () => { cleanup(); resolve(s); };
-        // A peer that accepts then stalls would otherwise never settle this
-        // candidate and block the rest each discovery cycle (and leak the fd).
-        timer = setTimeout(() => { cleanup(); s.destroy(); resolve(null); }, SOCKET_CONNECT_TIMEOUT_MS);
-        if (typeof timer === 'object' && 'unref' in timer) timer.unref();
-        s.once('connect', onOk);
-        s.once('error', onErr);
-      });
-      if (socket) return socket;
-    }
-    return null;
+    // Race every candidate concurrently rather than trying them one at a
+    // time. On posix this list is already existence-filtered (usually just
+    // one path), so it barely matters — but on Windows all 10 named-pipe
+    // paths are probed unconditionally (no existence pre-check is possible),
+    // so a sequential loop pays up to 10× SOCKET_CONNECT_TIMEOUT_MS in the
+    // worst case (Discord not running). Racing caps discovery at one timeout
+    // regardless of candidate count. `Promise.all` (not `race`) so a losing
+    // socket can still be found and destroyed rather than leaked, and so the
+    // winner is picked by path order — preserving "prefer discord-ipc-0" even
+    // when more than one candidate accepts (e.g. a bridge alongside real
+    // Discord).
+    const sockets = await Promise.all(paths.map((p) => this._tryConnect(p)));
+    const winner = sockets.findIndex((s) => s !== null);
+    if (winner === -1) return null;
+    sockets.forEach((s, i) => { if (s && i !== winner) { try { s.destroy(); } catch { /* already gone */ } } });
+    return sockets[winner];
   }
 
   // Connect, handshake, and resolve once Discord sends READY (which also
