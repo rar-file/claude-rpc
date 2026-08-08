@@ -31,7 +31,7 @@
     "prep:dashboard": "node ./scripts/prep-dashboard.js",
     "dist:mac": "npm run build:exe && npm run prep:dashboard && npm --prefix dashboard run dist:mac",
     "dist:win": "npm run build:exe && npm run prep:dashboard && npm --prefix dashboard run dist:win",
-    "test": "node --test test/*.test.js",
+    "test": "node ./scripts/run-tests.mjs",
     "lint": "eslint src test vscode-extension",
     "format": "prettier --write \"src/**/*.js\" \"test/**/*.js\"",
     "format:check": "prettier --check \"src/**/*.js\" \"test/**/*.js\"",
