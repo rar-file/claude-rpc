@@ -26,12 +26,17 @@ const WIN = process.platform === 'win32';
 function ghQuote(a) {
   return /[\s"]/.test(a) ? `"${String(a).replace(/"/g, '""')}"` : a;
 }
+// gh can block on a network stall or a locked keyring, and the daemon now
+// calls it too (background verification resume) — a spawnSync with no timeout
+// would freeze its event loop, so every call is capped. A timeout surfaces as
+// a non-zero/null status, which every caller already treats as failure.
+const GH_TIMEOUT_MS = 30_000;
 function gh(args, opts = {}) {
   // windowsHide so the gh.exe/cmd shim doesn't flash a console window on
   // Windows (shell:true routes through cmd.exe; hide that too). No-op elsewhere.
   return WIN
-    ? spawnSync('gh', args.map(ghQuote), { ...opts, shell: true, windowsHide: true })
-    : spawnSync('gh', args, { ...opts, windowsHide: true });
+    ? spawnSync('gh', args.map(ghQuote), { timeout: GH_TIMEOUT_MS, ...opts, shell: true, windowsHide: true })
+    : spawnSync('gh', args, { timeout: GH_TIMEOUT_MS, ...opts, windowsHide: true });
 }
 
 // Bare fetch has no total timeout; a stalled GitHub endpoint would hang the

@@ -839,6 +839,8 @@ export async function handleProfile(request, env) {
     machines:    ensureMachines(prev, id),
     createdAt:   prev.createdAt || now,
     updatedAt:   now,
+    // Stamped by applyVerifiedLink; carried forward or every flush would erase it.
+    ...(Number.isFinite(prev.verifiedAt) ? { verifiedAt: prev.verifiedAt } : {}),
   };
   // Absolute lifetime totals are SET (not accumulated) per machine, clamped to
   // the ceilings; re-sending the same totals is idempotent. The top-level
@@ -1242,7 +1244,10 @@ export async function handleVerifyCheck(request, env, fetchImpl = fetch) {
   // different canonical profile, fold this machine into it (matchedOwner is
   // authoritative — whoever actually owns the gist). Otherwise this machine
   // claims the login for itself.
-  const link = await applyVerifiedLink(env, body.instanceId, matchedOwner);
+  const link = await applyVerifiedLink(env, body.instanceId, matchedOwner, {
+    resumed: body.resumed === true,
+    pendingSince: body.pendingSince,
+  });
   if (link.merged) {
     return new Response(JSON.stringify({ ok: true, verified: true, githubUser: matchedOwner, merged: true, handle: link.handle }), {
       headers: { ...CORS, 'Content-Type': 'application/json' },
@@ -1789,6 +1794,24 @@ async function mergeIntoCanonical(env, machineId, canonicalId, canonicalProfile)
   await migrateSquadsToCanonical(env, machineId, canonicalId);
 }
 
+// When a profile became verified. Normally "now". A client finishing a
+// verification the user consented to EARLIER sends `resumed` (+ `pendingSince`
+// when it knows the consent time) — the CLI daemon's resume after the
+// 2026-08-20 → 09-11 KV write-cap outage, when /verify/start 500'd most of
+// every day. The stamp is back-dated to that consent, bounded to
+// [createdAt − 2 days, now]: consent can precede the first profile write that
+// actually landed by up to a day while writes are failing, and nothing
+// plausible sits further back. Without a consent time, createdAt is the best
+// anchor. Only analytics read it (never ranked, never public), so the bound is
+// about keeping the record honest, not about abuse.
+const VERIFY_BACKDATE_SLACK_MS = 2 * 86_400_000;
+export function verifiedAtFor(prof, { resumed = false, pendingSince } = {}, now = Date.now()) {
+  if (!resumed) return now;
+  const created = Number.isFinite(prof?.createdAt) ? prof.createdAt : now;
+  const since = Number.isFinite(pendingSince) ? pendingSince : created;
+  return Math.min(now, Math.max(created - VERIFY_BACKDATE_SLACK_MS, since));
+}
+
 // Shared by pair/claim and gist verify/check: mark machine N verified as
 // `login`. Returns one of:
 //   { merged: true, canonicalId, handle }  — folded into an existing identity
@@ -1797,7 +1820,7 @@ async function mergeIntoCanonical(env, machineId, canonicalId, canonicalProfile)
 // Otherwise (no prior link, or C expired) fall back to claiming the index for
 // N. When N has no profile of its own and a canonical exists, linking still
 // succeeds (alias only) — a brand-new machine links in one command.
-async function applyVerifiedLink(env, machineId, login) {
+async function applyVerifiedLink(env, machineId, login, stamp = {}) {
   const existing = await resolveGithubInstance(env, login);
   if (existing && existing !== machineId) {
     const canonicalProfile = await getProfile(env, existing);
@@ -1813,6 +1836,11 @@ async function applyVerifiedLink(env, machineId, login) {
   // No prior canonical (or it expired): N claims the login for itself.
   const prof = await getProfile(env, machineId);
   if (!prof) return { merged: false, profile: null }; // caller decides if that's an error
+  if (!prof.verified || !Number.isFinite(prof.verifiedAt)) {
+    prof.verifiedAt = verifiedAtFor(prof, stamp);
+    // The row's join date is when they joined, not when the server caught up.
+    if (Number.isFinite(prof.createdAt) && prof.verifiedAt < prof.createdAt) prof.createdAt = prof.verifiedAt;
+  }
   prof.verified = true;
   prof.githubUser = login;
   prof.machines = ensureMachines(prof, machineId);
@@ -1929,7 +1957,7 @@ export async function handlePairClaim(request, env) {
       handle, displayName: null, githubUser: login, verified: true,
       machines: { [id]: { tokens: 0, sessions: 0, activeMs: 0, streak: 0, updatedAt: now } },
       tokens: 0, sessions: 0, activeMs: 0, streak: 0,
-      createdAt: now, updatedAt: now,
+      createdAt: now, updatedAt: now, verifiedAt: now,
     };
     await env.TOTALS.put(PF_KEY(id), JSON.stringify(prof)); // verified → permanent
     await env.TOTALS.put(HANDLE_KEY(handle), id);

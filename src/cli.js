@@ -1680,8 +1680,9 @@ async function doLink(argv) {
   // local handle or an explicit enabled:false is always respected.
   const userCfg = readJson(CONFIG_PATH, {});
   const prevProfile = userCfg.profile || {};
+  const { verifyPending: _linked, ...prevRest } = prevProfile; // a link completes any pending gist verification
   userCfg.profile = {
-    ...prevProfile,
+    ...prevRest,
     githubUser: r.json.githubUser,
     verified: true,
     ...(prevProfile.handle ? {} : { handle: r.json.handle }),
@@ -1902,6 +1903,10 @@ function profileStatus() {
     // for terminals with no browser nearby.
     if (!steps[2].done) {
       lines.push('');
+      const vp = p.verifyPending;
+      if (vp && typeof vp === 'object' && !vp.gaveUpAt) {
+        lines.push(`${c.yellow}…${c.reset} ${c.dim}a GitHub verification you started is pending — the daemon retries it automatically${vp.lastError ? ` (last: ${vp.lastError})` : ''}${c.reset}`);
+      }
       lines.push(`${c.dim}the code comes from${c.reset} ${c.cyan}claude-rpc link${c.reset} ${c.dim}on a machine you already verified${c.reset}`);
       lines.push(`${c.dim}first machine? log in at${c.reset} ${c.cyan}${LINK_PAGE}${c.reset} ${c.dim}— or no browser:${c.reset} ${c.cyan}claude-rpc profile verify${c.reset}`);
     }
@@ -2003,19 +2008,21 @@ async function profilePublish() {
 
 // The gist-verification dance shared by `profile verify` and setup's optional
 // GitHub-connect question: worker token → public proof gist → worker check →
-// persist the verified identity locally. Prints its own progress lines (they
-// read the same in both contexts) and returns { ok, who } on success. It never
-// exits: hard failures come back as { ok: false, fatal: {label, hint, code} }
-// so profileVerify can fail() loudly while setup — where the whole step is
-// optional — shrugs and finishes the install.
+// persist the verified identity locally (core in src/verify.js, shared with the
+// daemon's background resume). Prints its own progress lines (they read the
+// same in both contexts) and returns { ok, who } on success. It never exits:
+// hard failures come back as { ok: false, fatal: {label, hint, code} } so
+// profileVerify can fail() loudly while setup — where the whole step is
+// optional — shrugs and finishes the install. Callers record consent
+// (withVerifyIntent) first, so a failure here leaves a pending marker the
+// daemon keeps retrying.
 async function gistVerifyDance(cfg) {
   const profile = cfg.profile || {};
   const community = cfg.community || {};
   if (!community.instanceId) {
     return { ok: false, fatal: { label: 'enable the profile first', hint: 'claude-rpc profile on', code: EX_BAD_STATE } };
   }
-  const endpoint = (community.endpoint || '').replace(/\/+$/, '');
-  if (!endpoint) {
+  if (!(community.endpoint || '').replace(/\/+$/, '')) {
     return { ok: false, fatal: {
       label: 'no community endpoint configured',
       hint: 'config.json is missing community.endpoint — re-run `claude-rpc setup` to restore the default',
@@ -2023,67 +2030,57 @@ async function gistVerifyDance(cfg) {
     } };
   }
 
-  const post = async (path, body) => {
-    const res = await fetch(endpoint + path, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    return { status: res.status, json: await res.json().catch(() => ({})) };
-  };
-
-  try {
-    // Make sure the profile row exists server-side before we verify it, so
-    // verification works regardless of whether `profile publish` was run first.
-    if (lb.profileIsPublishable(profile)) {
+  // Make sure the profile row exists server-side before we verify it, so
+  // verification works regardless of whether `profile publish` was run first.
+  if (lb.profileIsPublishable(profile)) {
+    try {
       const { flushProfile } = await import('./community.js');
       await flushProfile(cfg);
+    } catch { /* the check below reports a missing row */ }
+  }
+  const { runGistVerify, markVerifiedLocally, updateUserConfig } = await import('./verify.js');
+  const pending = readJson(CONFIG_PATH, {}).profile?.verifyPending;
+  const r = await runGistVerify(cfg, {
+    onStep: (msg) => console.log(`  ${c.dim}${msg}…${c.reset}`),
+    gistId: pending?.gistId || null,
+    pendingSince: pending?.since ?? null,
+    resumed: !!pending,
+  });
+  if (r.ok) {
+    const who = r.githubUser;
+    markVerifiedLocally(who);
+    console.log(`  ${c.green}✓${c.reset}  verified as ${c.cyan}@${who}${c.reset} — you'll show the ✓ on the board`);
+    if (who && profile.githubUser && who.toLowerCase() !== profile.githubUser.toLowerCase()) {
+      console.log(`     ${c.dim}(your gist is owned by @${who}, so the profile now uses that account)${c.reset}`);
     }
-    console.log(`  ${c.dim}requesting a verification token…${c.reset}`);
-    const start = await post('/verify/start', { instanceId: community.instanceId, githubUser: profile.githubUser || null });
-    if (!start.json?.token) {
-      return { ok: false, fatal: { label: `verify/start failed: ${start.json?.error || start.status}`, code: EX_SYS_ERROR } };
-    }
-    const token = start.json.token;
-
-    const { publishGistFile } = await import('./gist.js');
-    console.log(`  ${c.dim}publishing a public proof gist…${c.reset}`);
-    const gist = await publishGistFile({
-      svg: `claude-rpc leaderboard verification\n${token}\n`,
-      filename: 'claude-rpc-verify.txt',
-      description: 'claude-rpc profile verification',
-      isPublic: true,
+    return { ok: true, who };
+  }
+  // Remember the proof gist so a retry (ours or the daemon's) edits it
+  // instead of publishing another one.
+  if (r.gistId) {
+    updateUserConfig((u) => {
+      if (!u.profile?.verifyPending) return false;
+      u.profile.verifyPending = { ...u.profile.verifyPending, gistId: r.gistId };
     });
-
-    // Hand the worker the gist ID so it fetches that gist directly (no
-    // gist-list lag) and reads the real owner — instant, and the owner becomes
-    // the verified identity regardless of what --github was set to.
-    console.log(`  ${c.dim}confirming with the server…${c.reset}`);
-    const check = await post('/verify/check', { instanceId: community.instanceId, gistId: gist.id });
-    if (check.json?.verified) {
-      const who = check.json.githubUser || gist.owner || profile.githubUser;
-      // Persist the authoritative owner + a local verified marker so the
-      // profile checklist and future publishes match what got verified.
-      const userCfg = readJson(CONFIG_PATH, {});
-      userCfg.profile = { ...(userCfg.profile || {}), ...(who ? { githubUser: who } : {}), verified: true };
-      writeUserConfig(userCfg);
-      console.log(`  ${c.green}✓${c.reset}  verified as ${c.cyan}@${who}${c.reset} — you'll show the ✓ on the board`);
-      if (who && profile.githubUser && who.toLowerCase() !== profile.githubUser.toLowerCase()) {
-        console.log(`     ${c.dim}(your gist is owned by @${who}, so the profile now uses that account)${c.reset}`);
-      }
-      return { ok: true, who };
-    }
+  }
+  if (r.stage === 'check' && r.status >= 400 && r.status < 500) {
     // Soft outcome (matches historical behavior): the message tells the user
     // how to finish, and the process still exits 0.
-    console.log(`  ${c.yellow}!${c.reset}  not confirmed: ${check.json?.error || check.status}`);
+    console.log(`  ${c.yellow}!${c.reset}  not confirmed: ${r.error}`);
     console.log(`     ${c.dim}↳ make sure the gist is public, then re-run ${c.reset}${c.cyan}claude-rpc profile verify${c.reset}`);
     return { ok: false };
-  } catch (e) {
+  }
+  if (r.stage === 'gist') {
     return { ok: false, fatal: {
-      label: `verification failed: ${e.message}`,
+      label: `verification failed: ${r.error}`,
       hint: 'needs `gh` logged in or GH_TOKEN with gist scope', code: EX_SYS_ERROR,
     } };
   }
+  return { ok: false, fatal: {
+    label: `${r.stage === 'start' ? 'verify/start' : 'verify/check'} failed: ${r.error}`,
+    hint: 'the server may be having trouble — the daemon retries this automatically in the background',
+    code: EX_SYS_ERROR,
+  } };
 }
 
 // GitHub verification: ask the worker for a one-time token, publish it in a
@@ -2097,7 +2094,12 @@ async function profileVerify() {
   if (!cfg.profile?.githubUser) {
     console.log(`  ${c.dim}no --github set — your verified identity will be the account that owns the proof gist${c.reset}`);
   }
-  const r = await gistVerifyDance(cfg);
+  if (cfg.community?.instanceId) {
+    // Consent to verify; if the server can't finish it now, the daemon retries.
+    const { withVerifyIntent } = await import('./verify.js');
+    writeUserConfig(withVerifyIntent(readJson(CONFIG_PATH, {})));
+  }
+  const r = await gistVerifyDance(loadConfig());
   if (r.fatal) return fail(r.fatal.label, { hint: r.fatal.hint || '', code: r.fatal.code });
 }
 
@@ -2149,8 +2151,12 @@ async function setupGhConnect() {
     console.log(`  ${c.yellow}!${c.reset}  couldn't derive a handle from @${login} — run ${c.cyan}claude-rpc profile set --handle <you>${c.reset} then ${c.cyan}claude-rpc profile verify${c.reset}`);
     return;
   }
+  // The y above is consent to the whole flow, so record it before any network
+  // step: if the server can't finish it now, the daemon retries in the
+  // background (src/verify.js) instead of the install sitting unverified.
   userCfg.profile = { ...userCfg.profile, handle, githubUser: login, enabled: true };
-  writeUserConfig(userCfg);
+  const { withVerifyIntent } = await import('./verify.js');
+  writeUserConfig(withVerifyIntent(userCfg));
   console.log(`  ${c.dim}connecting as ${c.reset}${c.cyan}@${login}${c.reset}${c.dim} — handle ${c.reset}${c.cyan}${handle}${c.reset}`);
 
   // A fresh install has no aggregate yet; publish real totals, not zeros.
@@ -2164,7 +2170,7 @@ async function setupGhConnect() {
     console.log(`  ${c.green}✓${c.reset}  you're live at ${c.cyan}https://claude-rpc.com/u/${encodeURIComponent(handle)}${c.reset}`);
   } else {
     if (r.fatal) console.log(`  ${c.yellow}!${c.reset}  ${r.fatal.label}`);
-    console.log(`     ${c.dim}↳ setup itself is done — retry with ${c.reset}${c.cyan}claude-rpc profile verify${c.reset}`);
+    console.log(`     ${c.dim}↳ setup itself is done — the daemon keeps retrying this in the background, or run ${c.reset}${c.cyan}claude-rpc profile verify${c.reset}`);
   }
 }
 

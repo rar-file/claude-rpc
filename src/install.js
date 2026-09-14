@@ -20,6 +20,7 @@ import {
 import { DEFAULT_CONFIG } from './default-config.js';
 import { VERSION } from './version.js';
 import { c, SYM_OK, SYM_WARN, SYM_FAIL, SYM_INFO, hintLine } from './ui.js';
+import { inferLegacyVerifyIntent } from './verify.js';
 
 const STARTUP_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run';
 const STARTUP_VALUE = 'ClaudeRPC';
@@ -532,6 +533,17 @@ export function migrateConfig({ silent = false } = {}) {
       DEFAULT_CONFIG.presence?.byStatus?.thinking?.state) {
     cfg.presence.byStatus.thinking.state = DEFAULT_CONFIG.presence.byStatus.thinking.state;
     added.push('presence.byStatus.thinking.state');
+  }
+
+  // v1.4.3: setup's "connect GitHub?" y could die on a server error (the
+  // 2026-08-20 → 09-11 KV write-cap outage 500'd /verify/start most of every
+  // day) and was never asked again. 1.4.0–1.4.2 recorded no intent, so infer
+  // it from the yes-path's footprint; the daemon then finishes the verification
+  // in the background (src/verify.js). Undated — the worker back-dates to the
+  // profile's first successful write instead.
+  if (inferLegacyVerifyIntent(cfg.profile)) {
+    cfg.profile.verifyPending = { since: null };
+    added.push('profile.verifyPending (resume GitHub connect)');
   }
 
   // v0.7: community.enabled flipped to true in DEFAULT_CONFIG. For users

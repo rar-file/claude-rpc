@@ -943,6 +943,13 @@ async function runCommunityFlush() {
       } else if (!pr.ok && pr.reason !== 'rate-limited' && pr.reason !== 'disabled') {
         log(`profile: ${pr.reason}${pr.error ? ' (' + pr.error + ')' : ''}`);
       }
+      // A GitHub connect the user said yes to but the server never confirmed
+      // (e.g. the Aug–Sep 2026 KV write-cap outage) — finish it now that the
+      // row just published. Self-scheduling and a no-op without a pending marker.
+      if (pr.ok && config.profile?.verifyPending) {
+        const { resumePendingVerify } = await import('./verify.js');
+        await resumePendingVerify(config, { log });
+      }
     }
   } catch (e) {
     log('community/profile flush threw:', e.message);

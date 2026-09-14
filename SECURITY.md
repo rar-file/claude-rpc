@@ -218,6 +218,23 @@ non-interactive setups are never asked. There is no private identity tier:
 the only way claude-rpc ever learns a GitHub identity is this same public,
 consented profile flow.
 
+**Background retry of a consented verification (v1.4.3).** Answering **y**
+(or running `profile verify`) records a local `profile.verifyPending` marker
+before any network step. If the server can't confirm the verification right
+then, the daemon retries the *same* gist flow in the background after its
+profile flush — backing off from 30 minutes to 12 hours, reusing one proof
+gist rather than publishing new ones, and going quiet after 14 days (the
+marker keeps `gaveUpAt`; `profile verify` restarts it). It only ever proves the
+GitHub login you connected: if the `gh` CLI is logged out or has switched to a
+different account, it waits and sends nothing. `profile off` pauses it;
+`link` or a successful verify clears it. Upgrading from 1.4.0–1.4.2 infers the
+marker only for installs whose config shows setup's yes-path (asked, a GitHub
+login stored, publishing on, never verified) — the installs whose connect
+failed during the 2026-08-20 → 09-11 server outage. The retry adds two
+optional fields to `/verify/check` — `resumed: true` and `pendingSince` (the
+local consent timestamp) — which the worker uses only to back-date an
+internal, non-public `verifiedAt` stamp.
+
 **Claude Wrapped (opt-in one-shot, never automatic).** `claude-rpc wrapped
 --publish` publishes a year-in-review blob under your profile handle to
 `<endpoint>/wrapped`, rendered at `claude-rpc.com/wrapped/<handle>`. It never

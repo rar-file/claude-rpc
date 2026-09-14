@@ -1161,3 +1161,79 @@ test('wrapped v2: a second machine ADDS its slice instead of clobbering the year
   const again = await (await handleWrappedGet(new URL('http://localhost/wrapped?handle=archer&year=2026'), env)).json();
   assert.equal(again.wrapped.sessions, 420 + 12, 'slice replaced, canonical slice intact');
 });
+
+// ── verifiedAt + resumed verification back-dating (1.4.3) ─────────────────
+// The CLI daemon finishes verifications that died during the 2026-08-20 → 09-11
+// KV write-cap outage; the stamp is back-dated to the user's consent.
+
+const { verifiedAtFor } = await import('../src/index.js');
+
+test('verifiedAtFor: now unless resumed; resumed back-dates within [createdAt − 2d, now]', () => {
+  const DAY = 86_400_000;
+  const now = 100 * DAY;
+  const prof = { createdAt: 90 * DAY };
+  assert.equal(verifiedAtFor(prof, {}, now), now);
+  assert.equal(verifiedAtFor(prof, { pendingSince: 1 }, now), now, 'pendingSince ignored without resumed');
+  assert.equal(verifiedAtFor(prof, { resumed: true }, now), 90 * DAY, 'undated resume anchors on createdAt');
+  assert.equal(verifiedAtFor(prof, { resumed: true, pendingSince: 89.5 * DAY }, now), 89.5 * DAY, 'consent a day before the first landed write');
+  assert.equal(verifiedAtFor(prof, { resumed: true, pendingSince: 10 * DAY }, now), 88 * DAY, 'clamped to createdAt − 2d');
+  assert.equal(verifiedAtFor(prof, { resumed: true, pendingSince: 200 * DAY }, now), now, 'never in the future');
+  assert.equal(verifiedAtFor(prof, { resumed: true, pendingSince: '5' }, now), 90 * DAY, 'non-numbers ignored');
+  assert.equal(verifiedAtFor({}, { resumed: true }, now), now, 'no createdAt → now');
+});
+
+async function verifyWithGist(env, extraBody) {
+  await env.TOTALS.put(`verify:${profileBody.instanceId}`,
+    JSON.stringify({ githubUser: 'octocat', token: 'vrf_resume', ts: Date.now() }));
+  const fakeFetch = async (url) => (url.endsWith('/gists/feed42')
+    ? { ok: true, json: async () => ({ owner: { login: 'octocat' }, files: { 'p.txt': { content: 'vrf_resume' } } }) }
+    : { ok: false });
+  const req = new Request('http://localhost/verify/check', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ instanceId: profileBody.instanceId, gistId: 'feed42', ...extraBody }),
+  });
+  return handleVerifyCheck(req, env, fakeFetch);
+}
+
+test('handleVerifyCheck: resumed verify back-dates verifiedAt and createdAt; survives the next flush', async () => {
+  const env = makeEnv();
+  await handleProfile(profileRequest(profileBody), env);
+  const pfKey = `pf:${profileBody.instanceId}`;
+  const created = JSON.parse(env.TOTALS.store.get(pfKey).value).createdAt;
+  const consent = created - 6 * 3_600_000; // said "y" six hours before the first write landed
+
+  const res = await verifyWithGist(env, { resumed: true, pendingSince: consent });
+  assert.equal((await res.json()).verified, true);
+  let prof = JSON.parse(env.TOTALS.store.get(pfKey).value);
+  assert.equal(prof.verifiedAt, consent);
+  assert.equal(prof.createdAt, consent, 'join date moves to the consent');
+
+  // The daemon's next /profile flush must not erase the stamp.
+  await handleProfile(profileRequest({ ...profileBody, tokens: 2000 }), env);
+  prof = JSON.parse(env.TOTALS.store.get(pfKey).value);
+  assert.equal(prof.verifiedAt, consent);
+  assert.equal(prof.createdAt, consent);
+  assert.equal(prof.verified, true);
+});
+
+test('handleVerifyCheck: ordinary verify stamps now and leaves createdAt alone', async () => {
+  const env = makeEnv();
+  await handleProfile(profileRequest(profileBody), env);
+  const pfKey = `pf:${profileBody.instanceId}`;
+  const created = JSON.parse(env.TOTALS.store.get(pfKey).value).createdAt;
+  const before = Date.now();
+  await verifyWithGist(env, { pendingSince: 1 }); // no `resumed` → ignored
+  const prof = JSON.parse(env.TOTALS.store.get(pfKey).value);
+  assert.ok(prof.verifiedAt >= before);
+  assert.equal(prof.createdAt, created);
+});
+
+test('handleVerifyCheck: re-verifying keeps the original verifiedAt', async () => {
+  const env = makeEnv();
+  await handleProfile(profileRequest(profileBody), env);
+  const pfKey = `pf:${profileBody.instanceId}`;
+  await verifyWithGist(env, {});
+  const first = JSON.parse(env.TOTALS.store.get(pfKey).value).verifiedAt;
+  await verifyWithGist(env, { resumed: true, pendingSince: first - 86_400_000 });
+  assert.equal(JSON.parse(env.TOTALS.store.get(pfKey).value).verifiedAt, first);
+});
