@@ -2,6 +2,15 @@
 
 All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.4.3] - 2026-09-14
+
+**Fixed**
+
+- **"Connect GitHub?" answers that hit a server error now finish on their own.** From 2026-08-20 to 2026-09-11 the leaderboard worker ran out of its daily storage-write quota by ~05:00 UTC every day, so for most of each day `/verify/start` failed for anyone who answered **y** to setup's connect question (or ran `profile verify`). Setup asks exactly once, so those installs were left publishing an *unverified* profile — ranked below every verified one and capped at 1B tokens — with no prompt to try again. Consent is now recorded locally (`profile.verifyPending`) before any network step, and the daemon retries the same public-gist verification in the background after its profile flush until it lands: 30-minute backoff doubling to 12 hours, one reused proof gist, silent after 14 days. It only proves the GitHub login you connected — a logged-out or switched `gh` account means it waits and sends nothing. **Upgrading from 1.4.0–1.4.2 picks this up automatically** for installs whose config shows setup's yes-path (asked, GitHub login stored, publishing on, never verified); there's nothing to run. `profile status` shows when a verification is pending. Details in `SECURITY.md` §3c.
+- **Verifications that complete late are dated when you joined, not when the server caught up.** `/verify/check` accepts optional `resumed` + `pendingSince`, and the worker stamps a new internal `verifiedAt` (back-dated to the consent, bounded to the profile's first write − 2 days) and pulls `createdAt` back to match. Not shown publicly and not used for ranking.
+- **`gh` calls now time out after 30s.** Every `gh` invocation was a `spawnSync` with no timeout; a stalled network or a locked keyring could hang `profile verify`/`badge --gist` indefinitely — and, now that the daemon verifies in the background, its event loop.
+- `profile verify` now exits non-zero when the server itself fails (5xx/network) instead of printing the soft "not confirmed" hint meant for a gist that isn't public yet.
+
 ## [1.4.2] - 2026-08-08
 
 **Fixed — Windows**
