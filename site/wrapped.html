@@ -179,12 +179,6 @@ body.page { overflow: auto; user-select: text; -webkit-user-select: text; }
 .page-wrap .kicker { max-width: none; }
 .page-wrap .big { font-size: clamp(38px, 9vw, 84px); }
 .page-wrap .sub { max-width: 44ch; }
-.homelink {
-  position: fixed; top: 18px; left: 20px; z-index: 40;
-  font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--paper);
-  opacity: 0.6; text-decoration: none;
-}
-.homelink:hover { opacity: 1; text-decoration: underline; text-decoration-style: wavy; text-underline-offset: 3px; }
 .handle-row { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; justify-content: center; }
 .handle-row input {
   font-family: 'JetBrains Mono', monospace; font-size: 15px; padding: 12px 14px;
@@ -200,9 +194,26 @@ body.page { overflow: auto; user-select: text; -webkit-user-select: text; }
 .cmds .c { color: #f0cd54; }
 .cmds .d { opacity: 0.55; }
 </style>
+<link rel="stylesheet" href="/nav.css" />
 </head>
 <body>
-<a class="homelink" href="/">← claude-rpc</a>
+<!-- site-nav -->
+<nav class="site-nav sn-overlay" aria-label="site">
+  <div class="sn-in">
+    <a class="sn-brand" href="/"><img src="/img/favicon.png" alt="" width="26" height="26" /> claude-rpc <span class="sn-ver" id="nav-version">v1.4.3</span></a>
+    <div class="sn-links">
+      <a href="/docs">docs</a>
+      <a href="/leaderboard">leaderboard</a>
+      <a href="/squads">squads</a>
+      <a href="/community">community</a>
+      <a href="/wrapped" aria-current="page">wrapped</a>
+      <a href="/blog">posts</a>
+      <a href="https://github.com/rar-file/claude-rpc">github ↗</a>
+    </div>
+    <a class="sn-cta" href="/#download">install →</a>
+  </div>
+</nav>
+<!-- /site-nav -->
 <div id="app"><div class="boot">building the year<span class="dots"></span></div></div>
 <script>
 (() => {
@@ -636,7 +647,7 @@ body.page { overflow: auto; user-select: text; -webkit-user-select: text; }
         emptyState(`@${esc(HANDLE)}'s wrapped is empty`, 'the published year has no activity in it. re-publish after a scan:');
         return;
       }
-      document.querySelector('.homelink')?.remove(); // fullscreen story owns the frame
+      document.querySelector('.site-nav')?.remove(); // fullscreen story owns the frame
       mount(buildSlides(d));
     })
     .catch(() => {

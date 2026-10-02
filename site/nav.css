@@ -1,0 +1,62 @@
+/* The one top bar, shared by every page. Markup is stamped into each page by
+   scripts/sync-nav.mjs (edit it there, never in a page). Self-contained on
+   purpose: hard-coded colors and explicit resets, so a page's own `nav {}` or
+   font rules can't bend it. */
+.site-nav {
+  position: sticky; top: 0; z-index: 50;
+  display: block; width: 100%; box-sizing: border-box; margin: 0; padding: 0;
+  align-self: stretch; text-align: left;
+  background: rgba(244, 237, 224, 0.94);
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  border-bottom: 1.5px solid #2b2722;
+  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-size: 13.5px; line-height: 1.2; letter-spacing: 0;
+}
+.site-nav * { box-sizing: border-box; }
+.site-nav .sn-in {
+  max-width: 1120px; margin: 0 auto; padding: 0 24px; height: 58px;
+  display: flex; align-items: center; gap: 22px;
+}
+.site-nav a { text-decoration: none; }
+.site-nav .sn-brand {
+  display: flex; align-items: center; gap: 10px; flex: none;
+  color: #2b2722; font-weight: 700; font-size: 15px; white-space: nowrap;
+}
+.site-nav .sn-brand img { width: 26px; height: 26px; image-rendering: pixelated; display: block; }
+.site-nav .sn-ver {
+  font-size: 11px; font-weight: 700; color: #f4ede0; background: #2b2722;
+  padding: 2px 6px; transform: rotate(-2deg); display: inline-block;
+}
+.site-nav .sn-links {
+  display: flex; align-items: center; gap: 4px; margin: 0 0 0 auto; padding: 0; list-style: none;
+}
+.site-nav .sn-links a {
+  display: block; padding: 7px 9px; color: #6b6357; white-space: nowrap; font-weight: 400;
+  border-bottom: 2px solid transparent;
+}
+.site-nav .sn-links a:hover { color: #2b2722; background: rgba(43, 39, 34, 0.06); }
+.site-nav .sn-links a[aria-current="page"] { color: #2b2722; font-weight: 700; border-bottom-color: #d97757; }
+.site-nav .sn-cta {
+  flex: none; display: inline-block; padding: 8px 14px; white-space: nowrap;
+  background: #d97757; color: #fff; font-weight: 700;
+  border: 1.5px solid #2b2722; box-shadow: 3px 3px 0 #2b2722;
+}
+.site-nav .sn-cta:hover { transform: translate(-1px, -1px); box-shadow: 4px 4px 0 #2b2722; }
+.site-nav .sn-cta:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 #2b2722; }
+
+/* Narrow: brand + install on row one, the links on a sideways-scrolling row
+   two — every page stays reachable on a phone, nothing hides in a menu. */
+@media (max-width: 900px) {
+  .site-nav .sn-in { flex-wrap: wrap; height: auto; padding: 10px 16px 0; gap: 10px 14px; }
+  .site-nav .sn-cta { margin-left: auto; order: 2; padding: 6px 12px; }
+  .site-nav .sn-links {
+    order: 3; width: 100%; margin: 0 -16px; padding: 0 12px; width: calc(100% + 32px);
+    overflow-x: auto; scrollbar-width: none; border-top: 1px solid rgba(43, 39, 34, 0.15);
+  }
+  .site-nav .sn-links::-webkit-scrollbar { display: none; }
+  .site-nav .sn-links a { padding: 10px 9px; }
+}
+
+/* Over a full-screen dark page (wrapped): float above it instead of pushing
+   content down. The page removes the bar once a story starts playing. */
+.site-nav.sn-overlay { position: fixed; left: 0; right: 0; background: #f4ede0; }

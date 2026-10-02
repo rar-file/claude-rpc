@@ -36,14 +36,6 @@
     min-height: 100vh; display: flex; flex-direction: column; }
   body::before { content: ''; position: fixed; top: 0; left: 0; right: 0; height: 10px; background: var(--rust); z-index: 10; }
 
-  nav { max-width: 880px; margin: 26px auto 0; padding: 0 24px; width: 100%;
-    display: flex; align-items: center; justify-content: space-between; gap: 14px;
-    font-family: var(--font-mono); font-size: 0.82rem; }
-  nav .logo { display: flex; align-items: center; gap: 10px; color: var(--ink); text-decoration: none; font-weight: 700; }
-  nav .logo img { width: 26px; height: 26px; image-rendering: pixelated; }
-  nav .links { display: flex; gap: 8px 18px; flex-wrap: wrap; }
-  nav .links a { color: var(--ink-mute); text-decoration: none; }
-  nav .links a:hover { color: var(--ink); text-decoration: underline; text-decoration-style: wavy; text-underline-offset: 3px; }
 
   .wrap { max-width: 880px; margin: 0 auto; padding: 46px 24px 64px; width: 100%; flex: 1; }
   a { color: var(--rust-3); }
@@ -139,18 +131,26 @@
   footer a:hover { color: var(--ink); text-decoration: underline; text-decoration-style: wavy; }
   @media (prefers-reduced-motion: reduce) { .pod, .tab { transition: none; } }
 </style>
+<link rel="stylesheet" href="/nav.css" />
 </head>
 <body>
-  <nav>
-    <a class="logo" href="/"><img src="/img/favicon.png" alt="" /> claude-rpc</a>
-    <div class="links">
-      <a href="/community">community</a>
-      <a href="/squads">squads</a>
-      <a href="/wrapped">wrapped</a>
+<!-- site-nav -->
+<nav class="site-nav" aria-label="site">
+  <div class="sn-in">
+    <a class="sn-brand" href="/"><img src="/img/favicon.png" alt="" width="26" height="26" /> claude-rpc <span class="sn-ver" id="nav-version">v1.4.3</span></a>
+    <div class="sn-links">
       <a href="/docs">docs</a>
+      <a href="/leaderboard" aria-current="page">leaderboard</a>
+      <a href="/squads">squads</a>
+      <a href="/community">community</a>
+      <a href="/wrapped">wrapped</a>
+      <a href="/blog">posts</a>
       <a href="https://github.com/rar-file/claude-rpc">github ↗</a>
     </div>
-  </nav>
+    <a class="sn-cta" href="/#download">install →</a>
+  </div>
+</nav>
+<!-- /site-nav -->
 
   <main class="wrap">
     <span class="kicker">[ leaderboard ]</span>

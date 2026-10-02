@@ -14,35 +14,53 @@
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
-    min-height: 100vh; display: flex; flex-direction: column;
-    align-items: center; justify-content: center; gap: 18px;
+    margin: 0; min-height: 100vh; display: flex; flex-direction: column;
     background: var(--paper); color: var(--ink);
     font-family: ui-monospace, 'JetBrains Mono', Menlo, monospace;
-    text-align: center; padding: 24px;
     background-image: radial-gradient(rgba(43,39,34,0.08) 1.4px, transparent 1.4px);
     background-size: 34px 34px;
   }
-  body::before { content: ''; position: fixed; top: 0; left: 0; right: 0; height: 10px; background: var(--rust); }
+  main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; text-align: center; padding: 24px; }
   img { image-rendering: pixelated; width: 96px; height: 96px; }
   h1 { font-size: 64px; letter-spacing: -2px; }
   p { color: var(--ink-mute); max-width: 440px; line-height: 1.6; }
   code { background: rgba(43,39,34,0.07); padding: 2px 8px; border-radius: 4px; }
-  nav { display: flex; gap: 10px 22px; flex-wrap: wrap; justify-content: center; margin-top: 10px; }
+  .suggest { display: flex; gap: 10px 22px; flex-wrap: wrap; justify-content: center; margin-top: 10px; }
   a { color: var(--rust-deep); font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
   a:hover { text-decoration-style: wavy; }
 </style>
+<link rel="stylesheet" href="/nav.css" />
 </head>
 <body>
+<!-- site-nav -->
+<nav class="site-nav" aria-label="site">
+  <div class="sn-in">
+    <a class="sn-brand" href="/"><img src="/img/favicon.png" alt="" width="26" height="26" /> claude-rpc <span class="sn-ver" id="nav-version">v1.4.3</span></a>
+    <div class="sn-links">
+      <a href="/docs">docs</a>
+      <a href="/leaderboard">leaderboard</a>
+      <a href="/squads">squads</a>
+      <a href="/community">community</a>
+      <a href="/wrapped">wrapped</a>
+      <a href="/blog">posts</a>
+      <a href="https://github.com/rar-file/claude-rpc">github ↗</a>
+    </div>
+    <a class="sn-cta" href="/#download">install →</a>
+  </div>
+</nav>
+<!-- /site-nav -->
+<main>
   <img src="/img/favicon.png" alt="clawd, confused" width="96" height="96" />
   <h1>404</h1>
   <p>nothing at this path, like the card when claude's asleep.<br/>maybe you wanted one of these:</p>
-  <nav>
+  <div class="suggest">
     <a href="/">home</a>
     <a href="/leaderboard">leaderboard</a>
     <a href="/community">community</a>
     <a href="/blog">posts</a>
     <a href="https://github.com/rar-file/claude-rpc">github</a>
-  </nav>
+  </div>
   <p><code>npx claude-rpc@latest setup</code> works from anywhere, though.</p>
+</main>
 </body>
 </html>
