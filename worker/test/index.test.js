@@ -1237,3 +1237,83 @@ test('handleVerifyCheck: re-verifying keeps the original verifiedAt', async () =
   await verifyWithGist(env, { resumed: true, pendingSince: first - 86_400_000 });
   assert.equal(JSON.parse(env.TOTALS.store.get(pfKey).value).verifiedAt, first);
 });
+
+// ── heatmap: daily series storage + /heatmap and /stats SVGs ──────────────
+
+const { sanitizeDaily, profileSeries, handleUserHeatmap, handleUserStats } = await import('../src/index.js');
+
+function dayAgo(n, now = Date.now()) { return new Date(now - n * 86_400_000).toISOString().slice(0, 10); }
+function clearRates(env) { for (const k of [...env.TOTALS.store.keys()]) if (k.startsWith('rate:')) env.TOTALS.store.delete(k); }
+async function storedProfile(env, id) { return JSON.parse(await env.TOTALS.get(`pf:${id}`)); }
+
+test('sanitizeDaily: clamps values, trims to a year, drops junk instead of rejecting', () => {
+  const now = Date.now();
+  const d = sanitizeDaily({ end: dayAgo(0, now), tokens: [-5, 'x', 1e15, 7], activeMin: [5000, 3] }, now);
+  assert.deepEqual(d.tokens, [0, 0, 100_000_000_000, 7]);
+  assert.deepEqual(d.activeMin, [1440, 3]);
+  assert.equal(sanitizeDaily({ end: dayAgo(0, now), tokens: new Array(900).fill(1) }, now).tokens.length, 371);
+  assert.equal(sanitizeDaily({ end: '2026-02-30', tokens: [1] }, now), null);
+  assert.equal(sanitizeDaily({ end: dayAgo(-5, now), tokens: [1] }, now), null, 'future end');
+  assert.equal(sanitizeDaily({ end: dayAgo(500, now), tokens: [1] }, now), null, 'ancient end');
+  assert.equal(sanitizeDaily('nope', now), null);
+  // a junk series never blocks the profile itself
+  assert.equal(validateProfile({ ...profileBody, daily: { end: 'x' } }), null);
+});
+
+test('handleProfile: stores daily per machine; older clients keep it; null clears it', async () => {
+  const env = makeEnv();
+  const id = profileBody.instanceId;
+  await handleProfile(profileRequest({ ...profileBody, daily: { end: dayAgo(0), tokens: [1, 2], activeMin: [3, 4] } }), env);
+  let p = await storedProfile(env, id);
+  assert.deepEqual(p.machines[id].daily.tokens, [1, 2]);
+  // an older client (no `daily` field) must not erase the series
+  clearRates(env);
+  await handleProfile(profileRequest(profileBody), env);
+  p = await storedProfile(env, id);
+  assert.deepEqual(p.machines[id].daily.tokens, [1, 2]);
+  // opting out sends daily: null → cleared
+  clearRates(env);
+  await handleProfile(profileRequest({ ...profileBody, daily: null }), env);
+  p = await storedProfile(env, id);
+  assert.equal(p.machines[id].daily, undefined);
+  // and the public profile shape never carries the series
+  const pub = await (await handleProfileGet(new URL('http://localhost/profile?handle=archer'), env)).json();
+  assert.equal(pub.profile.daily, undefined);
+  assert.equal(pub.profile.machines, undefined);
+});
+
+test('profileSeries: a linked laptop\'s days are summed into the canonical heatmap', async () => {
+  const env = makeEnv();
+  const LAPTOP = '99999999-8888-7777-6666-555555555555';
+  await handleProfile(profileRequest({ ...profileBody, daily: { end: dayAgo(0), tokens: [10, 20], activeMin: [1, 2] } }), env);
+  env.TOTALS.store.set(`alias:${LAPTOP}`, { value: profileBody.instanceId, ttl: null });
+  // laptop last synced yesterday: its last value lands one day earlier
+  await handleProfile(profileRequest({ ...profileBody, instanceId: LAPTOP, daily: { end: dayAgo(1), tokens: [100], activeMin: [5] } }), env);
+  const s = profileSeries(await storedProfile(env, profileBody.instanceId));
+  assert.equal(s.end, dayAgo(0));
+  assert.deepEqual(s.tokens.slice(-2), [110, 20]);
+  assert.deepEqual(s.activeMin.slice(-2), [6, 2]);
+});
+
+test('/heatmap and /stats: render from the stored series, placeholder otherwise', async () => {
+  const env = makeEnv();
+  await handleProfile(profileRequest({ ...profileBody, daily: { end: dayAgo(0), tokens: [5_000_000, 9], activeMin: [60, 0] } }), env);
+  const res = await worker.fetch(new Request('http://localhost/heatmap/archer.svg?metric=hours'), env);
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('Content-Type'), /svg/);
+  const body = await res.text();
+  assert.match(body, /Archer · a year on Claude Code/);
+  assert.match(body, /1 active days/);
+  const stats = await (await worker.fetch(new Request('http://localhost/stats/archer.svg'), env)).text();
+  assert.match(stats, /BUSIEST DAY/);
+  assert.match(stats, /5\.00M/);
+  assert.doesNotMatch(stats, /aaaaaaaa-bbbb/, 'never leaks an instanceId');
+  // unknown handle / no series yet: still an SVG, with a hint, short cache
+  const none = await handleUserHeatmap('nobody', new URL('http://localhost/heatmap/nobody.svg'), env);
+  assert.match(await none.text(), /no public profile yet/);
+  assert.match(none.headers.get('Cache-Control'), /max-age=60/);
+  const env2 = makeEnv();
+  await handleProfile(profileRequest(profileBody), env2);
+  const pending = await handleUserStats('archer', new URL('http://localhost/stats/archer.svg'), env2);
+  assert.match(await pending.text(), /after the next profile sync/);
+});

@@ -165,6 +165,9 @@ export const DEFAULT_CONFIG = {
     handle: null,
     displayName: null,
     githubUser: null,
+    // Also publish per-day token + active-minute totals (last year) so the
+    // live /heatmap and /stats cards can draw your year. false = totals only.
+    heatmap: true,
   },
   showElapsed: true,
   activityType: 0,

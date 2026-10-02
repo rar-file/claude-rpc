@@ -59,6 +59,27 @@ profile metrics (tokens, sessions, active hours, streak). Path param only.
 Always returns an SVG; unknown handle renders a neutral placeholder card.
 Cache: `max-age=300` (`60` placeholder).
 
+### `GET /heatmap/<handle>.svg`
+Live per-user **year heatmap** (GitHub-contributions style, 53 weeks ending
+today) built from the per-day series the profile publishes. When one identity
+has several linked machines, their days are **summed**: each machine's tokens
+and minutes come from its own transcripts.
+
+| Param | Where | Values | Default |
+| ----- | ----- | ------ | ------- |
+| `<handle>` | path | the profile handle | — |
+| `metric` | query | `tokens` \| `hours` | `tokens` |
+
+Shading is relative to the profile's own distribution (quartiles of active
+days), so a light user and a heavy user both get a readable map. Always returns
+an SVG: an unknown handle, or a profile whose client predates 1.5.0, renders an
+empty grid with a hint. Cache: `max-age=300` (`60` when empty).
+
+### `GET /stats/<handle>.svg`
+Stats card **with the heatmap built in**: the four lifetime totals, the year
+grid, and facts read off it (busiest day, average per active day, longest run,
+best weekday). Same `metric` param and empty/caching behavior as `/heatmap`.
+
 ### `GET /wrapped?handle=<handle>&year=<y>`
 A published **Claude Wrapped** year-in-review (powers the `/wrapped/<handle>`
 page). `year` optional — defaults to the current UTC year, falling back to the
@@ -185,7 +206,7 @@ via Bearer sessions. Per-instance and per-IP rate limits apply.
 | Route | Body (key fields) | What it does |
 | ----- | ----------------- | ------------ |
 | `POST /report` | `instanceId`, `sessionsDelta`, `tokensDelta`, `version`, `osFamily` | Add anonymous community deltas. This is the **entire telemetry payload** — see [`validateReport`](../worker/src/index.js) and [`SECURITY.md`](../SECURITY.md). |
-| `POST /profile` | `instanceId`, `handle`, `tokens?`, `sessions?`, `activeMs?`, `streak?`, `displayName?`, `version`, `osFamily` | Upsert a public leaderboard profile (absolute totals, clamped). `verified`/`githubUser` are set only by the verify/link flow, never the client. |
+| `POST /profile` | `instanceId`, `handle`, `tokens?`, `sessions?`, `activeMs?`, `streak?`, `displayName?`, `daily?`, `version`, `osFamily` | Upsert a public leaderboard profile (absolute totals, clamped). `verified`/`githubUser` are set only by the verify/link flow, never the client. `daily` is `{ end: 'YYYY-MM-DD', tokens: number[], activeMin: number[] }` (oldest → newest, ≤371 days, last value = `end`), stored per machine for `/heatmap` and `/stats`. A malformed `daily` is dropped, never a 400. Omitting it keeps the stored series; `null` clears it. Never returned by `GET /profile`. |
 | `POST /wrapped` | `instanceId`, `year`, `wrapped` (allowlisted blob — see `GET /wrapped`) | Publish a Claude Wrapped year-in-review under the caller's published profile handle (403 without one). Opt-in one-shot (`claude-rpc wrapped --publish`); values are clamped, unknown fields dropped. Returns the public page URL. |
 | `POST /verify/start` | `instanceId`, `githubUser?` | Issue a one-time gist-verification token. |
 | `POST /verify/check` | `instanceId`, `gistId`, optional `resumed`, `pendingSince` | Confirm the token appears in a public gist; grants the verified check (merges into the canonical identity if one exists). `resumed: true` marks a verification completing an earlier consent (the CLI's background retry); the internal `verifiedAt` stamp is then back-dated to `pendingSince` (ms epoch), bounded to [profile `createdAt` − 2 days, now], or to `createdAt` when omitted. |

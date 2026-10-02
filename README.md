@@ -147,7 +147,19 @@ claude-rpc readme                 # prints paste-ready README badge markdown
 claude-rpc readme --raw | pbcopy  # straight to your clipboard
 ```
 
-**Live card + badges, paste once.** With a public profile (`claude-rpc profile set --handle <you> && claude-rpc profile on`), your stats are served as an always-current card (and badges) from the community worker — no `gh`, no gist, nothing to re-run:
+**Live stats + year heatmap, paste once.** With a public profile (`claude-rpc profile set --handle <you> && claude-rpc profile on`), the community worker serves an always-current stats card with your last 12 months as a heatmap. You don't need `gh` or a gist, and there's nothing to re-run:
+
+```md
+[![Claude Code stats](https://claude-rpc-totals.claude-rpc.workers.dev/stats/<you>.svg)](https://claude-rpc.com/u/<you>)
+```
+
+<div align="center">
+  <img src="site/examples/stats-heatmap.svg" width="680" alt="Stats card: lifetime tokens, sessions, hours and streak above a 12-month heatmap of tokens per day, with busiest day, daily average, longest run and best weekday" />
+</div>
+
+`?metric=hours` shades the grid by time instead of tokens. `/heatmap/<you>.svg` is the grid on its own. If you link several machines, their days are added together. Shading is relative to your own year, so light and heavy users both get a readable map. To publish lifetime totals only, set `"profile": { "heatmap": false }` in config.json; the next flush also clears the stored days.
+
+The smaller card and badges are still there:
 
 ```md
 [![Claude Code stats](https://claude-rpc-totals.claude-rpc.workers.dev/card/<you>.svg)](https://claude-rpc.com/u/<you>)
@@ -164,6 +176,8 @@ claude-rpc badge --metric hours  --range 7d   --out claude-hours.svg
 claude-rpc badge --metric streak              --out claude-streak.svg
 claude-rpc badge --metric hours  --gist                                     # publish to a gist (live README badge)
 claude-rpc card  --range year                 --out year-on-claude.svg
+claude-rpc calendar --metric tokens           --out heatmap.svg             # year heatmap (hours by default)
+claude-rpc calendar --card                    --out stats.svg               # stats + heatmap, offline
 ```
 
 <div align="center">
@@ -314,7 +328,7 @@ It's a thin bootstrapper — on the first session it just runs `npx claude-rpc@l
 | `badge`          | Shields-style SVG (`--metric` `--range` `--out` `--gist`) |
 | `card`           | Poster-style SVG (`--range year\|month\|week\|all`) |
 | `github-stat`    | Embeddable profile stat card (`--handle` `--out` `--gist`) |
-| `calendar`       | Year activity heatmap SVG (`--out` `--gist`) |
+| `calendar`       | Year activity heatmap SVG (`--metric hours\|tokens` `--card` `--out` `--gist`) |
 | `session-card`   | Recap card for the current session (`--out`) |
 | `readme`         | Paste-ready README badge markdown for your profile (`--raw` to pipe) |
 | `statusline`     | One-line status for tmux/shell prompts (`--template`) |

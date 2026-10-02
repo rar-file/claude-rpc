@@ -48,6 +48,10 @@
 import { renderBadge, fmtNum, fmtHours } from './badge.js';
 import { renderProfileCard, renderWrappedCard } from './card.js';
 import { mintToken, verifyToken, SESSION_TTL_MS, STATE_TTL_MS } from './auth.js';
+// Shared with the CLI (src/heatmap.js is pure — no imports — so wrangler
+// bundles it straight in). One renderer means the live /heatmap and /stats
+// SVGs and the local `claude-rpc calendar` can never drift apart.
+import { renderHeatmap, renderStatsCard, mergeSeries, isDayKey, dayToMs, msToDay, HEATMAP_DAYS } from '../../src/heatmap.js';
 
 const SCHEMA_VERSION = 1;
 const MAX_DELTA_SESSIONS = 100_000;       // per single report — bigger gets rejected
@@ -347,6 +351,41 @@ export async function handleUserCard(rawHandle, env) {
     if (prof) p = publicProfile(prof); // safe allowlist — never the machines map
   }
   return svgBadgeResponse(renderProfileCard(p), p ? 300 : 60);
+}
+
+async function profileByHandle(env, rawHandle) {
+  const handle = normHandle(rawHandle);
+  if (!handle) return null;
+  const owner = await env.TOTALS.get(HANDLE_KEY(handle));
+  return owner ? getProfile(env, owner) : null;
+}
+
+// Live year heatmap: /heatmap/<handle>.svg?metric=tokens|hours. Same
+// always-an-SVG contract as the badge/card — unknown handle or a profile that
+// hasn't synced a series yet renders an empty grid with a hint, never a 404.
+export async function handleUserHeatmap(rawHandle, url, env) {
+  const metric = url.searchParams.get('metric') === 'hours' ? 'hours' : 'tokens';
+  const prof = await profileByHandle(env, rawHandle);
+  const series = prof ? profileSeries(prof) : null;
+  const who = prof ? (prof.displayName || `@${prof.handle}`) : null;
+  const svg = renderHeatmap({
+    series: series || { end: msToDay(Date.now()), tokens: [], activeMin: [] },
+    metric,
+    empty: !series,
+    title: who ? `${who} · a year on Claude Code` : 'a year on Claude Code',
+    subtitle: !prof ? 'no public profile yet' : !series ? 'heatmap fills in after the next profile sync' : undefined,
+    footer: prof && prof.verified && prof.githubUser ? `github.com/${prof.githubUser} · claude-rpc.com` : 'claude-rpc.com',
+  });
+  return svgBadgeResponse(svg, series ? 300 : 60);
+}
+
+// Stats card with the heatmap built in: /stats/<handle>.svg?metric=tokens|hours.
+export async function handleUserStats(rawHandle, url, env) {
+  const metric = url.searchParams.get('metric') === 'hours' ? 'hours' : 'tokens';
+  const prof = await profileByHandle(env, rawHandle);
+  const p = prof ? publicProfile(prof) : null; // allowlist — never the machines map
+  const series = prof ? profileSeries(prof) : null;
+  return svgBadgeResponse(renderStatsCard(p, series, { metric }), series ? 300 : 60);
 }
 
 // Record a referral hit. Returns 204 regardless (it's a fire-and-forget
@@ -706,8 +745,51 @@ function machineSlice(body, prevSlice = {}, now = Date.now()) {
     sessions:  setClamp(body.sessions, MAX_PF_SESSIONS,  prevSlice.sessions),
     activeMs:  setClamp(body.activeMs, MAX_PF_ACTIVE_MS, prevSlice.activeMs),
     streak:    setClamp(body.streak,   MAX_STREAK,       prevSlice.streak),
+    // Per-day series for the heatmap. Absent (older client, or heatmap opted
+    // out) keeps nothing new but never erases what an earlier flush stored —
+    // except an explicit `daily: null`, which clears it (opt-out takes effect).
+    ...dailyField(body, prevSlice, now),
     updatedAt: now,
   };
+}
+
+// Clamp ceilings for one day. 1e11 tokens/day is ~100x the heaviest real day.
+const MAX_DAY_TOKENS = 100_000_000_000;
+const MAX_DAY_MINUTES = 1440;
+
+// Sanitize a client `daily` series: { end: 'YYYY-MM-DD', tokens[], activeMin[] }.
+// Junk is DROPPED (returns null), never a 400 — a bad heatmap must not stop
+// the lifetime totals from landing. `end` must be a real date within
+// [now − 400d, now + 2d] (client local dates run up to a day ahead of UTC).
+export function sanitizeDaily(d, now = Date.now()) {
+  if (!d || typeof d !== 'object' || !isDayKey(d.end)) return null;
+  const endMs = dayToMs(d.end);
+  if (endMs > now + 2 * 86_400_000 || endMs < now - 400 * 86_400_000) return null;
+  const clean = (arr, max) => (Array.isArray(arr) ? arr.slice(-HEATMAP_DAYS) : [])
+    .map((v) => Math.min(max, Math.max(0, Math.floor(Number(v) || 0))));
+  const tokens = clean(d.tokens, MAX_DAY_TOKENS);
+  const activeMin = clean(d.activeMin, MAX_DAY_MINUTES);
+  if (!tokens.length && !activeMin.length) return null;
+  return { end: d.end, tokens, activeMin };
+}
+
+function dailyField(body, prevSlice, now) {
+  if (body.daily === null) return {};
+  if (body.daily !== undefined) {
+    const d = sanitizeDaily(body.daily, now);
+    if (d) return { daily: d };
+  }
+  return prevSlice.daily ? { daily: prevSlice.daily } : {};
+}
+
+// One identity's heatmap: every machine's series summed per date, on a grid
+// ending today (UTC) — or later, when a machine's local date is ahead.
+export function profileSeries(p, now = Date.now()) {
+  const slices = Object.values(p?.machines || {}).map((m) => m && m.daily).filter(Boolean);
+  if (!slices.length) return null;
+  let end = msToDay(now - 86_400_000);
+  for (const sl of slices) if (isDayKey(sl.end) && sl.end > end) end = sl.end;
+  return mergeSeries(slices, end, HEATMAP_DAYS);
 }
 
 // Ensure a profile has a `machines` map. A profile written before this model
@@ -2079,6 +2161,14 @@ export default {
       let raw = url.pathname.slice('/card/'.length, -'.svg'.length);
       try { raw = decodeURIComponent(raw); } catch { /* keep raw — normHandle rejects junk */ }
       return handleUserCard(raw, env);
+    }
+    // Live heatmap + stats-with-heatmap card: /heatmap/<h>.svg, /stats/<h>.svg.
+    for (const [prefix, fn] of [['/heatmap/', handleUserHeatmap], ['/stats/', handleUserStats]]) {
+      if (request.method === 'GET' && url.pathname.startsWith(prefix) && url.pathname.endsWith('.svg')) {
+        let raw = url.pathname.slice(prefix.length, -'.svg'.length);
+        try { raw = decodeURIComponent(raw); } catch { /* keep raw — normHandle rejects junk */ }
+        return fn(raw, url, env);
+      }
     }
     // Claude Wrapped: publish (CLI), read (site page), share card (embeds).
     if (request.method === 'POST' && url.pathname === '/wrapped') {

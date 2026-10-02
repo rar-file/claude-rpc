@@ -2,6 +2,21 @@
 
 All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+**Added**
+
+- **A live stats card with a 12-month heatmap for your README:** `GET /stats/<handle>.svg`. It shows lifetime tokens, sessions, hours and streak above a GitHub-style grid of the last year. Under the grid it lists your busiest day, average per active day, longest run and best weekday. `?metric=hours` shades by time instead of tokens. Paste it once and it refreshes itself. `claude-rpc readme` and your `/u/<handle>` page now lead with it.
+- **`GET /heatmap/<handle>.svg`**: the grid on its own.
+- **Shading is relative to your own year** (quartiles of your active days), so a 50M-a-day user and a 5B-a-day user both get a readable map.
+- **Linked machines add up.** Each machine's days are stored separately and summed per date, the same way lifetime totals are merged.
+- **`claude-rpc calendar --metric tokens|hours` and `--card`.** The local heatmap now uses the same renderer as the live endpoints, so a local render and the README card match. `--card` renders the stats + heatmap card offline, and `--gist` publishes either.
+- The profile flush now carries `daily`: per-day tokens and active minutes for the last year, with nothing else per day. It costs no extra worker writes. Turn it off with `"profile": { "heatmap": false }`, which also deletes what's stored. See `SECURITY.md`.
+
+**Changed**
+
+- `claude-rpc calendar` has a new look: month and weekday labels, quartile shading, and hover titles per day. Its default metric is still hours.
+
 ## [1.4.3] - 2026-09-14
 
 **Fixed**

@@ -1216,18 +1216,27 @@ function doStatusline(argv) {
 }
 
 // Activity calendar — GitHub-contributions-style year heatmap SVG.
+// --metric hours (default) | tokens; --card wraps it in the stats card.
 async function doCalendar(argv) {
   argv = splitEqArgs(argv);
-  const opts = { out: '', gist: false };
+  const opts = { out: '', gist: false, metric: 'hours', card: false };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--out' || argv[i] === '-o') opts.out = takeValue(argv[++i], '--out');
     else if (argv[i] === '--gist') opts.gist = true;
+    else if (argv[i] === '--card') opts.card = true;
+    else if (argv[i] === '--metric') opts.metric = takeValue(argv[++i], '--metric');
+  }
+  if (!['hours', 'tokens'].includes(opts.metric)) {
+    fail(`unknown --metric \`${opts.metric}\``, { hint: 'use --metric hours or --metric tokens', code: EX_USER_ERROR });
   }
   const aggregate = readAggregate();
   if (!aggregate) fail('no aggregate yet — nothing to render', { hint: 'run `claude-rpc scan` first', code: EX_BAD_STATE });
-  const { renderCalendar } = await import('./calendar.js');
-  const svg = renderCalendar(aggregate, {});
-  if (opts.gist) return publishBadgeToGist(svg, { metric: 'calendar', range: 'year' }, 'calendar');
+  const { renderCalendar, renderCalendarCard } = await import('./calendar.js');
+  const svg = opts.card
+    ? renderCalendarCard(aggregate, { metric: opts.metric, handle: loadConfig().profile?.handle })
+    : renderCalendar(aggregate, { metric: opts.metric });
+  const kind = opts.card ? 'stats' : 'calendar';
+  if (opts.gist) return publishBadgeToGist(svg, { metric: kind, range: 'year' }, kind);
   if (opts.out) {
     writeFileSync(opts.out, svg);
     console.log(`  ${c.green}✓${c.reset}  wrote ${c.cyan}${opts.out}${c.reset}  ${c.dim}(${svg.length} bytes)${c.reset}`);
@@ -1268,12 +1277,13 @@ function doReadme(argv) {
     ['streak', 'Claude Code streak'],
     ['tokens', 'Claude Code tokens'],
   ];
-  // The hero: a live stat card that auto-refreshes from your published profile.
+  // The hero: live stats + year heatmap, auto-refreshing from your profile.
+  const statsMd = (h) => `[![Claude Code stats](${endpoint}/stats/${h}.svg)](${site}/u/${h})`;
   const cardMd = (h) => `[![Claude Code stats](${endpoint}/card/${h}.svg)](${site}/u/${h})`;
   const badgesMd = (h) => metrics
     .map(([m, alt]) => `[![${alt}](${endpoint}/badge/${h}.svg?metric=${m})](${site}/?ref=badge)`)
     .join('\n');
-  const liveMd = (h) => `${cardMd(h)}\n\n${badgesMd(h)}`;
+  const liveMd = (h) => `${statsMd(h)}\n\n${badgesMd(h)}`;
 
   // Raw mode: just the markdown, for `claude-rpc readme --raw | pbcopy`.
   if (raw) {
@@ -1288,9 +1298,18 @@ function doReadme(argv) {
   console.log('');
 
   if (live) {
-    console.log(`  ${c.dim}Live stat card for ${c.reset}${c.cyan}@${handle}${c.reset}${c.dim} — paste once; it auto-updates as you work:${c.reset}`);
+    console.log(`  ${c.dim}Live stats + year heatmap for ${c.reset}${c.cyan}@${handle}${c.reset}${c.dim} — paste once; it auto-updates as you work:${c.reset}`);
+    console.log('');
+    console.log(`    ${statsMd(handle)}`);
+    if (profile.heatmap === false) {
+      console.log(`    ${c.yellow}profile.heatmap is off — the heatmap stays empty until you turn it back on${c.reset}`);
+    }
+    console.log('');
+    console.log(`  ${c.dim}…the compact card (totals only):${c.reset}`);
     console.log('');
     console.log(`    ${cardMd(handle)}`);
+    console.log('');
+    console.log(`  ${c.dim}…just the heatmap:${c.reset} ${c.cyan}${endpoint}/heatmap/${handle}.svg${c.reset}${c.dim}  (?metric=hours for time)${c.reset}`);
     console.log('');
     console.log(`  ${c.dim}…or compact badges:${c.reset}`);
     console.log('');
@@ -1304,6 +1323,8 @@ function doReadme(argv) {
     console.log(`    ${c.cyan}claude-rpc profile set --handle <name> && claude-rpc profile on${c.reset}`);
     console.log('');
     console.log(`  ${c.dim}Then your card + badges live here (self-refreshing — paste once):${c.reset}`);
+    console.log(`    ${c.cyan}${endpoint}/stats/<handle>.svg${c.reset}     ${c.dim}# stats + year heatmap${c.reset}`);
+    console.log(`    ${c.cyan}${endpoint}/heatmap/<handle>.svg${c.reset}`);
     console.log(`    ${c.cyan}${endpoint}/card/<handle>.svg${c.reset}`);
     console.log(`    ${c.cyan}${endpoint}/badge/<handle>.svg?metric=hours${c.reset}`);
   }
@@ -2392,7 +2413,7 @@ function help() {
     ['card',      'Render a poster-style SVG summary (--range year|month|week|all)'],
     ['github-stat', 'Render an embeddable profile stat card (--handle --out --gist)'],
     ['statusline', 'One-line status for tmux/shell prompts (--template)'],
-    ['calendar',  'Year activity heatmap SVG (--out --gist)'],
+    ['calendar',  'Year activity heatmap SVG (--metric hours|tokens --card --out --gist)'],
     ['session-card', 'Recap card for the current session (--out)'],
     ['readme',    'Paste-ready README card + badges for your profile (--raw to pipe)'],
     ['mcp install', 'Wire the stats MCP server into Claude Code (one command)'],

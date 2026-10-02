@@ -199,7 +199,8 @@ anonymous 3a report, this one carries your chosen public identity. The
   "sessions": 1200,
   "activeMs": 360000000,
   "streak": 23,
-  "version": "0.16.2",
+  "daily": { "end": "2026-10-02", "tokens": [0, 41200000, …], "activeMin": [0, 95, …] },
+  "version": "1.5.0",
   "osFamily": "linux",
   "ts": 1716500000000
 }
@@ -207,6 +208,15 @@ anonymous 3a report, this one carries your chosen public identity. The
 
 It sends absolute totals (not deltas) and is idempotent worker-side (a SET, not
 an add). `profile off` stops it.
+
+**Per-day series (v1.5).** `daily` holds up to 371 days of two numbers per
+**local** calendar day: total tokens and active minutes. It contains no project,
+file, model or prompt data. It feeds the public `/heatmap/<handle>.svg` and
+`/stats/<handle>.svg` images, which show anyone *which days* you used Claude
+Code and how heavily. That reveals more than lifetime totals do, so there's a
+switch: `"profile": { "heatmap": false }` sends `daily: null`, which deletes
+the stored series on the next flush and keeps it off from then on. The series
+is never returned by `GET /profile` or `/leaderboard`.
 
 **The setup-time "connect GitHub?" question.** Since v1.4, an interactive
 `claude-rpc setup` ends with one explicit y/N: *connect GitHub?* Answering

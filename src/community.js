@@ -25,7 +25,8 @@ import { AGGREGATE_PATH, STATE_DIR } from './paths.js';
 import { VERSION } from './version.js';
 import { profileIsPublishable } from './leaderboard.js';
 import { projectNameIsPrivate } from './privacy.js';
-import { cleanProjectName } from './scanner.js';
+import { cleanProjectName, dayKey } from './scanner.js';
+import { HEATMAP_DAYS } from './heatmap.js';
 import { humanModel } from './format.js';
 
 const CURSOR_PATH = join(STATE_DIR, 'community-cursor.json');
@@ -103,6 +104,28 @@ function totalTokens(aggregate) {
 // cursor, no double-count risk, and the board matches your real aggregate
 // exactly. (Deltas were wrong here: the first publish carried the entire
 // lifetime total, which blew past the per-report caps for any established user.)
+// The last year of per-day tokens + active minutes, for the live heatmap
+// (/heatmap/<h>.svg, /stats/<h>.svg). Keyed by LOCAL date like aggregate.byDay;
+// oldest → newest with leading empty days trimmed. Only day totals — nothing
+// about projects, files, or prompts. Opt out with profile.heatmap: false.
+export function buildDailySeries(aggregate, now = Date.now(), days = HEATMAP_DAYS) {
+  const byDay = aggregate?.byDay || {};
+  const tokens = [], activeMin = [];
+  const d = new Date(now);
+  d.setHours(12, 0, 0, 0); // noon: DST shifts can't skip or repeat a date
+  const end = dayKey(d.getTime());
+  d.setDate(d.getDate() - (days - 1));
+  for (let i = 0; i < days; i++) {
+    const b = byDay[dayKey(d.getTime())];
+    tokens.push(b ? totalTokens(b) : 0);
+    activeMin.push(b ? Math.round((b.activeMs || 0) / 60_000) : 0);
+    d.setDate(d.getDate() + 1);
+  }
+  let first = 0;
+  while (first < days && !tokens[first] && !activeMin[first]) first++;
+  return { end, tokens: tokens.slice(first), activeMin: activeMin.slice(first) };
+}
+
 export function buildProfilePayload(aggregate, profileCfg, { instanceId, now = Date.now() }) {
   return {
     instanceId,
@@ -113,6 +136,9 @@ export function buildProfilePayload(aggregate, profileCfg, { instanceId, now = D
     sessions: aggregate?.sessions || 0,
     activeMs: aggregate?.activeMs || 0,
     streak: aggregate?.streak || 0,
+    // null (not omitted) on opt-out: the worker keeps a stored series when the
+    // field is absent (older clients), so clearing has to be explicit.
+    daily: profileCfg.heatmap === false ? null : buildDailySeries(aggregate, now),
     version: VERSION,
     osFamily: osFamily(),
     ts: now,

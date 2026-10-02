@@ -107,6 +107,7 @@
     width: 96px; height: 24px; background: var(--tape); border-radius: 2px; }
   .panel h2 { font-family: var(--font-disp); font-size: 1.2rem; margin: 0 0 4px; }
   .panel .hint { color: var(--ink-mute); font-family: var(--font-mono); font-size: 0.78rem; margin: 0 0 18px; }
+  .statsimg { display: block; width: 100%; max-width: 880px; height: auto; margin: 0 0 12px; }
   .embedgrid { display: grid; grid-template-columns: minmax(0, 420px) 1fr; gap: 20px 28px; align-items: start; }
   @media (max-width: 720px) { .embedgrid { grid-template-columns: 1fr; } }
   .cardimg { width: 100%; display: block; border: 1.5px solid var(--ink); box-shadow: 4px 4px 0 rgba(43,39,34,0.1); }
@@ -179,6 +180,11 @@
     <section class="panel" id="embed" hidden>
       <h2>embed in your README</h2>
       <p class="hint">live card + badges: they track this profile and refresh themselves. no re-running, no gist.</p>
+      <img id="statspreview" class="statsimg" alt="Claude Code stats with a year heatmap" loading="lazy" />
+      <div class="codebox">
+        <button class="copybtn" id="copystats" type="button">copy stats + heatmap</button>
+        <pre><code id="statsmd"></code></pre>
+      </div>
       <div class="embedgrid">
         <img id="cardpreview" class="cardimg" alt="Claude Code stats card" loading="lazy" />
         <div class="badgecol" id="badgecol"></div>
@@ -327,14 +333,18 @@
   ];
   function renderEmbed(h) {
     const enc = encodeURIComponent(h);
+    const statsMd = `[![Claude Code stats](${WORKER}/stats/${enc}.svg)](${SITE}/u/${enc})`;
     const cardMd = `[![Claude Code stats](${WORKER}/card/${enc}.svg)](${SITE}/u/${enc})`;
     const badgeMd = BADGES.map(b =>
       `[![${b.alt}](${WORKER}/badge/${enc}.svg?metric=${b.metric})](${SITE}/?ref=badge)`
     ).join('\n');
+    $('statspreview').src = `${WORKER}/stats/${enc}.svg`;
     $('cardpreview').src = `${WORKER}/card/${enc}.svg`;
     $('badgecol').innerHTML = BADGES.map(b =>
       `<img src="${WORKER}/badge/${enc}.svg?metric=${b.metric}" alt="${b.alt}" loading="lazy" />`
     ).join('') + '<span class="note">each links back here · updates itself</span>';
+    $('statsmd').textContent = statsMd;
+    $('copystats').onclick = () => copy(statsMd, $('copystats'), 'copy stats + heatmap');
     $('cardmd').textContent = cardMd;
     $('badgemd').textContent = badgeMd;
     $('copycard').onclick = () => copy(cardMd, $('copycard'), 'copy card');
