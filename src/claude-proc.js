@@ -35,18 +35,24 @@ export function looksLikeClaudeCode(name, cmdline) {
   const n = String(name || '').toLowerCase();
   const c = String(cmdline || '').replace(/\\/g, '/').toLowerCase();
   // The Claude DESKTOP app's binary is ALSO named claude(.exe) — Windows
-  // installs under …/AnthropicClaude/, macOS ships as Claude.app. It is not
-  // Claude Code; matching it would pin the card up whenever the chat app is
-  // open. Path check comes first so nothing below can re-admit it.
-  if (c.includes('anthropicclaude') || c.includes('claude.app/')) return false;
+  // installs under …/AnthropicClaude/, macOS ships as Claude.app, Linux builds
+  // as …/claude-desktop/claude-desktop. It is not Claude Code; matching it
+  // would pin the card up whenever the chat app is open. Path check comes
+  // first so nothing below can re-admit it.
+  if (c.includes('anthropicclaude') || c.includes('claude.app/') || c.includes('/claude-desktop')) {
+    return false;
+  }
   // npm / npx install: node …/node_modules/@anthropic-ai/claude-code/cli.js
   if (c.includes('@anthropic-ai/claude-code/')) return true;
   // Native-install version store: …/.local/share/claude/versions/<v>
   if (c.includes('/share/claude/versions/')) return true;
   // A command-line token that IS `claude` / `claude.exe` — bare (as typed in a
   // shell, argv[0] preserved) or as the tail of a path. The boundary required
-  // right after "claude" is what keeps claude-rpc from matching.
-  if (/(^|[/"'])claude(\.exe)?["']?(\s|$)/.test(c)) return true;
+  // right after "claude" is what keeps claude-rpc from matching. `--flag=value`
+  // tokens are dropped first: Electron children carry a profile path like
+  // --user-data-dir=/home/o/.config/Claude, which is a directory, not a binary.
+  const tokens = c.replace(/(^|\s)--?[\w-]+=("[^"]*"|\S*)/g, '$1');
+  if (/(^|[/"'])claude(\.exe)?["']?(\s|$)/.test(tokens)) return true;
   // No command line to inspect (platform hid it) — fall back to the process
   // name alone. Only safe here because the desktop-app exclusion above could
   // not run; a bare-name match is still far likelier Code than the chat app

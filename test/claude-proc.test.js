@@ -27,6 +27,32 @@ test('does NOT match the Claude DESKTOP app (also named claude.exe)', () => {
     '/Applications/Claude.app/Contents/MacOS/Claude'), false);
 });
 
+test('does NOT match the Linux Claude DESKTOP app or its Electron children', () => {
+  assert.equal(looksLikeClaudeCode('claude-desktop',
+    '/usr/lib/claude-desktop/claude-desktop --ozone-platform=wayland'), false);
+  // Every child process carries the profile dir, which ends in /Claude.
+  assert.equal(looksLikeClaudeCode('claude-desktop',
+    '/usr/lib/claude-desktop/claude-desktop --type=renderer --user-data-dir=/home/o/.config/Claude --lang=en-US'), false);
+  assert.equal(looksLikeClaudeCode('claude-desktop',
+    '/usr/lib/claude-desktop/claude-desktop --type=gpu-process --user-data-dir=/home/o/.config/Claude'), false);
+});
+
+test('does NOT match a --flag=value whose value is a …/Claude path', () => {
+  assert.equal(looksLikeClaudeCode('electron',
+    '/opt/someapp/electron --type=renderer --user-data-dir=/home/o/.config/Claude --lang=en-US'), false);
+  assert.equal(looksLikeClaudeCode('app.exe',
+    '"C:\\app\\app.exe" --user-data-dir="C:\\Users\\o\\AppData\\Roaming\\Claude" --type=utility'), false);
+});
+
+test('still matches Claude Code when it is passed --flag=value arguments', () => {
+  assert.equal(looksLikeClaudeCode('claude', '/opt/claude-code/bin/claude --settings=/home/o/s.json'), true);
+  assert.equal(looksLikeClaudeCode('', '"/Users/o/.local/bin/claude" --add-dir=/tmp/claude'), true);
+});
+
+test('matches an npm global bin shim run through node', () => {
+  assert.equal(looksLikeClaudeCode('node', 'node /home/o/.npm-global/bin/claude --continue'), true);
+});
+
 test('matches npm/npx installs by @anthropic-ai/claude-code in the command line', () => {
   assert.equal(looksLikeClaudeCode('node.exe',
     '"C:\\Program Files\\nodejs\\node.exe" "C:\\Users\\o\\AppData\\Roaming\\npm\\node_modules\\@anthropic-ai\\claude-code\\cli.js"'), true);
