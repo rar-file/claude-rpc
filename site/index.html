@@ -44,7 +44,7 @@
   "downloadUrl": "https://www.npmjs.com/package/claude-rpc",
   "softwareHelp": "https://github.com/rar-file/claude-rpc#readme",
   "license": "https://github.com/rar-file/claude-rpc/blob/main/LICENSE",
-  "softwareVersion": "1.1.4",
+  "softwareVersion": "1.4.3",
   "dateModified": "2026-07-05",
   "sameAs": [
     "https://github.com/rar-file/claude-rpc",
@@ -722,7 +722,7 @@
     text-transform: uppercase; letter-spacing: 0.08em;
   }
   .final-cta::after {
-    content: "v1.1.3";
+    content: "v1.4.3";
     position: absolute; bottom: 18px; right: 22px;
     font-family: var(--font-mono); font-size: 0.78rem;
     color: var(--ink-faint);
@@ -851,7 +851,7 @@
     </div>
     <p class="install-note">one command. It installs globally, wires Claude Code's hooks, and starts the daemon. No Node? <a href="#download">grab the desktop app ↓</a></p>
     <div class="hero-meta">
-      <span><span class="ok">●</span> <span id="latest-tag">v1.1.3</span></span>
+      <span><span class="ok">●</span> <span id="latest-tag">v1.4.3</span></span>
       <span class="dot">·</span>
       <span>MIT</span>
       <span class="dot">·</span>
@@ -1009,7 +1009,7 @@
 
   <div class="preview-wrap">
     <div>
-      <span class="sticker tilt-r">v1.1.3 · presence.byStatus</span>
+      <span class="sticker tilt-r">v1.4.3 · presence.byStatus</span>
       <div class="status-tabs" id="status-tabs">
         <span class="status-tab active" data-status="working">working</span>
         <span class="status-tab" data-status="thinking">thinking</span>
@@ -1085,8 +1085,9 @@
     </div>
     <div class="feature tall">
       <span class="num">05</span>
-      <h3>readme badges</h3>
-      <p>Shields-style SVG generator and a live endpoint when the daemon's up.</p>
+      <h3>live readme cards</h3>
+      <p>A stats card with a 12-month heatmap, plus badges. Paste once and it refreshes itself. <code>claude-rpc readme</code> prints the markdown.</p>
+      <span class="stub"><a href="/examples/stats-heatmap.svg">see an example →</a></span>
     </div>
 
     <div class="feature med">
@@ -1131,7 +1132,7 @@
         <span class="ln"><span class="term-dim">  logs:</span> /tmp/claude-rpc/daemon.log</span>
         <span class="ln">&nbsp;</span>
         <span class="ln"><span class="term-ps">$</span> claude-rpc status</span>
-        <span class="ln"><span class="term-info">  ╰─ working in claude-rpc · Opus 4.7</span></span>
+        <span class="ln"><span class="term-info">  ╰─ working in claude-rpc · Opus 5.5</span></span>
         <span class="ln"><span class="term-dim">     8 prompts · 18 tools · 2.3k tokens</span></span>
       </div>
     </div>
@@ -1242,18 +1243,19 @@
       <div class="meta" id="changelog-meta">latest first · <a href="https://github.com/rar-file/claude-rpc/releases">all releases →</a></div>
     </div>
     <ul id="changelog-list">
-      <li><span class="v">v1.1.3</span> <span class="note">the macOS .dmg opens now: the bundle is ad-hoc signed (was fully unsigned, which Apple Silicon refuses outright), the dmg carries first-open instructions, and CI verifies the seal every release.</span></li>
-      <li><span class="v">v1.1.2</span> <span class="note">the Windows installer finally does its job: the desktop app auto-runs <code>setup</code> on first launch (hooks wired, daemon up), plus a one-click Run setup button and CI now smoke-tests every shipped exe.</span></li>
-      <li><span class="v">v1.1.1</span> <span class="note">16 logic fixes from a full-codebase review. Compaction no longer resets the card, symlinked dirs no longer double stats, gist artifacts stop overwriting each other, chart labels align.</span></li>
-      <li><span class="v">v1.1.0</span> <span class="note"><code>claude-rpc recap</code>, the standup answer: yesterday's projects, ships, churn, and cost in one paste-ready summary (<code>--md</code>), plus a <code>get_recap</code> MCP tool.</span></li>
-      <li><span class="v">v1.0.3</span> <span class="note">the project moved home to <strong>claude-rpc.com</strong>. Every CLI hint, card footer, badge link, and page now points here; old <code>claude-rpc.vercel.app</code> links redirect.</span></li>
-      <li><span class="v">v1.0.2</span> <span class="note">presence no longer blanks under bursty activity (hard sliding-window write cap, default 4/20s), and Windows child processes stop flashing a console window.</span></li>
-      <li><span class="v">v1.0.1</span> <span class="note">first stable release. The public surface (worker API, CLI, config schema, template vars, data formats) is now a semver-governed contract. See <code>VERSIONING.md</code>.</span></li>
-      <li><span class="v">v0.24.0</span> <span class="note"><code>claude-rpc insights</code>: ~20 rotating generators (chronotype, personal-best day, weekend rhythm, model mix, cache-reuse, tenure milestones) with a fresh mix each run.</span></li>
-      <li><span class="v">v0.23.0</span> <span class="note">live auto-updating stat <strong>card</strong> for your README: <code>GET /card/&lt;handle&gt;.svg</code>, the bigger sibling of the badge. Paste once, refreshes itself.</span></li>
-      <li><span class="v">v0.22.0</span> <span class="note">live paste-once README <strong>badges</strong>: <code>GET /badge/&lt;handle&gt;.svg</code>, no gist, no <code>gh</code>; <code>claude-rpc readme</code> prints the markdown.</span></li>
-      <li><span class="v">v0.21.0</span> <span class="note">updates self-heal (re-wire hooks + migrate config on first run after update) and cross-platform login autostart (launchd + systemd, parity with Windows).</span></li>
-      <li><span class="v">v0.20.4</span> <span class="note">redesigned full-screen <code>status</code> dashboard: tabbed TUI with live histograms, sparklines, and status-aware accents.</span></li>
+      <li><span class="v">next</span> <span class="note">a live <strong>stats + heatmap card</strong> for your README: <code>GET /stats/&lt;handle&gt;.svg</code>, a GitHub-style grid of your last year shaded against your own year. Linked machines add up. Opt out with <code>profile.heatmap: false</code>.</span></li>
+      <li><span class="v">v1.4.3</span> <span class="note">GitHub connects that failed during the Aug&ndash;Sep worker outage now finish on their own: the daemon retries the verification in the background, no command to run.</span></li>
+      <li><span class="v">v1.4.2</span> <span class="note">Windows reliability: the dashboard stays live, toasts render, Discord reconnects faster, and Windows now runs in CI.</span></li>
+      <li><span class="v">v1.4.1</span> <span class="note">presence no longer vanishes on Vesktop / Equibop / web clients: the daemon re-asserts the card, and <code>doctor</code> names the client that answered.</span></li>
+      <li><span class="v">v1.4.0</span> <span class="note"><code>setup</code> ends with one question, <code>connect GitHub? [y/N]</code>. Asked once; <b>n</b> sends nothing.</span></li>
+      <li><span class="v">v1.3.1</span> <span class="note">an open-but-quiet Claude Code keeps the card up (OS-level process detection, thanks <a href="https://github.com/Teksya/claude-rpc">@Teksya</a>), and the token count stops sticking at 0 after a <code>cd</code>.</span></li>
+      <li><span class="v">v1.3.0</span> <span class="note">one-line onboarding from <a href="/wrapped">/wrapped</a>: sign in with GitHub, copy one <code>setup --link</code> command, done.</span></li>
+      <li><span class="v">v1.2.0</span> <span class="note"><strong>Claude Wrapped</strong> on the web, the new <a href="/docs">/docs</a> page, plus <code>projects</code>, <code>project</code> and <code>compare</code> commands.</span></li>
+      <li><span class="v">v1.1.3</span> <span class="note">the macOS .dmg opens now: the bundle is ad-hoc signed, and CI verifies the seal every release.</span></li>
+      <li><span class="v">v1.1.2</span> <span class="note">the Windows installer finally does its job: the desktop app auto-runs <code>setup</code> on first launch.</span></li>
+      <li><span class="v">v1.1.0</span> <span class="note"><code>claude-rpc recap</code>, the standup answer: yesterday's projects, ships, churn, and cost in one paste-ready summary.</span></li>
+      <li><span class="v">v1.0.3</span> <span class="note">the project moved home to <strong>claude-rpc.com</strong>.</span></li>
+      <li><span class="v">v1.0.1</span> <span class="note">first stable release. The public surface is now a semver-governed contract. See <code>VERSIONING.md</code>.</span></li>
     </ul>
   </div>
 </section>
@@ -1264,13 +1266,13 @@
     <h2>get it on your profile in two minutes.</h2>
     <p class="lead">
       Download, run <code style="background:rgba(255,255,255,0.12); border-color:rgba(255,255,255,0.2); color:var(--paper);">claude-rpc setup</code>,
-      paste your discord application id into the config, start the daemon. That's the whole flow.
+      and you're done. It wires the hooks, starts the daemon, and asks once whether to connect GitHub for the leaderboard.
     </p>
     <div class="cta-row">
       <a class="btn cream" href="https://github.com/rar-file/claude-rpc/releases/latest">
         download latest release <span class="arrow">→</span>
       </a>
-      <a class="btn" style="background:transparent; color:var(--paper); border-color:var(--paper);" href="https://github.com/rar-file/claude-rpc#quick-start">
+      <a class="btn" style="background:transparent; color:var(--paper); border-color:var(--paper);" href="/docs">
         quick start docs
       </a>
     </div>
