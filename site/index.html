@@ -68,6 +68,9 @@
 }
 </script>
 
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
 <link rel="icon" type="image/png" href="/img/favicon.png" />
 <link rel="apple-touch-icon" href="/img/apple-touch-icon.png" />
 
@@ -92,9 +95,11 @@
     --tape:      #f2d76e;
     --tape-2:    #e9c854;
 
-    --shadow-sm: 0 1px 0 var(--ink), 0 2px 0 rgba(26,22,17,0.15);
-    --shadow:    0 2px 0 var(--ink), 0 6px 0 rgba(26,22,17,0.10);
-    --shadow-lg: 0 4px 0 var(--ink), 0 14px 24px -10px rgba(26,22,17,0.25);
+    --shadow-sm: 0 1px 2px rgba(26,22,17,0.06);
+    --shadow:    0 1px 2px rgba(26,22,17,0.05), 0 8px 24px -14px rgba(26,22,17,0.22);
+    --shadow-lg: 0 2px 4px rgba(26,22,17,0.06), 0 18px 40px -18px rgba(26,22,17,0.30);
+    --line:      rgba(26,22,17,0.14);
+    --radius:    12px;
 
     --max:       1100px;
 
@@ -120,16 +125,12 @@
   /* paper grain + faint dot grid */
   body::before {
     content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
-    opacity: 0.5;
+    opacity: 0.35;
     background-image:
       radial-gradient(circle at 1px 1px, rgba(26,22,17,0.08) 1px, transparent 0);
     background-size: 22px 22px;
   }
-  body::after {
-    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
-    opacity: 0.07; mix-blend-mode: multiply;
-    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.95' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
-  }
+
 
   a { color: var(--rust); text-decoration: underline; text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
   a:hover { color: var(--rust-2); }
@@ -140,38 +141,14 @@
     background: var(--paper-3);
     padding: 1px 6px;
     border-radius: 3px;
-    border: 1px solid var(--ink);
-    box-shadow: 1px 1px 0 var(--ink);
+    border: 1px solid var(--line);
     margin: 0 2px;
   }
 
   /* ─── layout ───────────────────────────────────────────────────── */
   .wrap { max-width: var(--max); margin: 0 auto; padding: 20px 28px 80px; position: relative; z-index: 1; }
   section { padding: 80px 0; position: relative; }
-  section + section { border-top: 1.5px dashed var(--ink); }
-
-  /* ─── marquee ticker bar at very top ──────────────────────────── */
-  .ticker-bar {
-    background: var(--ink); color: var(--paper);
-    font-family: var(--font-mono);
-    font-size: 0.78rem; letter-spacing: 0.04em;
-    overflow: hidden; white-space: nowrap;
-    border-bottom: 2px solid var(--rust);
-    position: relative; z-index: 2;
-  }
-  .ticker-track {
-    display: inline-block; padding: 8px 0;
-    animation: ticker 38s linear infinite;
-    will-change: transform;
-  }
-  .ticker-track span { padding: 0 28px; }
-  .ticker-track span.h { color: var(--rust-3); }
-  .ticker-track span.g { color: var(--tape); }
-  .ticker-bar:hover .ticker-track { animation-play-state: paused; }
-  @keyframes ticker {
-    from { transform: translateX(0); }
-    to   { transform: translateX(-50%); }
-  }
+  section + section { border-top: 1px solid var(--line); }
 
   /* ─── shared bits ──────────────────────────────────────────────── */
   .kicker {
@@ -179,14 +156,13 @@
     font-size: 0.74rem;
     text-transform: uppercase;
     letter-spacing: 0.22em;
-    color: var(--ink-mute);
+    color: var(--rust);
+    font-weight: 700;
     margin-bottom: 12px;
     display: inline-block;
   }
-  .kicker::before { content: "[ "; }
-  .kicker::after  { content: " ]"; }
 
-  h1, h2, h3 { font-family: var(--font-disp); font-weight: 800; color: var(--ink); letter-spacing: -0.025em; line-height: 1.05; }
+  h1, h2, h3 { font-family: var(--font-disp); font-weight: 700; color: var(--ink); letter-spacing: -0.025em; line-height: 1.05; }
   h2 { font-size: clamp(1.9rem, 3.4vw, 2.6rem); margin: 0 0 14px; }
   h3 { font-size: 1.1rem; margin: 0 0 8px; letter-spacing: -0.01em; }
   .lead {
@@ -200,21 +176,20 @@
   /* sticker label — used throughout for that "tape labels on a binder" feel */
   .sticker {
     display: inline-block;
-    background: var(--tape);
-    color: var(--ink);
-    padding: 4px 12px;
+    background: var(--paper-2);
+    color: var(--ink-mute);
+    padding: 5px 14px;
     font-family: var(--font-mono);
     font-size: 0.74rem;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    border: 1.5px solid var(--ink);
-    box-shadow: 2px 2px 0 var(--ink);
-    transform: rotate(-1.5deg);
+    border: 1px solid var(--line);
+    border-radius: 999px;
   }
   .sticker.rust { background: var(--rust); color: var(--paper); }
   .sticker.cream { background: var(--paper); color: var(--ink); }
-  .sticker.tilt-r { transform: rotate(1.5deg); }
+  .sticker.tilt-r { }
   .sticker.big { font-size: 0.92rem; padding: 6px 14px; }
 
   /* ─── buttons (chunky, with offset shadow) ─────────────────────── */
@@ -222,9 +197,10 @@
     display: inline-flex; align-items: center; gap: 10px;
     padding: 12px 22px;
     background: var(--ink); color: var(--paper);
-    border: 2px solid var(--ink);
+    border: 1.5px solid var(--ink);
+    border-radius: 10px;
     font-family: var(--font-disp);
-    font-weight: 700;
+    font-weight: 600;
     font-size: 0.98rem;
     letter-spacing: -0.005em;
     box-shadow: var(--shadow);
@@ -234,8 +210,8 @@
     user-select: none;
     position: relative;
   }
-  .btn:hover { transform: translate(-1px, -1px); box-shadow: var(--shadow-lg); text-decoration: none; color: var(--paper); }
-  .btn:active { transform: translate(1px, 2px); box-shadow: var(--shadow-sm); }
+  .btn:hover { transform: translateY(-1px); box-shadow: var(--shadow-lg); text-decoration: none; color: var(--paper); }
+  .btn:active { transform: translateY(1px); box-shadow: var(--shadow-sm); }
   .btn .sub { font-size: 0.78rem; opacity: 0.78; font-weight: 500; font-family: var(--font-mono); }
   .btn.rust { background: var(--rust); color: var(--paper); }
   .btn.rust:hover { background: var(--rust-2); }
@@ -259,26 +235,17 @@
   h1 {
     font-family: var(--font-disp);
     font-size: clamp(2.5rem, 5.6vw, 4.1rem);
-    font-weight: 800;
-    line-height: 1.12;
-    letter-spacing: -0.02em;
+    font-weight: 700;
+    line-height: 1.06;
+    letter-spacing: -0.035em;
     margin: 0 0 26px;
     color: var(--ink);
   }
   h1 .ink-blot {
     display: inline-block; position: relative;
     color: var(--rust);
-    padding: 0 6px;
   }
-  h1 .ink-blot::before {
-    content: ""; position: absolute; inset: 0;
-    background: var(--rust-pale);
-    z-index: -1;
-    transform: skew(-3deg) rotate(-1deg);
-    border-radius: 2px;
-  }
-  h1 .wave { display: inline-block; animation: wave 4s ease-in-out infinite; transform-origin: 70% 70%; }
-  @keyframes wave { 0%,60%,100% { transform: rotate(0); } 10% { transform: rotate(14deg); } 20% { transform: rotate(-8deg); } 30% { transform: rotate(14deg); } 40% { transform: rotate(-4deg); } 50% { transform: rotate(10deg); } }
+
 
   .hero p.lead { font-size: 1.15rem; max-width: 560px; }
 
@@ -289,35 +256,13 @@
 
   /* polaroid-frame for the hero GIF */
   .polaroid {
-    background: var(--paper);
-    padding: 14px 14px 56px;
-    border: 1.5px solid var(--ink);
-    box-shadow: var(--shadow-lg);
-    transform: rotate(2.5deg);
-    transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
     position: relative;
-    max-width: 440px; margin-left: auto;
+    max-width: 480px; margin-left: auto;
   }
-  .polaroid:hover { transform: rotate(0); }
-  .polaroid img { width: 100%; display: block; border: 1px solid var(--ink); }
+  .polaroid video, .polaroid img { width: 100%; height: auto; display: block; border-radius: 16px; box-shadow: var(--shadow-lg); background: #111214; }
   .polaroid .caption {
-    position: absolute; bottom: 14px; left: 0; right: 0; text-align: center;
-    font-family: var(--font-mono); font-size: 0.8rem; color: var(--ink-mute);
-  }
-  .polaroid .tape-strip {
-    position: absolute; top: -14px; left: 50%; transform: translateX(-50%) rotate(-2deg);
-    width: 90px; height: 26px;
-    background: rgba(242, 215, 110, 0.7);
-    border: 1px solid var(--ink);
-    box-shadow: 1px 1px 0 rgba(26,22,17,0.2);
-  }
-  .polaroid .pin {
-    position: absolute; top: -8px; right: -8px;
-    width: 22px; height: 22px; border-radius: 50%;
-    background: var(--rust);
-    border: 1.5px solid var(--ink);
-    box-shadow: var(--shadow-sm), inset -3px -3px 0 rgba(0,0,0,0.18);
-    transform: rotate(-15deg);
+    margin-top: 14px; text-align: center;
+    font-family: var(--font-mono); font-size: 0.8rem; color: var(--ink-faint);
   }
 
   .hero-meta {
@@ -363,27 +308,21 @@
     border: 1.5px solid var(--ink);
     box-shadow: var(--shadow);
     padding: 26px 22px 22px;
-    transform: rotate(-0.6deg);
     transition: transform 0.16s ease, box-shadow 0.16s ease;
     /* uniform bottoms: the meta+CTA block pins to the baseline no matter
        how long the copy above it runs */
     display: flex; flex-direction: column;
   }
   .dl-card .dl-meta { margin-top: auto; }
-  .dl-card:nth-child(2) { transform: rotate(0.3deg); }
-  .dl-card:nth-child(3) { transform: rotate(-0.2deg); }
-  .dl-card:hover { transform: rotate(0) translate(-2px, -3px); box-shadow: var(--shadow-lg); }
+  .dl-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
   .dl-card.active { background: var(--rust-pale); }
   .dl-card.active::before {
     content: "for you"; position: absolute;
     top: -12px; right: 14px;
     background: var(--rust); color: var(--paper);
     font-family: var(--font-mono); font-size: 0.7rem; font-weight: 700;
-    padding: 4px 10px;
-    border: 1.5px solid var(--ink);
+    padding: 3px 10px; border-radius: 999px;
     text-transform: uppercase; letter-spacing: 0.08em;
-    transform: rotate(4deg);
-    box-shadow: var(--shadow-sm);
   }
   .dl-os-row { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
   .dl-os-icon {
@@ -430,7 +369,7 @@
     font-size: 0.96rem;
     line-height: 1.65;
     padding: 16px 0 0;
-    border-top: 1.5px dashed var(--ink);
+    border-top: 1px solid var(--line);
     transition: opacity 0.22s ease;
   }
   .preview-note .lbl {
@@ -448,13 +387,12 @@
     padding: 24px;
   }
   .dc-mount::before {
-    content: "live preview"; position: absolute;
+    content: none; position: absolute;
     top: -2px; right: 16px;
     background: var(--ink); color: var(--paper);
     font-family: var(--font-mono); font-size: 0.7rem;
     padding: 4px 10px;
     text-transform: uppercase; letter-spacing: 0.1em;
-    transform: rotate(2deg);
     z-index: 2;
   }
   .dc-shell {
@@ -468,10 +406,8 @@
     border: 2px solid var(--ink);
     font-family: var(--font-body);
     width: 100%; max-width: 380px;
-    transform: rotate(-2deg);
     transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
   }
-  .dc-mount:hover .dc-shell { transform: rotate(0); }
   .dc-header {
     color: #b5bac1; font-size: 0.66rem;
     letter-spacing: 0.14em; font-weight: 700;
@@ -519,7 +455,6 @@
       pointer-events: none;
       width: 140px; height: 80px;
       top: 38%; left: 48%;
-      transform: rotate(-6deg);
       opacity: 0.85;
     }
   }
@@ -545,20 +480,13 @@
   .feature.wide { grid-column: span 4; }
   .feature.tall { grid-column: span 2; }
   .feature.med { grid-column: span 3; }
-  .feature .num {
-    position: absolute; top: -10px; right: 14px;
-    font-family: var(--font-mono); font-size: 0.7rem;
-    background: var(--ink); color: var(--paper);
-    padding: 3px 9px;
-    transform: rotate(3deg);
-  }
   .feature h3 { font-size: 1.15rem; margin-bottom: 8px; }
   .feature p { margin: 0; color: var(--ink-soft); font-size: 0.94rem; line-height: 1.6; }
   .feature .stub {
     margin-top: 14px;
     font-family: var(--font-mono); font-size: 0.78rem;
     color: var(--ink-mute);
-    border-top: 1px dashed var(--ink-faint);
+    border-top: 1px solid var(--line);
     padding-top: 10px;
   }
 
@@ -580,10 +508,8 @@
     box-shadow: var(--shadow-lg);
     font-family: var(--font-mono);
     font-size: 0.86rem;
-    transform: rotate(-0.6deg);
     transition: transform 0.3s ease;
   }
-  .terminal:hover { transform: rotate(0); }
   .term-bar {
     display: flex; align-items: center; gap: 8px;
     padding: 10px 14px;
@@ -620,11 +546,10 @@
     font-family: var(--font-mono); font-size: 0.92rem; font-weight: 700;
     text-align: center; line-height: 38px;
     margin-bottom: 14px;
-    transform: rotate(-3deg);
     box-shadow: var(--shadow-sm);
   }
-  .step:nth-child(2) .num { background: var(--blurple); transform: rotate(2deg); }
-  .step:nth-child(3) .num { background: var(--ink); color: var(--paper); transform: rotate(-2deg); }
+  .step:nth-child(2) .num { background: var(--blurple); }
+  .step:nth-child(3) .num { background: var(--ink); color: var(--paper); }
   .step h3 { font-size: 1.2rem; margin-bottom: 8px; }
   .step p { color: var(--ink-soft); font-size: 0.93rem; margin: 0; line-height: 1.6; }
   .step .path {
@@ -653,11 +578,10 @@
     border: 1.5px solid var(--ink);
     box-shadow: var(--shadow);
     overflow: hidden;
-    transform: rotate(-0.4deg);
     transition: transform 0.16s ease, box-shadow 0.16s ease;
   }
-  .shot:nth-child(2) { transform: rotate(0.5deg); }
-  .shot:hover { transform: rotate(0) translate(-2px, -3px); box-shadow: var(--shadow-lg); }
+  .shot:nth-child(2) { }
+  .shot:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
   .shot-frame {
     display: flex; align-items: center; gap: 6px;
     padding: 9px 14px;
@@ -689,7 +613,7 @@
   .changelog-head {
     display: flex; align-items: center; justify-content: space-between;
     margin-bottom: 14px; padding-bottom: 12px;
-    border-bottom: 1.5px dashed var(--ink);
+    border-bottom: 1px solid var(--line);
   }
   .changelog-head .ttl { font-family: var(--font-disp); font-weight: 800; font-size: 1.15rem; }
   .changelog-head .meta { font-size: 0.78rem; color: var(--ink-mute); }
@@ -709,20 +633,18 @@
     padding: 64px 32px 56px;
     text-align: center;
     position: relative; overflow: hidden;
-    transform: rotate(-0.3deg);
   }
   .final-cta::before {
-    content: "ship it →";
+    content: none;
     position: absolute; top: 16px; left: 18px;
     background: var(--tape); color: var(--ink);
     padding: 4px 10px;
     border: 1.5px solid var(--ink);
     font-family: var(--font-mono); font-size: 0.74rem; font-weight: 700;
-    transform: rotate(-6deg);
     text-transform: uppercase; letter-spacing: 0.08em;
   }
   .final-cta::after {
-    content: "v1.4.3";
+    content: none;
     position: absolute; bottom: 18px; right: 22px;
     font-family: var(--font-mono); font-size: 0.78rem;
     color: var(--ink-faint);
@@ -740,7 +662,7 @@
     font-family: var(--font-mono);
     font-size: 0.84rem;
     display: flex; justify-content: space-between; flex-wrap: wrap; gap: 16px;
-    border-top: 1.5px dashed var(--ink);
+    border-top: 1px solid var(--line);
     margin-top: 16px;
   }
   footer .left .made { color: var(--ink-soft); }
@@ -757,13 +679,19 @@
     .features { grid-template-columns: 1fr; }
     .features .feature.wide, .features .feature.tall, .features .feature.med { grid-column: span 1; }
     .preview-wrap { grid-template-columns: 1fr; gap: 32px; }
-    .dc-mount::before { right: 50%; transform: translateX(50%) rotate(2deg); top: -12px; }
+    .dc-mount::before { right: 50%; transform: translateX(50%) ; top: -12px; }
     .shots { grid-template-columns: 1fr; }
     .how { grid-template-columns: 1fr; }
     .arrow-between { display: none; }
     .term-wrap { grid-template-columns: 1fr; }
     section { padding: 56px 0; }
   }
+
+  /* cards: one quiet treatment (hairline border, soft radius, soft shadow) */
+  .dl-card, .feature, .step, .changelog, .status-tab, .copy-box, .dc-shell { border-radius: var(--radius); }
+  .dl-card, .feature, .step, .changelog { border: 1px solid var(--line); box-shadow: var(--shadow); }
+  .final-cta { border-radius: 20px; border: 0; }
+  .status-tab { border-radius: 999px; }
 
   /* reveal on scroll */
   .reveal { opacity: 0; transform: translateY(16px); transition: opacity 0.55s ease, transform 0.55s ease; }
@@ -777,25 +705,6 @@
 </head>
 
 <body>
-
-<!-- ─────────────────────────────────────────────────── TICKER -->
-<div class="ticker-bar">
-  <div class="ticker-track">
-    <span class="h">★</span><span>shipped v1.0, first stable release</span>
-    <span class="h">★</span><span>presence.byStatus is the new default</span>
-    <span class="h">★</span><span>built solo by archer in weekends</span>
-    <span class="h">★</span><span>MIT licensed. fork it, ship it</span>
-    <span class="h">★</span><span>node SEA single-file binary, no install required</span>
-    <span class="g">★</span><span>discord rich presence for claude code</span>
-    <!-- duplicated for seamless loop -->
-    <span class="h">★</span><span>shipped v1.0, first stable release</span>
-    <span class="h">★</span><span>presence.byStatus is the new default</span>
-    <span class="h">★</span><span>built solo by archer in weekends</span>
-    <span class="h">★</span><span>MIT licensed. fork it, ship it</span>
-    <span class="h">★</span><span>node SEA single-file binary, no install required</span>
-    <span class="g">★</span><span>discord rich presence for claude code</span>
-  </div>
-</div>
 
 <!-- site-nav -->
 <nav class="site-nav" aria-label="site">
@@ -822,7 +731,7 @@
 <!-- ─────────────────────────────────────────────────── HERO -->
 <header class="hero">
   <div>
-    <span class="sticker">a weekend project, shipped publicly</span>
+    <span class="sticker">open source &middot; free &middot; MIT</span>
     <h1>
       your <span class="ink-blot">claude code</span> session,<br/>
       live on discord.
@@ -866,12 +775,9 @@
 
   <div class="hero-art-col">
     <div class="polaroid">
-      <div class="tape-strip"></div>
-      <div class="pin"></div>
-      <img src="img/demo.gif" alt="Discord Rich Presence card showing Claude Code working in claude-rpc on Opus 4.7" />
-      <div class="caption">discord profile · last tuesday</div>
+      <video src="/img/hero-card.mp4" poster="/img/hero-card.jpg" autoplay muted loop playsinline width="1440" height="672" aria-label="Discord Rich Presence card cycling through Claude Code's working, thinking, waiting and compacting states"></video>
+      <div class="caption">what your friends see on your discord profile</div>
     </div>
-    <div class="scribble" style="margin-top: 18px; text-align: right;">that's the whole pitch</div>
   </div>
 </header>
 
@@ -881,7 +787,6 @@
   <h2>see it move.</h2>
   <div class="film-wrap">
     <div class="film-polaroid">
-      <div class="film-tape"></div>
       <video id="launch-film" poster="/img/launch-poster.jpg" muted loop playsinline preload="none"
              data-src="/img/launch.mp4?v=2"
              width="1920" height="1080" aria-label="32-second tour: the live Discord card, ship celebrations, the README heatmap card, Claude Wrapped, the GitHub-verified leaderboard, live community totals, and the one-line install"></video>
@@ -893,14 +798,10 @@
   #film { text-align: center; }
   .film-wrap { display: flex; justify-content: center; margin-top: 34px; }
   .film-polaroid {
-    background: #fbf7ee; padding: 16px 16px 12px; border-radius: 6px; position: relative;
-    box-shadow: 0 24px 60px rgba(43,39,34,0.22); transform: rotate(-0.6deg); max-width: 960px;
+    background: #fbf7ee; padding: 12px 12px 8px; border-radius: 16px; position: relative;
+    box-shadow: var(--shadow-lg); max-width: 960px; border: 1px solid var(--line);
   }
-  .film-tape {
-    position: absolute; top: -14px; left: 50%; transform: translateX(-50%) rotate(-2deg);
-    width: 150px; height: 30px; background: rgba(217,119,87,0.32); border-radius: 3px;
-  }
-  .film-polaroid video { width: 100%; height: auto; border-radius: 4px; display: block; border: 1.5px solid rgba(43,39,34,0.4); }
+  .film-polaroid video { width: 100%; height: auto; border-radius: 10px; display: block; }
   .film-caption { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.78rem; color: var(--ink-mute, #6b6357); padding: 10px 2px 4px; }
   .film-caption a { color: var(--rust-3, #b8552f); }
 </style>
@@ -1009,8 +910,7 @@
 
   <div class="preview-wrap">
     <div>
-      <span class="sticker tilt-r">v1.4.3 · presence.byStatus</span>
-      <div class="status-tabs" id="status-tabs">
+            <div class="status-tabs" id="status-tabs">
         <span class="status-tab active" data-status="working">working</span>
         <span class="status-tab" data-status="thinking">thinking</span>
         <span class="status-tab" data-status="notification">notification</span>
@@ -1059,99 +959,40 @@
 
   <div class="features">
     <div class="feature wide clawd">
-      <span class="num">01</span>
       <h3>all-time aggregates</h3>
       <p>Hours, prompts, tokens, sessions, streaks, hotspot files, lines added/removed, languages, bash commands, web domains, subagent runs &mdash; pulled from your transcripts and cached at <code>~/.claude-rpc/aggregate.json</code>.</p>
       <img src="https://cdn.qualit.ly/clawd-working-typing.gif" alt="clawd typing" />
     </div>
     <div class="feature tall">
-      <span class="num">02</span>
       <h3>cost estimate</h3>
       <p>Per-model spend (Opus / Sonnet / Haiku) at public list prices. Edit one file to override.</p>
       <span class="stub">src/pricing.js</span>
     </div>
 
     <div class="feature tall">
-      <span class="num">03</span>
       <h3>cli &amp; tui</h3>
       <p>Heatmap, hour histogram, top tools / files / projects / languages.</p>
       <span class="stub">$ claude-rpc status</span>
     </div>
     <div class="feature tall">
-      <span class="num">04</span>
       <h3>local web dashboard</h3>
       <p>SSE-pushed updates, range selector (7d/30d/90d/1y/all), day-detail modal, project drilldown.</p>
       <span class="stub">$ claude-rpc serve · :47474</span>
     </div>
     <div class="feature tall">
-      <span class="num">05</span>
       <h3>live readme cards</h3>
       <p>A stats card with a 12-month heatmap, plus badges. Paste once and it refreshes itself. <code>claude-rpc readme</code> prints the markdown.</p>
       <span class="stub"><a href="/examples/stats-heatmap.svg">see an example →</a></span>
     </div>
 
     <div class="feature med">
-      <span class="num">06</span>
       <h3>six-tab settings gui</h3>
       <p>Electron config editor: presence (drag-reorder, variable autocomplete, presets), discord, assets, timing, daemon controls, stats.</p>
     </div>
     <div class="feature med clawd">
-      <span class="num">07</span>
       <h3>auto-generated insights</h3>
       <p><code>claude-rpc insights</code> prints 3&ndash;5 contextual lines about your week &mdash; trend, peak weekday, hotspot, cost pace, streak progress. Useful for stand-ups, useful for self-awareness, useful for nothing &mdash; up to you.</p>
       <img src="https://cdn.qualit.ly/clawd-sleeping.gif" alt="clawd sleeping" />
-    </div>
-  </div>
-</section>
-
-<!-- ─────────────────────────────────────────────────── TERMINAL -->
-<section id="setup">
-  <span class="kicker">two-minute setup</span>
-  <h2>three commands. that's it.</h2>
-  <p class="lead">
-    The first <code>setup</code> seeds a config, registers the lifecycle hooks
-    with claude code, and copies the binary into a stable per-user location so
-    future manual updates can never break your hook entries.
-  </p>
-
-  <div class="term-wrap">
-    <div class="terminal">
-      <div class="term-bar">
-        <span class="term-dot r"></span><span class="term-dot y"></span><span class="term-dot g"></span>
-        <span class="term-title">~ &mdash; claude-rpc setup</span>
-      </div>
-      <div class="term-body">
-        <span class="ln"><span class="term-ps">$</span> claude-rpc setup</span>
-        <span class="ln"><span class="term-dim">  config seeded</span>  → ~/.config/claude-rpc/config.json</span>
-        <span class="ln"><span class="term-dim">  exe installed</span>  → ~/.config/claude-rpc/bin/claude-rpc</span>
-        <span class="ln"><span class="term-dim">  hooks       </span>  → ~/.claude/settings.json</span>
-        <span class="ln"><span class="term-ok">  ✓ done.</span></span>
-        <span class="ln">&nbsp;</span>
-        <span class="ln"><span class="term-ps">$</span> claude-rpc start</span>
-        <span class="ln"><span class="term-ok">  ✓ daemon launched</span>  <span class="term-dim">(pid 24871)</span></span>
-        <span class="ln"><span class="term-dim">  logs:</span> /tmp/claude-rpc/daemon.log</span>
-        <span class="ln">&nbsp;</span>
-        <span class="ln"><span class="term-ps">$</span> claude-rpc status</span>
-        <span class="ln"><span class="term-info">  ╰─ working in claude-rpc · Opus 5.5</span></span>
-        <span class="ln"><span class="term-dim">     8 prompts · 18 tools · 2.3k tokens</span></span>
-      </div>
-    </div>
-
-    <div>
-      <span class="sticker rust">no polling</span>
-      <h3 style="margin-top: 16px; font-size: 1.3rem;">Hook-driven, not polling.</h3>
-      <p style="color: var(--ink-soft); margin: 8px 0 20px;">
-        Claude Code fires lifecycle events on its own clock
-        (<code>SessionStart</code>, <code>PreToolUse</code>,
-        <code>Notification</code>, <code>SessionEnd</code>&hellip;). Each event
-        updates a small JSON file on disk; the daemon watches that file and
-        pushes a frame to discord within a second.
-      </p>
-      <h3 style="font-size: 1.3rem;">SessionEnd is authoritative.</h3>
-      <p style="color: var(--ink-soft); margin: 8px 0 0;">
-        When you close claude code, the presence clears <em>immediately</em>.
-        No 5-minute "is it still running?" timeout. Shipped with v0.3.5.
-      </p>
     </div>
   </div>
 </section>
@@ -1192,37 +1033,6 @@
       <h3>scanner</h3>
       <p>Walks transcripts incrementally for the lifetime aggregates. Feeds the dashboards and the idle rotation frames.</p>
       <span class="path">~/.claude-rpc/aggregate.json</span>
-    </div>
-  </div>
-</section>
-
-<!-- ─────────────────────────────────────────────────── SHOTS -->
-<section id="shots">
-  <span class="kicker">screens</span>
-  <h2>browse the rest from a real desktop UI.</h2>
-
-  <div class="shots">
-    <div class="shot crop">
-      <div class="shot-frame">
-        <span class="term-dot r"></span><span class="term-dot y"></span><span class="term-dot g"></span>
-        <span class="url">127.0.0.1:47474</span>
-      </div>
-      <img src="img/dashboard.png" alt="Web dashboard" loading="lazy" decoding="async" />
-      <div class="shot-caption">
-        <div class="title">web dashboard</div>
-        <div class="sub"><code>claude-rpc serve</code> &mdash; range selector, heatmap, languages stack, leaderboards.</div>
-      </div>
-    </div>
-    <div class="shot">
-      <div class="shot-frame">
-        <span class="term-dot r"></span><span class="term-dot y"></span><span class="term-dot g"></span>
-        <span class="url">Claude RPC.app</span>
-      </div>
-      <img src="img/electron.png" alt="Electron config editor" loading="lazy" decoding="async" />
-      <div class="shot-caption">
-        <div class="title">settings gui</div>
-        <div class="sub">six-tab electron editor: drag-reorder frames, variable autocomplete, daemon controls, live preview.</div>
-      </div>
     </div>
   </div>
 </section>
@@ -1282,9 +1092,7 @@
 <footer>
   <div class="left">
     <div class="made">
-      made with <span class="heart">♥</span> by
-      <a href="https://github.com/rar-file">archer</a>
-      · MIT · feel free to fork
+      built by <a href="https://github.com/rar-file">archer</a> · MIT
     </div>
     <div style="margin-top: 6px; font-size: 0.78rem; color: var(--ink-faint);">
       no analytics on this page. no cookies. one fetch to api.github.com for the latest tag.
@@ -1389,32 +1197,6 @@
     if (s.length > 160) s = s.slice(0, 157).replace(/\s+\S*$/, '') + '…';
     return s;
   }
-  function renderChangelog(releases) {
-    const ul = document.getElementById('changelog-list');
-    if (!ul || !Array.isArray(releases) || !releases.length) return;
-    const items = releases
-      .filter(r => r && r.tag_name)
-      .slice(0, 6)
-      .map(r => {
-        const li = document.createElement('li');
-        const v = document.createElement('span');
-        v.className = 'v';
-        v.textContent = r.tag_name;
-        const note = document.createElement('span');
-        note.className = 'note';
-        const summary = summarizeBody(r.body) || (r.name && r.name !== r.tag_name ? r.name : '');
-        const date = fmtDate(r.published_at);
-        note.textContent = summary
-          ? (date ? `${summary} · ${date}` : summary)
-          : (date ? `released ${date}` : 'see release notes →');
-        li.appendChild(v);
-        li.appendChild(document.createTextNode(' '));
-        li.appendChild(note);
-        return li;
-      });
-    if (!items.length) return;
-    ul.replaceChildren(...items); // replace the hardcoded fallback <li>s
-  }
   function applyAssets(data) {
     if (!data) return;
     const assets = data.assets || [];
@@ -1453,7 +1235,6 @@
       // newest published, non-draft release for the download/version surfaces
       const latest = list.find(x => !x.draft) || list[0];
       applyAssets(latest);
-      renderChangelog(list);
     } catch (_) {}
   }
   loadReleases();
@@ -1500,7 +1281,7 @@
     },
     thinking: {
       details: 'Thinking in claude-rpc',
-      state:   'Opus 4.7 · 8 prompts · 24k tokens',
+      state:   'Opus 5.5 · 8 prompts · 24k tokens',
       img:     'https://cdn.qualit.ly/clawd-working-typing.gif',
       small:   '#d97757',
       lbl:     'between a prompt and the first tool call',
@@ -1508,7 +1289,7 @@
     },
     notification: {
       details: 'Waiting on you · claude-rpc',
-      state:   'Opus 4.7 · 8 prompts',
+      state:   'Opus 5.5 · 8 prompts',
       img:     'https://cdn.qualit.ly/clawd-notification.gif',
       small:   '#faa61a',
       lbl:     'claude is asking for input',

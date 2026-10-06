@@ -25,7 +25,7 @@
 .site-nav .sn-brand img { width: 26px; height: 26px; image-rendering: pixelated; display: block; }
 .site-nav .sn-ver {
   font-size: 11px; font-weight: 700; color: #f4ede0; background: #2b2722;
-  padding: 2px 6px; transform: rotate(-2deg); display: inline-block;
+  padding: 2px 6px; display: inline-block;
 }
 .site-nav .sn-links {
   display: flex; align-items: center; gap: 4px; margin: 0 0 0 auto; padding: 0; list-style: none;
@@ -39,10 +39,10 @@
 .site-nav .sn-cta {
   flex: none; display: inline-block; padding: 8px 14px; white-space: nowrap;
   background: #d97757; color: #fff; font-weight: 700;
-  border: 1.5px solid #2b2722; box-shadow: 3px 3px 0 #2b2722;
+  border: 1.5px solid #2b2722; border-radius: 8px;
 }
-.site-nav .sn-cta:hover { transform: translate(-1px, -1px); box-shadow: 4px 4px 0 #2b2722; }
-.site-nav .sn-cta:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 #2b2722; }
+.site-nav .sn-cta:hover { background: #c96543; }
+.site-nav .sn-cta:active { transform: translateY(1px); }
 
 /* Narrow: brand + install on row one, the links on a sideways-scrolling row
    two — every page stays reachable on a phone, nothing hides in a menu. */
