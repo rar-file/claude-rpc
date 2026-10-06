@@ -7,7 +7,7 @@
 // deploys dependency-free and can't import across the package boundary. Keep
 // the two in sync; test/format.test.js pins fmtNum's tier behavior.
 
-// Compact integer: 999 → "999", 1_500 → "1.5k", 1_500_000 → "1.50M", up to "B".
+// Compact integer: 999 → "999", 1_500 → "1.5k", 1_500_000 → "1.50M", up to "T".
 // The unit is chosen from the ROUNDED value, so 999_999 → "1.00M" (not the old
 // "1000.0k") and 999_999_999 → "1.00B".
 export function fmtNum(n) {
@@ -15,11 +15,11 @@ export function fmtNum(n) {
   const neg = n < 0 ? '-' : '';
   const v = Math.abs(n);
   if (v < 1000) return neg + Math.round(v);
-  for (const [suf, div, prec] of [['k', 1e3, 1], ['M', 1e6, 2], ['B', 1e9, 2]]) {
+  for (const [suf, div, prec] of [['k', 1e3, 1], ['M', 1e6, 2], ['B', 1e9, 2], ['T', 1e12, 2]]) {
     const s = (v / div).toFixed(prec);
     if (Number(s) < 1000) return neg + s + suf;
   }
-  return neg + (v / 1e9).toFixed(2) + 'B'; // ≥ ~1e12 stays in the B tier
+  return neg + (v / 1e12).toFixed(2) + 'T';
 }
 
 // Duration from ms: <60m → "42m", <10h → "2.5h", else "12h". Rounds to whole

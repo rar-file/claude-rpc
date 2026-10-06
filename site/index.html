@@ -101,7 +101,7 @@
     --line:      rgba(26,22,17,0.14);
     --radius:    12px;
 
-    --max:       1100px;
+    --max:       1240px;
 
     --font-disp: "Space Grotesk", "Inter Tight", "Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
     --font-mono: "JetBrains Mono", "IBM Plex Mono", "SF Mono", "Cascadia Mono", ui-monospace, Menlo, Consolas, monospace;
@@ -138,10 +138,9 @@
   code, .mono { font-family: var(--font-mono); }
   code {
     font-size: 0.86em;
-    background: var(--paper-3);
-    padding: 1px 6px;
-    border-radius: 3px;
-    border: 1px solid var(--line);
+    background: rgba(26,22,17,0.06);
+    padding: 1px 5px;
+    border-radius: 4px;
     margin: 0 2px;
   }
 
@@ -344,120 +343,25 @@
   }
   .dl-card .alt:hover { color: var(--ink); }
 
-  /* ─── preview / discord card ───────────────────────────────────── */
-  .preview-wrap {
-    display: grid; grid-template-columns: 1.05fr 1fr; gap: 60px;
-    align-items: center;
+  /* ─── hero discord card (live: states cycle, timer ticks) ───────── */
+  .dcard {
+    background: #111214; color: #dbdee1; border-radius: 16px;
+    padding: 20px 22px 22px; box-shadow: var(--shadow-lg);
+    font-family: var(--font-disp);
   }
-
-  .status-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 16px 0 22px; }
-  .status-tab {
-    background: var(--paper); color: var(--ink);
-    padding: 7px 14px;
-    border: 1.5px solid var(--ink);
-    font-family: var(--font-mono); font-size: 0.82rem;
-    cursor: pointer; user-select: none;
-    transition: transform 0.08s ease, background 0.16s ease;
-    box-shadow: 2px 2px 0 var(--ink);
-    text-transform: lowercase;
-  }
-  .status-tab:hover { transform: translate(-1px, -1px); background: var(--paper-2); box-shadow: 3px 3px 0 var(--ink); }
-  .status-tab.active { background: var(--rust); color: var(--paper); }
-
-  .preview-note {
-    color: var(--ink-soft);
-    font-size: 0.96rem;
-    line-height: 1.65;
-    padding: 16px 0 0;
-    border-top: 1px solid var(--line);
-    transition: opacity 0.22s ease;
-  }
-  .preview-note .lbl {
-    font-family: var(--font-mono); font-size: 0.74rem;
-    text-transform: uppercase; letter-spacing: 0.12em;
-    color: var(--ink-mute);
-    margin-bottom: 6px; display: block;
-  }
-  .preview-note code { background: var(--paper-2); }
-
-  /* a faithful-but-skewed Discord activity card */
-  .dc-mount {
-    display: flex; justify-content: center;
-    position: relative;
-    padding: 24px;
-  }
-  .dc-mount::before {
-    content: none; position: absolute;
-    top: -2px; right: 16px;
-    background: var(--ink); color: var(--paper);
-    font-family: var(--font-mono); font-size: 0.7rem;
-    padding: 4px 10px;
-    text-transform: uppercase; letter-spacing: 0.1em;
-    z-index: 2;
-  }
-  .dc-shell {
-    background: #2b2d31;
-    border-radius: 8px;
-    padding: 14px 16px 16px;
-    color: #fff;
-    box-shadow:
-      0 4px 0 var(--ink),
-      0 18px 28px -12px rgba(26,22,17,0.4);
-    border: 2px solid var(--ink);
-    font-family: var(--font-body);
-    width: 100%; max-width: 380px;
-    transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
-  }
-  .dc-header {
-    color: #b5bac1; font-size: 0.66rem;
-    letter-spacing: 0.14em; font-weight: 700;
-    margin-bottom: 12px; text-transform: uppercase;
-    display: flex; align-items: center; gap: 6px;
-  }
-  .dc-header::before {
-    content: ""; width: 4px; height: 4px; border-radius: 50%;
-    background: var(--grass); box-shadow: 0 0 6px var(--grass);
-  }
-  .dc-row { display: flex; gap: 14px; align-items: flex-start; }
-  .dc-img-wrap { position: relative; flex: 0 0 60px; }
-  .dc-img-wrap .big {
-    width: 60px; height: 60px; border-radius: 8px;
-    background-size: cover; background-position: center;
-    background-color: #1e1f22;
-    transition: background-image 0.28s ease;
-  }
-  .dc-img-wrap .small {
-    position: absolute; right: -4px; bottom: -4px;
-    width: 22px; height: 22px; border-radius: 50%;
-    border: 3px solid #2b2d31;
-    transition: background 0.28s ease;
-  }
-  .dc-text { flex: 1; min-width: 0; }
-  .dc-app { font-weight: 700; font-size: 0.96rem; margin-bottom: 3px; }
-  .dc-details, .dc-state, .dc-time { font-size: 0.84rem; line-height: 1.4; color: #dbdee1; }
-  .dc-details { font-weight: 500; }
-  .dc-state { color: #b5bac1; }
-  .dc-time { color: #b5bac1; margin-top: 4px; font-variant-numeric: tabular-nums; }
-  .dc-buttons { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
-  .dc-button {
-    font-size: 0.76rem; padding: 6px 10px;
-    background: #4e5058; color: #fff; border-radius: 4px;
-    font-weight: 500;
-  }
-  .dc-fade { transition: opacity 0.22s ease; }
-  .dc-fade.swap { opacity: 0; }
-
-  /* doodled arrow from explanation to card */
-  .arrow-doodle { display: none; }
-  @media (min-width: 920px) {
-    .arrow-doodle {
-      display: block; position: absolute;
-      pointer-events: none;
-      width: 140px; height: 80px;
-      top: 38%; left: 48%;
-      opacity: 0.85;
-    }
-  }
+  .hero > * { min-width: 0; }
+  .dcard-hdr { font-size: 0.82rem; font-weight: 600; color: #b5bac1; margin-bottom: 14px; }
+  .dcard-row { display: flex; gap: 18px; align-items: center; }
+  .dcard-art { position: relative; flex: none; width: 96px; height: 96px; }
+  .dcard-art .big { display: block; width: 96px; height: 96px; border-radius: 12px; background: #000 center / cover no-repeat; image-rendering: pixelated; }
+  .dcard-art .dot { position: absolute; right: -6px; bottom: -6px; width: 28px; height: 28px; border-radius: 50%; border: 5px solid #111214; background: #43b581; transition: background 0.3s ease; }
+  .dcard-name { font-weight: 700; color: #fff; font-size: 1.05rem; margin-bottom: 2px; }
+  .dcard-line { font-size: 0.95rem; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dcard-line.dim { color: #b5bac1; }
+  .dcard-time { font-family: var(--font-mono); font-size: 0.86rem; color: #43b581; margin-top: 4px; }
+  .dcard-btn { margin-top: 16px; background: #2b2d31; border-radius: 8px; text-align: center; padding: 9px; font-size: 0.88rem; font-weight: 600; }
+  .dcard .swap, .polaroid .caption { transition: opacity 0.22s ease; }
+  .dcard .swap.out, .polaroid .caption.out { opacity: 0; }
 
   /* ─── feature grid (asymmetric, sticker-tagged) ────────────────── */
   .features {
@@ -678,8 +582,6 @@
     .downloads { grid-template-columns: 1fr; }
     .features { grid-template-columns: 1fr; }
     .features .feature.wide, .features .feature.tall, .features .feature.med { grid-column: span 1; }
-    .preview-wrap { grid-template-columns: 1fr; gap: 32px; }
-    .dc-mount::before { right: 50%; transform: translateX(50%) ; top: -12px; }
     .shots { grid-template-columns: 1fr; }
     .how { grid-template-columns: 1fr; }
     .arrow-between { display: none; }
@@ -688,10 +590,9 @@
   }
 
   /* cards: one quiet treatment (hairline border, soft radius, soft shadow) */
-  .dl-card, .feature, .step, .changelog, .status-tab, .copy-box, .dc-shell { border-radius: var(--radius); }
+  .dl-card, .feature, .step, .changelog, .copy-box { border-radius: var(--radius); }
   .dl-card, .feature, .step, .changelog { border: 1px solid var(--line); box-shadow: var(--shadow); }
   .final-cta { border-radius: 20px; border: 0; }
-  .status-tab { border-radius: 999px; }
 
   /* reveal on scroll */
   .reveal { opacity: 0; transform: translateY(16px); transition: opacity 0.55s ease, transform 0.55s ease; }
@@ -731,13 +632,12 @@
 <!-- ─────────────────────────────────────────────────── HERO -->
 <header class="hero">
   <div>
-    <span class="sticker">open source &middot; free &middot; MIT</span>
     <h1>
       your <span class="ink-blot">claude code</span> session,<br/>
       live on discord.
     </h1>
     <p class="lead">
-      A small Node daemon that takes the lifecycle events <code>claude code</code>
+      A small Node daemon that takes the lifecycle events Claude Code
       already fires and pipes them into the Discord Rich Presence (RPC) card on
       your profile. Your friends see what you're building, your future self gets
       lifetime stats. Zero polling between sessions.
@@ -759,15 +659,6 @@
       <button id="copy-btn" type="button">copy</button>
     </div>
     <p class="install-note">one command. It installs globally, wires Claude Code's hooks, and starts the daemon. No Node? <a href="#download">grab the desktop app ↓</a></p>
-    <div class="hero-meta">
-      <span><span class="ok">●</span> <span id="latest-tag">v1.4.3</span></span>
-      <span class="dot">·</span>
-      <span>MIT</span>
-      <span class="dot">·</span>
-      <span>node 18+</span>
-      <span class="dot">·</span>
-      <span>macos · windows · linux</span>
-    </div>
     <div class="hero-meta" id="hero-proof" style="display:none; margin-top: 6px;">
       <span><span class="ok">●</span> <span id="proof-line"></span></span>
     </div>
@@ -775,8 +666,20 @@
 
   <div class="hero-art-col">
     <div class="polaroid">
-      <video src="/img/hero-card.mp4" poster="/img/hero-card.jpg" autoplay muted loop playsinline width="1440" height="672" aria-label="Discord Rich Presence card cycling through Claude Code's working, thinking, waiting and compacting states"></video>
-      <div class="caption">what your friends see on your discord profile</div>
+      <div class="dcard" role="img" aria-label="Discord Rich Presence card for Claude Code, cycling through its working, thinking, waiting and idle states">
+        <div class="dcard-hdr">Playing</div>
+        <div class="dcard-row">
+          <div class="dcard-art"><span class="big swap" id="dc-big" style="background-image:url('https://cdn.qualit.ly/clawd-working-building.gif')"></span><span class="dot" id="dc-small"></span></div>
+          <div style="min-width:0">
+            <div class="dcard-name">Claude Code</div>
+            <div class="dcard-line swap" id="dc-details">Working in claude-rpc</div>
+            <div class="dcard-line dim swap" id="dc-state">Edit · src/heatmap.js · 48.2k tokens</div>
+            <div class="dcard-time" id="dc-time">00:14:32 elapsed</div>
+          </div>
+        </div>
+        <div class="dcard-btn">View on GitHub</div>
+      </div>
+      <div class="caption" id="preview-explain">while a tool is running: project, tool, file, live tokens</div>
     </div>
   </div>
 </header>
@@ -896,55 +799,6 @@
     </div>
   </div>
 
-</section>
-
-<!-- ─────────────────────────────────────────────────── PREVIEW -->
-<section id="preview">
-  <span class="kicker">the card</span>
-  <h2>a different look for every state claude is in.</h2>
-  <p class="lead">
-    The card text follows whatever claude is doing right now &mdash; not a generic
-    rotation that cycles through the same six stats forever. Lifetime numbers
-    only show up when you're actually idle.
-  </p>
-
-  <div class="preview-wrap">
-    <div>
-            <div class="status-tabs" id="status-tabs">
-        <span class="status-tab active" data-status="working">working</span>
-        <span class="status-tab" data-status="thinking">thinking</span>
-        <span class="status-tab" data-status="notification">notification</span>
-        <span class="status-tab" data-status="idle">idle</span>
-      </div>
-      <div class="preview-note" id="preview-explain">
-        <span class="lbl">while a tool is running</span>
-        the card shows the project, the tool name, the file claude just touched,
-        and the live token count for the session.
-      </div>
-    </div>
-
-    <div class="dc-mount">
-      <div class="dc-shell">
-        <div class="dc-header">Playing a game</div>
-        <div class="dc-row">
-          <div class="dc-img-wrap">
-            <div class="big dc-fade" id="dc-big" style="background-image: url('https://cdn.qualit.ly/clawd-working-building.gif')"></div>
-            <div class="small dc-fade" id="dc-small" style="background:#43b581"></div>
-          </div>
-          <div class="dc-text">
-            <div class="dc-app">Claude Code</div>
-            <div class="dc-details dc-fade" id="dc-details">Working in claude-rpc</div>
-            <div class="dc-state dc-fade" id="dc-state">Edit · src/scanner.js · 2.3k tokens</div>
-            <div class="dc-time" id="dc-time">00:14:32 elapsed</div>
-          </div>
-        </div>
-        <div class="dc-buttons">
-          <span class="dc-button">View on GitHub →</span>
-          <span class="dc-button">Claude Code</span>
-        </div>
-      </div>
-    </div>
-  </div>
 </section>
 
 <!-- ─────────────────────────────────────────────────── FEATURES -->
@@ -1206,7 +1060,6 @@
     const macDmg      = pick(/\.dmg$/i);
 
     if (data.tag_name) {
-      document.getElementById('latest-tag').textContent = data.tag_name;
       document.getElementById('nav-version').textContent = data.tag_name;
     }
     if (winSetup) {
@@ -1269,85 +1122,35 @@
     } catch { /* offline / blocked — say nothing */ }
   })();
 
-  // ─── discord card cycler ────────────────────────────────────────────────
-  const STATES = {
-    working: {
-      details: 'Working in claude-rpc',
-      state:   'Edit · src/scanner.js · 2.3k tokens',
-      img:     'https://cdn.qualit.ly/clawd-working-building.gif',
-      small:   '#43b581',
-      lbl:     'while a tool is running',
-      note:    "the card shows the project, the tool name, the file claude just touched, and the live token count for the session.",
-    },
-    thinking: {
-      details: 'Thinking in claude-rpc',
-      state:   'Opus 5.5 · 8 prompts · 24k tokens',
-      img:     'https://cdn.qualit.ly/clawd-working-typing.gif',
-      small:   '#d97757',
-      lbl:     'between a prompt and the first tool call',
-      note:    "surfaces the model and how many prompts this session has cost so far.",
-    },
-    notification: {
-      details: 'Waiting on you · claude-rpc',
-      state:   'Opus 5.5 · 8 prompts',
-      img:     'https://cdn.qualit.ly/clawd-notification.gif',
-      small:   '#faa61a',
-      lbl:     'claude is asking for input',
-      note:    "the card makes it instantly obvious from another window or from a phone.",
-    },
-    idle: {
-      details: '23-day streak',
-      state:   'Day 53 · 47 sessions',
-      img:     'https://cdn.qualit.ly/clawd-sleeping.gif',
-      small:   '#5865f2',
-      lbl:     'when nothing is running',
-      note:    "the card cycles through lifetime stats: today, this week, streak, hotspot file, lines added, all-time tokens, cost.",
-    },
-  };
-
+  // ─── hero discord card: cycle states, tick the timer ─────────────────
+  const STATES = [
+    { details: 'Working in claude-rpc',       state: 'Edit · src/heatmap.js · 48.2k tokens', img: 'clawd-working-building', dot: '#43b581', lbl: 'while a tool is running: project, tool, file, live tokens' },
+    { details: 'Thinking in claude-rpc',      state: 'Opus 5.5 · 14 prompts · 61.0k tokens', img: 'clawd-working-typing',   dot: '#f0b232', lbl: 'between your prompt and the first tool call' },
+    { details: 'Waiting on you · claude-rpc', state: 'Opus 5.5 · permission needed',          img: 'clawd-notification',     dot: '#f23f43', lbl: 'claude needs you, visible from any window or your phone' },
+    { details: '23-day streak',               state: 'Day 53 · 1,284 sessions',               img: 'clawd-sleeping',         dot: '#5865f2', lbl: 'idle: lifetime stats rotate through instead' },
+  ];
+  STATES.forEach((s) => { new Image().src = `https://cdn.qualit.ly/${s.img}.gif`; });
   const dcDetails = document.getElementById('dc-details');
   const dcState   = document.getElementById('dc-state');
   const dcBig     = document.getElementById('dc-big');
   const dcSmall   = document.getElementById('dc-small');
   const explain   = document.getElementById('preview-explain');
-  const fades     = [dcDetails, dcState, dcBig, dcSmall];
-  const tabs      = document.querySelectorAll('#status-tabs .status-tab');
-
-  let userPicked = false;
-  let autoTimer = null;
-
-  function renderStatus(name) {
-    const s = STATES[name];
-    if (!s) return;
-    fades.forEach(el => el.classList.add('swap'));
-    explain.style.opacity = '0';
+  const swaps     = [dcDetails, dcState, dcBig, explain];
+  let si = 0;
+  setInterval(() => {
+    si = (si + 1) % STATES.length;
+    const s = STATES[si];
+    swaps.forEach((el) => el.classList.add('out'));
+    dcSmall.style.background = s.dot;
     setTimeout(() => {
       dcDetails.textContent = s.details;
-      dcState.textContent   = s.state;
-      dcBig.style.backgroundImage = `url('${s.img}')`;
-      dcSmall.style.background    = s.small;
-      explain.innerHTML = `<span class="lbl">${s.lbl}</span>${s.note}`;
-      tabs.forEach(t => t.classList.toggle('active', t.dataset.status === name));
-      fades.forEach(el => el.classList.remove('swap'));
-      explain.style.opacity = '1';
+      dcState.textContent = s.state;
+      dcBig.style.backgroundImage = `url('https://cdn.qualit.ly/${s.img}.gif')`;
+      explain.textContent = s.lbl;
+      swaps.forEach((el) => el.classList.remove('out'));
     }, 220);
-  }
+  }, 3200);
 
-  tabs.forEach(t => t.addEventListener('click', () => {
-    userPicked = true;
-    if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
-    renderStatus(t.dataset.status);
-  }));
-
-  const order = ['working', 'thinking', 'notification', 'idle'];
-  let i = 0;
-  autoTimer = setInterval(() => {
-    if (userPicked) return;
-    i = (i + 1) % order.length;
-    renderStatus(order[i]);
-  }, 3800);
-
-  // ─── ticking elapsed timer on the demo card ─────────────────────────────
   const dcTime = document.getElementById('dc-time');
   const startMs = Date.now() - (14 * 60 + 32) * 1000;
   setInterval(() => {

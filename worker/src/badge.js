@@ -29,11 +29,11 @@ export function fmtNum(n) {
   const neg = n < 0 ? '-' : '';
   const v = Math.abs(n);
   if (v < 1000) return neg + Math.round(v);
-  for (const [suf, div, prec] of [['k', 1e3, 1], ['M', 1e6, 2], ['B', 1e9, 2]]) {
+  for (const [suf, div, prec] of [['k', 1e3, 1], ['M', 1e6, 2], ['B', 1e9, 2], ['T', 1e12, 2]]) {
     const s = (v / div).toFixed(prec);
     if (Number(s) < 1000) return neg + s + suf;
   }
-  return neg + (v / 1e9).toFixed(2) + 'B';
+  return neg + (v / 1e12).toFixed(2) + 'T';
 }
 
 // Byte-for-byte mirror of src/fmt.js fmtHours — same sync rule as fmtNum.

@@ -14,7 +14,7 @@
 }
 .site-nav * { box-sizing: border-box; }
 .site-nav .sn-in {
-  max-width: 1120px; margin: 0 auto; padding: 0 24px; height: 58px;
+  max-width: 1240px; margin: 0 auto; padding: 0 28px; height: 58px;
   display: flex; align-items: center; gap: 22px;
 }
 .site-nav a { text-decoration: none; }

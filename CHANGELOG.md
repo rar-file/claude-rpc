@@ -15,6 +15,7 @@ All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachang
 
 **Changed**
 
+- **Token counts past a trillion read as `T`.** The community total crossed 1e12 and every formatter topped out at `B`, so badges and pages showed `5261.86B`. The CLI, dashboard, MCP/recap output, worker badges and cards, and the site now say `5.26T`.
 - `claude-rpc calendar` has a new look: month and weekday labels, quartile shading, and hover titles per day. Its default metric is still hours.
 
 ## [1.4.3] - 2026-09-14

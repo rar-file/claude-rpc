@@ -49,7 +49,8 @@
     if (n < 1000) return String(n);
     if (n < 1e6) return (n / 1e3).toFixed(1) + 'k';
     if (n < 1e9) return (n / 1e6).toFixed(2) + 'M';
-    return (n / 1e9).toFixed(2) + 'B';
+    if (n < 1e12) return (n / 1e9).toFixed(2) + 'B';
+    return (n / 1e12).toFixed(2) + 'T';
   };
   const fmtCost = (usd) => {
     if (!usd) return '$0';

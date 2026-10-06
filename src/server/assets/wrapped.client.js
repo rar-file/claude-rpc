@@ -8,7 +8,8 @@
     if (n < 1000) return String(Math.round(n));
     if (n < 1e6) return (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'k';
     if (n < 1e9) return (n / 1e6).toFixed(2).replace(/\.?0+$/, '') + 'M';
-    return (n / 1e9).toFixed(2).replace(/\.?0+$/, '') + 'B';
+    if (n < 1e12) return (n / 1e9).toFixed(2).replace(/\.?0+$/, '') + 'B';
+    return (n / 1e12).toFixed(2).replace(/\.?0+$/, '') + 'T';
   };
   const fmtHours = (ms) => { const h = (ms || 0) / 3.6e6; return h < 1 ? Math.round(h * 60) + 'm' : h < 10 ? h.toFixed(1) + 'h' : Math.round(h) + 'h'; };
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));

@@ -43,11 +43,11 @@ function fmtNum(n) {
   if (!n) return '0';
   const v = Math.abs(n);
   if (v < 1000) return String(Math.round(v));
-  for (const [suf, div, prec] of [['k', 1e3, 1], ['M', 1e6, 2], ['B', 1e9, 2]]) {
+  for (const [suf, div, prec] of [['k', 1e3, 1], ['M', 1e6, 2], ['B', 1e9, 2], ['T', 1e12, 2]]) {
     const s = (v / div).toFixed(prec);
     if (Number(s) < 1000) return s + suf;
   }
-  return (v / 1e9).toFixed(2) + 'B';
+  return (v / 1e12).toFixed(2) + 'T';
 }
 function fmtMinutes(min) {
   if (!min) return '0m';

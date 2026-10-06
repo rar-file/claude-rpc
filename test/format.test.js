@@ -586,6 +586,9 @@ test('fmtNum scales by suffix', () => {
   // Tier-boundary rounding: must promote, not render "1000.0k" / "1000.00M".
   assert.equal(fmtNum(999_999), '1.00M');
   assert.equal(fmtNum(999_999_999), '1.00B');
+  // Community totals passed 1e12: "5.26T", not "5261.86B".
+  assert.equal(fmtNum(5_261_861_234_567), '5.26T');
+  assert.equal(fmtNum(999_999_999_999), '1.00T');
 });
 
 test('fmtDuration uses hours/minutes/seconds', () => {
