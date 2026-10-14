@@ -20,6 +20,9 @@
 <meta name="twitter:description" content="Every install path, the doctor checklist, config, privacy controls, and fixes for the failures people actually hit." />
 <meta name="twitter:image" content="https://claude-rpc.com/img/og.png" />
 
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
 <link rel="icon" type="image/png" href="/img/favicon.png" />
 <link rel="apple-touch-icon" href="/img/apple-touch-icon.png" />
 <style>
@@ -133,8 +136,8 @@
     aside.toc a.on { border-color: var(--rust-3); }
     .code pre { padding-right: 16px; padding-top: 34px; }
   }
-  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
   html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
 </style>
 <link rel="stylesheet" href="/nav.css" />
 </head>
@@ -180,7 +183,7 @@
         <section class="doc" id="install">
           <span class="sec-kicker">01 · install</span>
           <h2>one command, whatever your setup</h2>
-          <p>Every path below ends in the same place: <code>setup</code> wires nine lifecycle hooks into <code>~/.claude/settings.json</code> (as absolute, PATH-independent commands; only claude-rpc's own entries, third-party hooks are never touched), seeds a default config, starts the daemon, registers login autostart (LaunchAgent on macOS, <code>systemd --user</code> on Linux, a Run-key entry on Windows), and test-fires a synthetic <code>SessionStart</code> so a broken pipe surfaces immediately. All of it is reversible; see <a href="#uninstall">uninstall</a>.</p>
+          <p>Every path below ends in the same place: <code>setup</code> wires nine lifecycle hooks into <code>~/.claude/settings.json</code> (as absolute, PATH-independent commands; only claude-rpc's own entries, third-party hooks are never touched), plus up to three more (<code>PostToolUseFailure</code>, <code>PostCompact</code>, <code>StopFailure</code>) once your Claude Code version is new enough to know them, seeds a default config, starts the daemon, registers login autostart (LaunchAgent on macOS, <code>systemd --user</code> on Linux, a Run-key entry on Windows), and test-fires a synthetic <code>SessionStart</code> so a broken pipe surfaces immediately. All of it is reversible; see <a href="#uninstall">uninstall</a>.</p>
 
           <h3>npm / npx: macOS · Linux · WSL (Node 18+)</h3>
           <div class="code" data-copy="npx claude-rpc@latest setup"><button class="copy" type="button">copy</button><pre><span class="ps1">$</span> npx claude-rpc@latest setup</pre></div>
@@ -329,7 +332,7 @@ claude-rpc preview"><button class="copy" type="button">copy</button><pre><span c
           <span class="sec-kicker">05 · community &amp; profiles</span>
           <h2>put your stats where people can see them</h2>
           <h3>join the leaderboard</h3>
-          <div class="code" data-copy="claude-rpc profile set --handle &lt;you&gt; &amp;&amp; claude-rpc profile on"><button class="copy" type="button">copy</button><pre><span class="ps1">$</span> claude-rpc profile set --handle &lt;you&gt; &amp;&amp; claude-rpc profile on
+          <div class="code" data-copy="claude-rpc profile set --handle your-handle &amp;&amp; claude-rpc profile on"><button class="copy" type="button">copy</button><pre><span class="ps1">$</span> claude-rpc profile set --handle &lt;you&gt; &amp;&amp; claude-rpc profile on
 <span class="ps1">$</span> claude-rpc profile publish   <span class="cmt"># optional: push now instead of the next flush</span></pre></div>
           <p>Verified profiles (a proven GitHub identity) rank first on the <a href="/leaderboard">leaderboard</a> and get the ✓. Two ways to verify: log in with GitHub at <a href="/link">claude-rpc.com/link</a> and claim the code it mints with <code>claude-rpc link &lt;code&gt;</code>, or — no browser — <code>claude-rpc profile verify</code> proves ownership through a public gist. Extra machines link into the same identity: run <code>claude-rpc link</code> on the verified machine, claim the code on the new one.</p>
 

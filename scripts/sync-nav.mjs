@@ -7,7 +7,9 @@
 //   node scripts/sync-nav.mjs --check  exit 1 if any page has drifted (CI test)
 //
 // Adding a page: add it to PAGES with the section it belongs to, put an empty
-// `<!-- site-nav --><!-- /site-nav -->` right after <body>, run this.
+// `<!-- site-nav --><!-- /site-nav -->` right after <body>, run this. Pages in
+// subdirectories (blog/, examples/) need nothing extra: every URL the bar
+// emits (/nav.css, /img/favicon.png, the links) is root-absolute.
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -43,6 +45,7 @@ export const PAGES = {
   'blog/ship-week.html':    { active: 'posts' },
   'blog/three-weeks.html':  { active: 'posts' },
   'blog/zero-deps.html':    { active: 'posts' },
+  'examples/index.html':    { active: null },
   '404.html':         { active: null },
   // promo.html is deliberately absent: it's a chromeless 16:9 stage for
   // screen-recording the promo video, not a page people navigate.

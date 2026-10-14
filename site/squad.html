@@ -11,6 +11,9 @@
 <meta property="og:type" content="website" />
 <meta property="og:image" content="https://claude-rpc.com/img/og.png" />
 <meta name="twitter:card" content="summary_large_image" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
 <link rel="icon" type="image/png" href="/img/favicon.png" />
 <link rel="apple-touch-icon" href="/img/apple-touch-icon.png" />
 <style>
@@ -156,12 +159,17 @@
 <script>
   const WORKER = localStorage.getItem('crpcWorkerOverride') || 'https://claude-rpc-totals.claude-rpc.workers.dev';
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+  // Same output as src/fmt.js fmtNum: 999, 1.5k, 1.50M, 5.26T.
   const fmt = (n) => { n = +n || 0;
-    if (n >= 1e12) return (n / 1e12).toFixed(1) + 'T';
-    if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
-    if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
-    if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
-    return String(Math.round(n)); };
+    if (!n) return '0';
+    const neg = n < 0 ? '-' : '';
+    const v = Math.abs(n);
+    if (v < 1000) return neg + Math.round(v);
+    for (const [suf, div, prec] of [['k', 1e3, 1], ['M', 1e6, 2], ['B', 1e9, 2], ['T', 1e12, 2]]) {
+      const s = (v / div).toFixed(prec);
+      if (Number(s) < 1000) return neg + s + suf;
+    }
+    return neg + (v / 1e12).toFixed(2) + 'T'; };
   const hours = (ms) => ((+ms || 0) / 3600000).toFixed(1) + 'h';
 
   // Capture a fresh session token from the OAuth redirect hash, then scrub it
@@ -186,6 +194,8 @@
     el.textContent = msg;
     el.hidden = false;
   }
+  // Worker down or offline: say so instead of sitting on "loading…" forever.
+  const NET_ERR = 'Couldn\'t reach the squad server. Check your connection and refresh in a moment.';
 
   // /squad/join/<code> → join mode · /squad/<id> → view mode
   const path = location.pathname;
@@ -216,9 +226,12 @@
   }
 
   async function loadView(id) {
-    const res = await fetch(`${WORKER}/squad?id=${encodeURIComponent(id)}`);
+    let res, j;
+    try {
+      res = await fetch(`${WORKER}/squad?id=${encodeURIComponent(id)}`);
+      if (res.ok) j = await res.json();
+    } catch { return showErr(NET_ERR); }
     if (!res.ok) return showErr('No squad here. It may have dissolved, or the link is wrong.');
-    const j = await res.json();
     document.getElementById('title').textContent = j.squad.name;
     document.getElementById('sub').textContent =
       `${j.squad.members} member${j.squad.members === 1 ? '' : 's'} · week ${j.squad.week} · resets monday 00:00 utc`;
@@ -294,9 +307,12 @@
   // ── join mode ────────────────────────────────────────────────────────────
   async function loadJoin(code) {
     document.getElementById('kicker').textContent = 'squad invite';
-    const res = await fetch(`${WORKER}/squad/bycode?code=${encodeURIComponent(code)}`);
+    let res, j;
+    try {
+      res = await fetch(`${WORKER}/squad/bycode?code=${encodeURIComponent(code)}`);
+      if (res.ok) j = await res.json();
+    } catch { return showErr(NET_ERR); }
     if (!res.ok) return showErr('This invite isn\'t valid anymore. Ask your friend for a fresh code.');
-    const j = await res.json();
     document.getElementById('title').textContent = j.squad.name;
     document.getElementById('sub').textContent = `${j.squad.members} member${j.squad.members === 1 ? '' : 's'} racing weekly`;
     document.getElementById('join').hidden = false;
@@ -377,9 +393,9 @@
     };
   }
 
-  if (joinMatch) loadJoin(decodeURIComponent(joinMatch[1]));
-  else if (viewMatch) loadView(viewMatch[1]);
-  else showErr('No squad in the URL. Make one: claude-rpc squad create "the night shift". Or from the leaderboard page once you\'re logged in.');
+  if (joinMatch) loadJoin(decodeURIComponent(joinMatch[1])).catch(() => showErr(NET_ERR));
+  else if (viewMatch) loadView(viewMatch[1]).catch(() => showErr(NET_ERR));
+  else showErr('No squad in the URL. Make one: claude-rpc squad create "the night shift". Or start one at claude-rpc.com/squads.');
 </script>
 </body>
 </html>

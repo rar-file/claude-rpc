@@ -11,6 +11,9 @@
 <meta property="og:type" content="website" />
 <meta property="og:image" content="https://claude-rpc.com/img/og.png" />
 <meta name="twitter:card" content="summary_large_image" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
 <link rel="icon" type="image/png" href="/img/favicon.png" />
 <link rel="apple-touch-icon" href="/img/apple-touch-icon.png" />
 <style>
@@ -62,12 +65,6 @@
   .sq .spacer { flex: 1; }
   .crown { color: var(--rust-3); }
 
-  .steps { font-family: var(--font-mono); font-size: 0.84rem; background: var(--paper); border: 1.5px solid var(--ink); padding: 8px 10px; margin: 12px 0; }
-  .cmd { margin: 2px 0; padding: 7px 8px; cursor: pointer; display: flex; gap: 8px; align-items: baseline; }
-  .cmd:hover { background: var(--paper-2); }
-  .cmd .copyhint { margin-left: auto; font-size: 0.7rem; color: var(--ink-faint); white-space: nowrap; }
-  .cmd.copied .copyhint { color: var(--grass); font-weight: 700; }
-  .ps1 { color: var(--rust-3); }
   .waiting { font-family: var(--font-mono); font-size: 0.78rem; color: var(--ink-mute); display: inline-flex; align-items: center; gap: 8px; }
   .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--grass); animation: pulse 2s infinite; }
   @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(90,125,79,.5)} 70%{box-shadow:0 0 0 8px rgba(90,125,79,0)} 100%{box-shadow:0 0 0 0 rgba(90,125,79,0)} }

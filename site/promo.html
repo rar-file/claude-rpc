@@ -106,7 +106,7 @@
         <div>
           <div class="name">Claude Code</div>
           <div class="line" id="cardLine"><span class="cur"></span></div>
-          <div class="sub">claude-rpc · Opus 4.8</div>
+          <div class="sub">claude-rpc · Opus 5.5</div>
         </div>
       </div>
       <div class="chip" id="chip">3.2h today · 1.4M tokens · 12&#128293; streak</div>
@@ -173,7 +173,7 @@
     { el:'sB', dur:6200, on:async(g)=>{
         $('card').classList.add('show');
         const line=$('cardLine'), cur='<span class="cur"></span>';
-        const states=['Editing src/daemon.js','Running tests in claude-rpc','Just shipped v1.1.3'];
+        const states=['Editing src/daemon.js','Running tests in claude-rpc','Just shipped v1.5.2'];
         for(const st of states){ if(g!==GEN) return; line.innerHTML=cur; await sleep(160);
           for(let i=0;i<st.length;i++){ if(g!==GEN) return; line.innerHTML=st.slice(0,i+1)+cur; await sleep(45);} await sleep(700); }
         line.innerHTML=states[states.length-1]+cur;

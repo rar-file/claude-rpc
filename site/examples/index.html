@@ -4,6 +4,27 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>claude-rpc · card examples</title>
+<meta name="description" content="Example SVG posters from claude-rpc: your year, month, week and all time on Claude Code, rendered by claude-rpc card from a real aggregate. Plus the always-current README cards and badges." />
+<link rel="canonical" href="https://claude-rpc.com/examples" />
+
+<meta property="og:site_name" content="claude-rpc" />
+<meta property="og:title" content="claude-rpc · card examples" />
+<meta property="og:description" content="Year, month, week and all-time posters of your Claude Code stats, rendered as SVG by claude-rpc card." />
+<meta property="og:type" content="website" />
+<meta property="og:url" content="https://claude-rpc.com/examples" />
+<meta property="og:image" content="https://claude-rpc.com/img/og.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="claude-rpc · card examples" />
+<meta name="twitter:description" content="Year, month, week and all-time posters of your Claude Code stats, rendered as SVG by claude-rpc card." />
+<meta name="twitter:image" content="https://claude-rpc.com/img/og.png" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
+<link rel="icon" type="image/png" href="/img/favicon.png" />
+<link rel="apple-touch-icon" href="/img/apple-touch-icon.png" />
 <style>
   :root {
     --paper:    #f4ede0;
@@ -27,16 +48,7 @@
     min-height: 100vh;
   }
   a { color: var(--rust); }
-  .wrap { max-width: 1100px; margin: 0 auto; padding: 40px 28px 80px; }
-  nav {
-    display: flex; justify-content: space-between; align-items: center;
-    padding-bottom: 18px; margin-bottom: 36px;
-    border-bottom: 1.5px solid var(--ink);
-    font-family: var(--font-mono);
-    font-size: 13px;
-  }
-  nav .back { text-decoration: none; padding: 4px 9px; border: 1.5px solid var(--ink); background: var(--paper); box-shadow: 1.5px 1.5px 0 var(--ink); transition: transform 0.08s; }
-  nav .back:hover { transform: translate(-1px, -1px); box-shadow: 2.5px 2.5px 0 var(--ink); }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 48px 28px 80px; }
   h1 {
     font-size: clamp(2rem, 4vw, 2.8rem);
     font-weight: 800;
@@ -113,6 +125,7 @@
   }
   .endpoint h2 { color: var(--paper); margin: 0 0 10px; font-size: 1.2rem; }
   .endpoint p { margin: 0 0 14px; color: rgba(244,237,224,0.78); font-family: -apple-system, Inter, system-ui, sans-serif; line-height: 1.6; }
+  .endpoint pre + p { margin: 14px 0 0; }
   .endpoint code {
     background: rgba(244,237,224,0.12);
     padding: 1px 7px;
@@ -136,22 +149,36 @@
     .grid { grid-template-columns: 1fr; }
   }
 </style>
+<link rel="stylesheet" href="/nav.css" />
 </head>
 <body>
-<div class="wrap">
-
-<nav>
-  <a class="back" href="../">← back to claude-rpc</a>
-  <span>card · examples</span>
+<!-- site-nav -->
+<nav class="site-nav" aria-label="site">
+  <div class="sn-in">
+    <a class="sn-brand" href="/"><img src="/img/favicon.png" alt="" width="26" height="26" /> claude-rpc <span class="sn-ver" id="nav-version">v1.5.2</span></a>
+    <div class="sn-links">
+      <a href="/docs">docs</a>
+      <a href="/leaderboard">leaderboard</a>
+      <a href="/squads">squads</a>
+      <a href="/community">community</a>
+      <a href="/wrapped">wrapped</a>
+      <a href="/blog">posts</a>
+      <a href="https://github.com/rar-file/claude-rpc">github ↗</a>
+    </div>
+    <a class="sn-cta" href="/#download">install →</a>
+  </div>
 </nav>
+<!-- /site-nav -->
+<div class="wrap">
 
 <span class="sticker">poster preview</span>
 <h1>year / month / week on claude</h1>
 <p class="lead">
   Live-rendered SVG posters from a real <code>claude-rpc</code> aggregate.
   Each card is ~880×540, monospace-heavy, designed to be screenshotted and
-  shared. Modern Discord and GitHub render the SVG inline — no PNG step
-  needed. Below: four ranges, all from the same lifetime dataset.
+  shared. GitHub READMEs render SVG images as-is, so there's no PNG step for
+  a README; Discord doesn't embed SVG, so for chat, post a screenshot.
+  Below: four ranges, all from the same lifetime dataset.
 </p>
 
 <div class="grid">
@@ -159,10 +186,10 @@
   <div class="card">
     <div class="card-head">
       <span class="name">year on claude</span>
-      <a class="raw" href="year-on-claude.svg" target="_blank">raw svg ↗</a>
+      <a class="raw" href="/examples/year-on-claude.svg" target="_blank">raw svg ↗</a>
     </div>
     <div class="card-body">
-      <img src="year-on-claude.svg" alt="year-on-claude SVG card" />
+      <img src="/examples/year-on-claude.svg" alt="year-on-claude SVG card" />
     </div>
     <div class="card-foot">claude-rpc card --range year --out year.svg</div>
   </div>
@@ -170,10 +197,10 @@
   <div class="card">
     <div class="card-head">
       <span class="name">month on claude</span>
-      <a class="raw" href="month-on-claude.svg" target="_blank">raw svg ↗</a>
+      <a class="raw" href="/examples/month-on-claude.svg" target="_blank">raw svg ↗</a>
     </div>
     <div class="card-body">
-      <img src="month-on-claude.svg" alt="month-on-claude SVG card" />
+      <img src="/examples/month-on-claude.svg" alt="month-on-claude SVG card" />
     </div>
     <div class="card-foot">claude-rpc card --range month --out month.svg</div>
   </div>
@@ -181,10 +208,10 @@
   <div class="card">
     <div class="card-head">
       <span class="name">week on claude</span>
-      <a class="raw" href="week-on-claude.svg" target="_blank">raw svg ↗</a>
+      <a class="raw" href="/examples/week-on-claude.svg" target="_blank">raw svg ↗</a>
     </div>
     <div class="card-body">
-      <img src="week-on-claude.svg" alt="week-on-claude SVG card" />
+      <img src="/examples/week-on-claude.svg" alt="week-on-claude SVG card" />
     </div>
     <div class="card-foot">claude-rpc card --range week --out week.svg</div>
   </div>
@@ -192,10 +219,10 @@
   <div class="card">
     <div class="card-head">
       <span class="name">all-time on claude</span>
-      <a class="raw" href="all-on-claude.svg" target="_blank">raw svg ↗</a>
+      <a class="raw" href="/examples/all-on-claude.svg" target="_blank">raw svg ↗</a>
     </div>
     <div class="card-body">
-      <img src="all-on-claude.svg" alt="all-time-on-claude SVG card" />
+      <img src="/examples/all-on-claude.svg" alt="all-time-on-claude SVG card" />
     </div>
     <div class="card-foot">claude-rpc card --range all --out all-time.svg</div>
   </div>
@@ -203,16 +230,23 @@
 </div>
 
 <div class="endpoint">
-  <h2>also live on the running daemon</h2>
+  <h2>always-current cards for your README</h2>
   <p>
-    When <code>claude-rpc serve</code> is up, the same SVGs are served by
-    the local dashboard — re-rendered every request so they're always
-    current. Drop the URL into a README or a Discord message.
+    The posters above are files: render one with <code>claude-rpc card</code>
+    and commit it. For cards that keep themselves up to date, publish a profile
+    (<code>claude-rpc profile on</code>) and the community worker serves a stats
+    card, a profile card and badges at public URLs anyone can load.
+    <code>claude-rpc readme</code> prints the markdown with your handle filled in.
   </p>
-  <pre>http://127.0.0.1:47474/api/card.svg?range=year
-http://127.0.0.1:47474/api/card.svg?range=month
-http://127.0.0.1:47474/api/card.svg?range=week
-http://127.0.0.1:47474/api/card.svg?range=all</pre>
+  <pre>https://claude-rpc-totals.claude-rpc.workers.dev/stats/your-handle.svg
+https://claude-rpc-totals.claude-rpc.workers.dev/card/your-handle.svg
+https://claude-rpc-totals.claude-rpc.workers.dev/badge/your-handle.svg?metric=hours</pre>
+  <p>
+    <code>claude-rpc serve</code> also re-renders these four posters on every
+    request at <code>http://127.0.0.1:47474/api/card.svg?range=year</code>
+    (or month, week, all), but that address only exists on your own machine:
+    handy for a preview, useless in a README.
+  </p>
 </div>
 
 </div>

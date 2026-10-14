@@ -44,8 +44,13 @@ install_macos_binary() {
   [ -w "$dest_dir" ] 2>/dev/null || dest_dir="$HOME/.local/bin"
   mkdir -p "$dest_dir"
   say "→ downloading prebuilt binary to $dest_dir/$BIN…"
-  curl -fsSL "$url" -o "$dest_dir/$BIN"
-  chmod +x "$dest_dir/$BIN"
+  # Download beside the target, then rename over it. Rewriting a signed Mach-O
+  # in place (same inode) can get it SIGKILLed on Apple Silicon; mv within one
+  # directory swaps in a fresh inode atomically.
+  tmp="$dest_dir/.$BIN.download.$$"
+  curl -fsSL "$url" -o "$tmp" || { rm -f "$tmp"; exit 1; }
+  chmod +x "$tmp"
+  mv -f "$tmp" "$dest_dir/$BIN"
   CLI="$dest_dir/$BIN"
   case ":$PATH:" in
     *":$dest_dir:"*) : ;;
@@ -70,7 +75,14 @@ main() {
   fi
 
   say "→ wiring Claude Code hooks + starting the daemon…"
-  "$CLI" setup || { err "setup failed — run \`$BIN doctor\` to diagnose"; exit 1; }
+  # Under `curl … | sh` our stdin is this script, not the keyboard, so setup
+  # would silently skip its one question (connect GitHub? [y/N]). Give it the
+  # terminal when there is one that actually opens; otherwise run as before.
+  if [ -r /dev/tty ] && (: </dev/tty) 2>/dev/null; then
+    "$CLI" setup </dev/tty || { err "setup failed — run \`$BIN doctor\` to diagnose"; exit 1; }
+  else
+    "$CLI" setup || { err "setup failed — run \`$BIN doctor\` to diagnose"; exit 1; }
+  fi
 
   say ""
   say "✓ done. open Claude Code and the card appears within a second."

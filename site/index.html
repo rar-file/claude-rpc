@@ -45,7 +45,7 @@
   "softwareHelp": "https://github.com/rar-file/claude-rpc#readme",
   "license": "https://github.com/rar-file/claude-rpc/blob/main/LICENSE",
   "softwareVersion": "1.5.2",
-  "dateModified": "2026-07-05",
+  "dateModified": "2026-10-14",
   "sameAs": [
     "https://github.com/rar-file/claude-rpc",
     "https://www.npmjs.com/package/claude-rpc"
@@ -70,7 +70,7 @@
 
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
 <link rel="icon" type="image/png" href="/img/favicon.png" />
 <link rel="apple-touch-icon" href="/img/apple-touch-icon.png" />
 
@@ -135,8 +135,8 @@
   a { color: var(--rust); text-decoration: underline; text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
   a:hover { color: var(--rust-2); }
 
-  code, .mono { font-family: var(--font-mono); }
   code {
+    font-family: var(--font-mono);
     font-size: 0.86em;
     background: rgba(26,22,17,0.06);
     padding: 1px 5px;
@@ -172,25 +172,6 @@
     margin: 0 0 36px;
   }
 
-  /* sticker label — used throughout for that "tape labels on a binder" feel */
-  .sticker {
-    display: inline-block;
-    background: var(--paper-2);
-    color: var(--ink-mute);
-    padding: 5px 14px;
-    font-family: var(--font-mono);
-    font-size: 0.74rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    border: 1px solid var(--line);
-    border-radius: 999px;
-  }
-  .sticker.rust { background: var(--rust); color: var(--paper); }
-  .sticker.cream { background: var(--paper); color: var(--ink); }
-  .sticker.tilt-r { }
-  .sticker.big { font-size: 0.92rem; padding: 6px 14px; }
-
   /* ─── buttons (chunky, with offset shadow) ─────────────────────── */
   .btn {
     display: inline-flex; align-items: center; gap: 10px;
@@ -218,7 +199,6 @@
   .btn.cream:hover { background: var(--paper-2); color: var(--ink); }
   .btn .arrow { transition: transform 0.12s ease; }
   .btn:hover .arrow { transform: translateX(3px); }
-  .btn.small { padding: 8px 16px; font-size: 0.88rem; }
 
   /* ─── hero ─────────────────────────────────────────────────────── */
   .hero {
@@ -229,7 +209,6 @@
     padding: 64px 0 80px;
     position: relative;
   }
-  .hero .sticker { margin-bottom: 22px; }
 
   h1 {
     font-family: var(--font-disp);
@@ -250,15 +229,11 @@
 
   .cta-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
 
-  .scribble { color: var(--ink-faint); font-family: var(--font-mono); font-size: 0.84rem; }
-  .scribble::before { content: "↳ "; }
-
   /* polaroid-frame for the hero GIF */
   .polaroid {
     position: relative;
     max-width: 480px; margin-left: auto;
   }
-  .polaroid video, .polaroid img { width: 100%; height: auto; display: block; border-radius: 16px; box-shadow: var(--shadow-lg); background: #111214; }
   .polaroid .caption {
     margin-top: 14px; text-align: center;
     font-family: var(--font-mono); font-size: 0.8rem; color: var(--ink-faint);
@@ -403,36 +378,6 @@
     background: var(--paper-2);
   }
 
-  /* ─── terminal (handmade window chrome) ────────────────────────── */
-  .term-wrap { display: grid; grid-template-columns: 1.2fr 1fr; gap: 36px; align-items: center; }
-  .terminal {
-    background: #0e0c08;
-    color: #e6ddc7;
-    border: 1.5px solid var(--ink);
-    box-shadow: var(--shadow-lg);
-    font-family: var(--font-mono);
-    font-size: 0.86rem;
-    transition: transform 0.3s ease;
-  }
-  .term-bar {
-    display: flex; align-items: center; gap: 8px;
-    padding: 10px 14px;
-    background: #1a160d;
-    border-bottom: 1.5px solid var(--ink);
-  }
-  .term-dot { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--ink); }
-  .term-dot.r { background: #d56858; }
-  .term-dot.y { background: var(--tape-2); }
-  .term-dot.g { background: var(--grass); }
-  .term-title { color: #a89677; margin-left: 8px; font-family: var(--font-body); font-size: 0.78rem; }
-  .term-body { padding: 18px 20px 22px; line-height: 1.7; }
-  .term-body .ln { display: block; white-space: pre-wrap; }
-  .term-ps { color: var(--rust-3); }
-  .term-dim { color: #897861; }
-  .term-ok { color: var(--grass); }
-  .term-warn { color: var(--tape); }
-  .term-info { color: #7e8efc; }
-
   /* ─── how it works ─────────────────────────────────────────────── */
   .how { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; position: relative; }
   .step {
@@ -474,36 +419,6 @@
   .arrow-between.a1 { left: calc(33.33% - 16px); }
   .arrow-between.a2 { left: calc(66.66% - 16px); }
 
-  /* ─── screenshots ──────────────────────────────────────────────── */
-  .shots { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; align-items: start; }
-  .shot.crop img { max-height: 760px; object-fit: cover; object-position: top; }
-  .shot {
-    background: var(--paper);
-    border: 1.5px solid var(--ink);
-    box-shadow: var(--shadow);
-    overflow: hidden;
-    transition: transform 0.16s ease, box-shadow 0.16s ease;
-  }
-  .shot:nth-child(2) { }
-  .shot:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
-  .shot-frame {
-    display: flex; align-items: center; gap: 6px;
-    padding: 9px 14px;
-    background: var(--paper-2); border-bottom: 1.5px solid var(--ink);
-  }
-  .shot-frame .term-dot { width: 10px; height: 10px; }
-  .shot-frame .url {
-    flex: 1; text-align: center;
-    font-family: var(--font-mono); font-size: 0.74rem; color: var(--ink-mute);
-    padding: 3px 10px; background: var(--paper);
-    border: 1px solid var(--ink-faint);
-    max-width: 260px; margin: 0 auto;
-  }
-  .shot img { width: 100%; display: block; border-bottom: 1.5px solid var(--ink); }
-  .shot-caption { padding: 14px 18px 16px; }
-  .shot-caption .title { font-family: var(--font-disp); font-weight: 800; font-size: 1.05rem; }
-  .shot-caption .sub { color: var(--ink-mute); font-size: 0.9rem; margin-top: 4px; }
-
   /* ─── changelog tile ───────────────────────────────────────────── */
   .changelog {
     background: var(--paper);
@@ -538,21 +453,6 @@
     text-align: center;
     position: relative; overflow: hidden;
   }
-  .final-cta::before {
-    content: none;
-    position: absolute; top: 16px; left: 18px;
-    background: var(--tape); color: var(--ink);
-    padding: 4px 10px;
-    border: 1.5px solid var(--ink);
-    font-family: var(--font-mono); font-size: 0.74rem; font-weight: 700;
-    text-transform: uppercase; letter-spacing: 0.08em;
-  }
-  .final-cta::after {
-    content: none;
-    position: absolute; bottom: 18px; right: 22px;
-    font-family: var(--font-mono); font-size: 0.78rem;
-    color: var(--ink-faint);
-  }
   .final-cta h2 { color: var(--paper); font-size: clamp(2rem, 4.2vw, 3rem); margin-bottom: 14px; }
   .final-cta .lead { color: var(--paper); opacity: 0.82; margin: 0 auto 28px; max-width: 540px; }
   .final-cta .cta-row { justify-content: center; }
@@ -570,7 +470,6 @@
     margin-top: 16px;
   }
   footer .left .made { color: var(--ink-soft); }
-  footer .left .made .heart { color: var(--rust); }
   footer .right { display: flex; gap: 12px 22px; flex-wrap: wrap; }
   footer a { color: var(--ink-soft); text-decoration: none; }
   footer a:hover { color: var(--ink); text-decoration: underline; text-decoration-style: wavy; }
@@ -582,10 +481,8 @@
     .downloads { grid-template-columns: 1fr; }
     .features { grid-template-columns: 1fr; }
     .features .feature.wide, .features .feature.tall, .features .feature.med { grid-column: span 1; }
-    .shots { grid-template-columns: 1fr; }
     .how { grid-template-columns: 1fr; }
     .arrow-between { display: none; }
-    .term-wrap { grid-template-columns: 1fr; }
     section { padding: 56px 0; }
   }
 
@@ -598,6 +495,7 @@
   .reveal { opacity: 0; transform: translateY(16px); transition: opacity 0.55s ease, transform 0.55s ease; }
   .reveal.shown { opacity: 1; transform: translateY(0); }
   @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
     *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
     .reveal { opacity: 1; transform: none; }
   }
@@ -819,7 +717,7 @@
     </div>
     <div class="feature tall">
       <h3>cost estimate</h3>
-      <p>Per-model spend (Opus / Sonnet / Haiku) at public list prices. Edit one file to override.</p>
+      <p>Per-model spend (Fable / Opus / Sonnet / Haiku) at public list prices. Edit one file to override.</p>
       <span class="stub">src/pricing.js</span>
     </div>
 
@@ -840,8 +738,8 @@
     </div>
 
     <div class="feature med">
-      <h3>six-tab settings gui</h3>
-      <p>Electron config editor: presence (drag-reorder, variable autocomplete, presets), discord, assets, timing, daemon controls, stats.</p>
+      <h3>seven-tab settings gui</h3>
+      <p>Electron config editor: presence (drag-reorder, variable autocomplete, presets), discord, assets, timing, daemon controls, privacy, stats.</p>
     </div>
     <div class="feature med clawd">
       <h3>auto-generated insights</h3>
@@ -914,7 +812,7 @@
       <li><span class="v">v1.4.2</span> <span class="note">Windows reliability: the dashboard stays live, toasts render, Discord reconnects faster, and Windows now runs in CI.</span></li>
       <li><span class="v">v1.4.1</span> <span class="note">presence no longer vanishes on Vesktop / Equibop / web clients: the daemon re-asserts the card, and <code>doctor</code> names the client that answered.</span></li>
       <li><span class="v">v1.4.0</span> <span class="note"><code>setup</code> ends with one question, <code>connect GitHub? [y/N]</code>. Asked once; <b>n</b> sends nothing.</span></li>
-      <li><span class="v">v1.3.1</span> <span class="note">an open-but-quiet Claude Code keeps the card up (OS-level process detection, thanks <a href="https://github.com/Teksya/claude-rpc">@Teksya</a>), and the token count stops sticking at 0 after a <code>cd</code>.</span></li>
+      <li><span class="v">v1.3.1</span> <span class="note">an open-but-quiet Claude Code keeps the card up (OS-level process detection, thanks <a href="https://github.com/Teksya">@Teksya</a>), and the token count stops sticking at 0 after a <code>cd</code>.</span></li>
       <li><span class="v">v1.3.0</span> <span class="note">one-line onboarding from <a href="/wrapped">/wrapped</a>: sign in with GitHub, copy one <code>setup --link</code> command, done.</span></li>
       <li><span class="v">v1.2.0</span> <span class="note"><strong>Claude Wrapped</strong> on the web, the new <a href="/docs">/docs</a> page, plus <code>projects</code>, <code>project</code> and <code>compare</code> commands.</span></li>
       <li><span class="v">v1.1.3</span> <span class="note">the macOS .dmg opens now: the bundle is ad-hoc signed, and CI verifies the seal every release.</span></li>
@@ -951,7 +849,7 @@
       built by <a href="https://github.com/rar-file">archer</a> · MIT
     </div>
     <div style="margin-top: 6px; font-size: 0.78rem; color: var(--ink-faint);">
-      no analytics on this page. no cookies. one fetch to api.github.com for the latest tag.
+      no analytics, no cookies. this page fetches the latest release from api.github.com and the live totals from the community worker's /total.json. arrive via a ?ref= (or ?utm_source=) link and it pings the worker's /ref once with just that source name; a localStorage flag stops repeats.
     </div>
   </div>
   <div class="right">
@@ -999,9 +897,13 @@
   // ─── OS detection ────────────────────────────────────────────────────────
   const ua = (navigator.userAgent || '').toLowerCase();
   const plat = (navigator.platform || '').toLowerCase();
+  // iPhone/iPad UAs say "like Mac OS X", and iPadOS requests the desktop site
+  // as a touch-capable "Macintosh". Neither can run the .dmg, so they get the
+  // install guide like any other non-desktop OS.
+  const ios = /iphone|ipad|ipod/.test(ua) || (/mac/.test(plat) && navigator.maxTouchPoints > 1);
   let os = 'src';
   if (/windows|win64|win32/.test(ua) || /win/.test(plat)) os = 'win';
-  else if (/mac|darwin/.test(ua) || /mac/.test(plat)) os = 'mac';
+  else if (!ios && (/mac|darwin/.test(ua) || /mac/.test(plat))) os = 'mac';
   document.getElementById('dl-' + os)?.classList.add('active');
 
   const primaryLabels = {
@@ -1012,6 +914,7 @@
   const cta = document.getElementById('primary-cta');
   document.getElementById('primary-cta-label').textContent = primaryLabels[os].label;
   document.getElementById('primary-cta-sub').textContent = primaryLabels[os].sub;
+  if (os === 'src') cta.href = '/docs#install';
 
   // ─── copy install ────────────────────────────────────────────────────────
   const copyBtn = document.getElementById('copy-btn');
@@ -1076,25 +979,26 @@
     if (os === 'win' && winSetup) cta.href = winSetup.browser_download_url;
     else if (os === 'mac' && macDmg) cta.href = macDmg.browser_download_url;
   }
-  // Single fetch of the releases list — drives the latest-tag/download links
-  // AND the changelog, so we don't hit the API twice. Falls back gracefully:
-  // hardcoded version stamps + <li>s stay in place if this fails or is empty.
+  // One fetch of the newest release: drives the nav version stamp and the
+  // download links + sizes. (The changelog list above is hand-written; this
+  // doesn't touch it.) Falls back gracefully: the hardcoded version stamp and
+  // releases/latest links stay in place if this fails or is empty.
   async function loadReleases() {
     try {
-      const r = await fetch('https://api.github.com/repos/rar-file/claude-rpc/releases?per_page=6', {
+      const r = await fetch('https://api.github.com/repos/rar-file/claude-rpc/releases?per_page=1', {
         headers: { 'Accept': 'application/vnd.github+json' },
       });
       if (!r.ok) return;
       const list = await r.json();
       if (!Array.isArray(list) || !list.length) return;
-      // newest published, non-draft release for the download/version surfaces
-      const latest = list.find(x => !x.draft) || list[0];
-      applyAssets(latest);
+      // unauthenticated calls never list drafts, so this is the newest
+      // published release
+      applyAssets(list[0]);
     } catch (_) {}
   }
   loadReleases();
 
-  // Lazy film: the 4.6MB mp4 only downloads when the section approaches the
+  // Lazy film: the 3.1MB mp4 only downloads when the section approaches the
   // viewport, and it pauses off-screen. Fallback for no-IO browsers: load it.
   (function lazyFilm() {
     const v = document.getElementById('launch-film');
@@ -1109,6 +1013,21 @@
     }, { rootMargin: '400px 0px' }).observe(v);
   })();
 
+  // Same output as src/fmt.js fmtNum (999, 1.5k, 1.50M, 5.26T), so a total
+  // reads the same here as on /community and in the CLI.
+  function fmtNum(n) {
+    n = +n || 0;
+    if (!n) return '0';
+    const neg = n < 0 ? '-' : '';
+    const v = Math.abs(n);
+    if (v < 1000) return neg + Math.round(v);
+    for (const [suf, div, prec] of [['k', 1e3, 1], ['M', 1e6, 2], ['B', 1e9, 2], ['T', 1e12, 2]]) {
+      const s = (v / div).toFixed(prec);
+      if (Number(s) < 1000) return neg + s + suf;
+    }
+    return neg + (v / 1e12).toFixed(2) + 'T';
+  }
+
   // Live social proof under the hero meta — real numbers from the community
   // worker (the same endpoint /community reads). Hidden entirely on failure.
   (async function loadProof() {
@@ -1117,9 +1036,8 @@
       if (!r.ok) return;
       const d = await r.json();
       if (!d || !d.sessions) return;
-      const tok = d.tokens >= 1e12 ? `${(d.tokens / 1e12).toFixed(1)}T` : `${(d.tokens / 1e9).toFixed(1)}B`;
       document.getElementById('proof-line').textContent =
-        `${Number(d.sessions).toLocaleString('en-US')} sessions · ${tok} tokens tracked across the community`;
+        `${Number(d.sessions).toLocaleString('en-US')} sessions · ${fmtNum(d.tokens)} tokens tracked across the community`;
       document.getElementById('hero-proof').style.display = '';
     } catch { /* offline / blocked — say nothing */ }
   })();

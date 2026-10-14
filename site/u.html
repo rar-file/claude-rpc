@@ -11,6 +11,9 @@
 <meta property="og:type" content="profile" />
 <meta property="og:image" content="https://claude-rpc.com/img/og.png" />
 <meta name="twitter:card" content="summary_large_image" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
 <link rel="icon" type="image/png" href="/img/favicon.png" />
 <link rel="apple-touch-icon" href="/img/apple-touch-icon.png" />
 <style>
@@ -32,8 +35,6 @@
     background-image: radial-gradient(rgba(43,39,34,0.05) 1.2px, transparent 1.2px); background-size: 26px 26px;
     min-height: 100vh; display: flex; flex-direction: column; }
   body::before { content: ''; position: fixed; top: 0; left: 0; right: 0; height: 10px; background: var(--rust); z-index: 10; }
-
-  /* ── slim nav, matching the landing page ─────────────────────────── */
 
   .wrap { max-width: 880px; margin: 0 auto; padding: 46px 24px 64px; width: 100%; flex: 1; }
   a { color: var(--rust-3); }
@@ -223,12 +224,17 @@
 <script>
   const WORKER = 'https://claude-rpc-totals.claude-rpc.workers.dev';
   const SITE = 'https://claude-rpc.com';
+  // Same output as src/fmt.js fmtNum: 999, 1.5k, 1.50M, 5.26T.
   const fmt = (n) => { n = +n || 0;
-    if (n >= 1e12) return (n / 1e12).toFixed(1) + 'T';
-    if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
-    if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
-    if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
-    return String(Math.round(n)); };
+    if (!n) return '0';
+    const neg = n < 0 ? '-' : '';
+    const v = Math.abs(n);
+    if (v < 1000) return neg + Math.round(v);
+    for (const [suf, div, prec] of [['k', 1e3, 1], ['M', 1e6, 2], ['B', 1e9, 2], ['T', 1e12, 2]]) {
+      const s = (v / div).toFixed(prec);
+      if (Number(s) < 1000) return neg + s + suf;
+    }
+    return neg + (v / 1e12).toFixed(2) + 'T'; };
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
   const $ = (id) => document.getElementById(id);
 
@@ -253,7 +259,8 @@
     if (!handle) return showErr('no handle in the URL. try /u/<handle>.');
     try {
       const res = await fetch(`${WORKER}/profile?handle=${encodeURIComponent(handle)}`);
-      if (!res.ok) return showErr(`nobody has claimed “${esc(handle)}”. it could be yours.`);
+      // showErr escapes the whole message, so the handle goes in raw here.
+      if (!res.ok) return showErr(`nobody has claimed “${handle}”. it could be yours.`);
       const { profile: p } = await res.json();
       const name = p.displayName || ('@' + p.handle);
       document.title = `${name} · claude-rpc`;

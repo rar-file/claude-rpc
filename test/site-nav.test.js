@@ -16,11 +16,18 @@ test('site nav: every listed page is in sync with the template', () => {
   }
 });
 
+// Every .html under site/, subdirectories included (blog/, examples/, and any
+// added later), as the posix-style relative paths PAGES is keyed by.
+function htmlPages(dir = '') {
+  return readdirSync(new URL(dir || './', site), { withFileTypes: true }).flatMap((e) => {
+    if (e.isDirectory()) return htmlPages(`${dir}${e.name}/`);
+    return e.name.endsWith('.html') ? [`${dir}${e.name}`] : [];
+  });
+}
+
 test('site nav: no html page is left out (promo is the one chromeless exception)', () => {
-  const pages = [
-    ...readdirSync(site).filter((f) => f.endsWith('.html')),
-    ...readdirSync(new URL('blog/', site)).filter((f) => f.endsWith('.html')).map((f) => `blog/${f}`),
-  ];
+  const pages = htmlPages();
+  assert.ok(pages.includes('blog/zero-deps.html') && pages.includes('examples/index.html'), 'walks subdirectories');
   const missing = pages.filter((p) => !(p in PAGES) && p !== 'promo.html');
   assert.deepEqual(missing, [], 'add new pages to PAGES in scripts/sync-nav.mjs');
 });

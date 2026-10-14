@@ -15,8 +15,8 @@ const STEPS = [
   { line: 'Running tests in claude-rpc',  tok: '1.31M' },
   { line: 'Running tests in claude-rpc',  tok: '1.33M' },
   { line: 'All tests passed - shipping',  tok: '1.38M' },
-  { line: 'Just shipped v0.13.0',         tok: '1.40M' },
-  { line: 'Just shipped v0.13.0',         tok: '1.40M' },
+  { line: 'Just shipped to main',         tok: '1.40M' },
+  { line: 'Just shipped to main',         tok: '1.40M' },
 ];
 
 const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -38,7 +38,7 @@ function frame({ line, tok }, cursorOn) {
     <!-- text -->
     <text x="178" y="116" font-size="20" font-weight="700" fill="#2b2722">Claude Code</text>
     <text x="178" y="164" font-size="17" fill="#6b6357">${esc(line)}</text>${cur}
-    <text x="178" y="190" font-size="14" fill="#9a9183">claude-rpc · Opus 4.8</text>
+    <text x="178" y="190" font-size="14" fill="#9a9183">claude-rpc · Opus 5.5</text>
     <!-- stat chip -->
     <rect x="86" y="212" width="468" height="34" rx="6" fill="#f4ede0" stroke="#2b2722" stroke-width="1.5"/>
     <text x="100" y="234" font-size="15" fill="#6b6357">3.2h today · ${tok} tokens · 12d streak</text>

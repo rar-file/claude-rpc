@@ -14,6 +14,9 @@
 <meta property="og:image" content="https://claude-rpc.com/img/og.png" />
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:image" content="https://claude-rpc.com/img/og.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
 <link rel="icon" type="image/png" href="/img/favicon.png" />
 <link rel="apple-touch-icon" href="/img/apple-touch-icon.png" />
 <style>
@@ -206,13 +209,18 @@
   const LABELS = { tokens: 'tokens', sessions: 'sessions', activeMs: 'hours', streak: 'day streak' };
   let metric = 'tokens';
 
+  // Same output as src/fmt.js fmtNum: 999, 1.5k, 1.50M, 5.26T.
   function fmt(n) {
     n = Number(n) || 0;
-    if (n >= 1e12) return (n / 1e12).toFixed(1) + 'T';
-    if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
-    if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
-    if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
-    return String(Math.round(n));
+    if (!n) return '0';
+    const neg = n < 0 ? '-' : '';
+    const v = Math.abs(n);
+    if (v < 1000) return neg + Math.round(v);
+    for (const [suf, div, prec] of [['k', 1e3, 1], ['M', 1e6, 2], ['B', 1e9, 2], ['T', 1e12, 2]]) {
+      const s = (v / div).toFixed(prec);
+      if (Number(s) < 1000) return neg + s + suf;
+    }
+    return neg + (v / 1e12).toFixed(2) + 'T';
   }
   function rawFor(row, m) { return Number(row[m]) || 0; }
   function valueFor(row, m) {

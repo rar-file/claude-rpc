@@ -20,6 +20,9 @@
 <meta name="twitter:description" content="Sessions and tokens across everyone running claude-rpc, aggregated anonymously." />
 <meta name="twitter:image" content="https://claude-rpc.com/img/og.png" />
 
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
 <link rel="icon" type="image/png" href="/img/favicon.png" />
 <link rel="apple-touch-icon" href="/img/apple-touch-icon.png" />
 <style>
@@ -69,7 +72,6 @@
   .ref-bar { height: 14px; background: var(--paper-2); border: 1.5px solid var(--ink); position: relative; }
   .ref-bar > i { display: block; height: 100%; background: var(--rust); }
   .ref-val { text-align: right; color: var(--ink-mute); }
-  .muted { color: var(--ink-faint); font-family: var(--font-mono); font-size: 0.82rem; }
 
   .cta { margin-top: 44px; background: var(--ink); color: var(--paper); border: 1.5px solid var(--ink); box-shadow: var(--shadow); padding: 22px 24px; }
   .cta .cmd { font-family: var(--font-mono); font-size: 0.95rem; }
@@ -134,16 +136,23 @@
 
 <script>
   const WORKER = 'https://claude-rpc-totals.claude-rpc.workers.dev';
+  // Same output as src/fmt.js fmtNum: 999, 1.5k, 1.50M, 5.26T.
   const fmt = (n) => {
     n = +n || 0;
-    if (n < 1000) return String(Math.round(n));
-    if (n < 1e6) return (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'k';
-    if (n < 1e9) return (n / 1e6).toFixed(2).replace(/\.?0+$/, '') + 'M';
-    if (n < 1e12) return (n / 1e9).toFixed(2).replace(/\.?0+$/, '') + 'B';
-    return (n / 1e12).toFixed(2).replace(/\.?0+$/, '') + 'T';
+    if (!n) return '0';
+    const neg = n < 0 ? '-' : '';
+    const v = Math.abs(n);
+    if (v < 1000) return neg + Math.round(v);
+    for (const [suf, div, prec] of [['k', 1e3, 1], ['M', 1e6, 2], ['B', 1e9, 2], ['T', 1e12, 2]]) {
+      const s = (v / div).toFixed(prec);
+      if (Number(s) < 1000) return neg + s + suf;
+    }
+    return neg + (v / 1e12).toFixed(2) + 'T';
   };
+  // One label per worker REF_SOURCES entry (worker/src/index.js).
   const REF_LABELS = {
-    discord: 'Discord card', wrapped: 'Claude Wrapped', card: 'shared card',
+    discord: 'Discord card', squad: 'squad invite', vscode: 'VS Code extension',
+    wrapped: 'Claude Wrapped', card: 'shared card',
     badge: 'README badge', readme: 'README', github: 'GitHub', npm: 'npm',
     hn: 'Hacker News', reddit: 'Reddit', producthunt: 'Product Hunt',
     devto: 'dev.to', twitter: 'X / Twitter',

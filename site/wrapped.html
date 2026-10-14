@@ -19,7 +19,7 @@
 <meta name="theme-color" content="#1a1611" />
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>
 /* Claude Wrapped — full-screen, animated, Spotify-Wrapped-style story.
    This is the LOCAL `claude-rpc wrapped` experience (src/server/assets/
@@ -248,13 +248,19 @@ body.page { overflow: auto; user-select: text; -webkit-user-select: text; }
   const GH = localStorage.getItem('crpcGh') || '';
 
   // ── format helpers ───────────────────────────────────────────
+  // Same output as src/fmt.js fmtNum: 999, 1.5k, 1.50M, 5.26T, so a total
+  // reads the same here as on every other page.
   const fmtNum = (n) => {
     n = +n || 0;
-    if (n < 1000) return String(Math.round(n));
-    if (n < 1e6) return (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'k';
-    if (n < 1e9) return (n / 1e6).toFixed(2).replace(/\.?0+$/, '') + 'M';
-    if (n < 1e12) return (n / 1e9).toFixed(2).replace(/\.?0+$/, '') + 'B';
-    return (n / 1e12).toFixed(2).replace(/\.?0+$/, '') + 'T';
+    if (!n) return '0';
+    const neg = n < 0 ? '-' : '';
+    const v = Math.abs(n);
+    if (v < 1000) return neg + Math.round(v);
+    for (const [suf, div, prec] of [['k', 1e3, 1], ['M', 1e6, 2], ['B', 1e9, 2], ['T', 1e12, 2]]) {
+      const s = (v / div).toFixed(prec);
+      if (Number(s) < 1000) return neg + s + suf;
+    }
+    return neg + (v / 1e12).toFixed(2) + 'T';
   };
   const fmtHours = (ms) => { const h = (ms || 0) / 3.6e6; return h < 1 ? Math.round(h * 60) + 'm' : h < 10 ? h.toFixed(1) + 'h' : Math.round(h) + 'h'; };
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
