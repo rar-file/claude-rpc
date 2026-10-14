@@ -1,10 +1,14 @@
 // claude-rpc community-totals worker.
 //
-// This is the entire server. Routes:
-//   POST /report         — opt-in anonymous counters from a CLI install
-//   POST /profile        — opt-in leaderboard profile upsert (validated deltas)
+// This is the entire server. Full request/response shapes live in
+// docs/WORKER-API.md; this is the map. Routes (see the router at the bottom):
+//   POST /report         — anonymous counters from a CLI install (on by default
+//                          for fresh installs; `claude-rpc community off` opts out)
+//   POST /profile        — opt-in leaderboard profile upsert (clamped absolute
+//                          totals, one slice per machine)
 //   GET  /profile?handle= — single public profile (powers /u/<handle>)
-//   GET  /leaderboard    — top-N profiles (verified-first ranking)
+//   GET  /leaderboard    — top-N profiles (verified-first ranking;
+//                          ?metric=tokens|sessions|activems|streak&limit=)
 //   POST /verify/start   — begin GitHub gist verification (issues a token)
 //   POST /verify/check   — confirm the token appears in a public gist → ✓
 //   GET  /auth/login     — start the GitHub OAuth dance (web login)
@@ -22,19 +26,40 @@
 //   GET  /squad/bycode?code= — minimal preview for the join page
 //   GET  /sessions.svg   — shields-style community badge for the README
 //   GET  /tokens.svg     — same, for tokens
-//   GET  /badge/<handle>.svg — live per-user badge (?metric=tokens|sessions|hours|streak)
-//   GET  /card/<handle>.svg  — live per-user stat card (the four profile metrics)
+//   GET  /badge/<handle>.svg   — live per-user badge (?metric=tokens|sessions|hours|streak)
+//   GET  /card/<handle>.svg    — live per-user stat card (the four profile metrics)
+//   GET  /heatmap/<handle>.svg — live activity heatmap (?metric=tokens|hours)
+//   GET  /stats/<handle>.svg   — stat card + heatmap (?metric=tokens|hours)
+//   POST /wrapped        — publish this machine's Claude Wrapped slice for a year
+//   GET  /wrapped?handle=&year= — merged Wrapped JSON (powers /wrapped/<handle>)
+//   GET  /wrapped/<handle>.svg  — Wrapped share card (?year=)
 //   GET  /total.json     — JSON for arbitrary consumers / dashboards
 //   GET  /ref?s=<src>    — referral beacon (counts an allowlisted source)
 //   GET  /refs.json      — referral breakdown by source
 //   GET  /health         — sanity check
+//   OPTIONS *            — CORS preflight for the browser-facing routes
 //
-// Storage is a single KV namespace bound as `TOTALS`. We keep:
-//   total:sessions       integer string, running sum
-//   total:tokens         integer string, running sum
-//   seen:<instanceId>    last-seen counters, 30d TTL (dedup window)
+// Storage is a single KV namespace bound as `TOTALS`. Key prefixes in use:
+//   total:counters       {sessions, tokens} community totals, one JSON value
+//                        (legacy total:sessions / total:tokens are read only,
+//                        as the seed before the first combined write)
+//   seen:<instanceId>    last-seen {ts, version, osFamily}, 30d TTL, refreshed
+//                        at most daily (active-install marker)
+//   rate:<scope>:<instanceId> — per-instance limiter marker, 60s TTL
+//                        (scopes: report, profile, wrapped, squad-create, pair-start)
+//   rate:ip:<ip>:<window>     — per-IP fixed-window counter, 60s TTL
+//   ref:<source>         referral counter per allowlisted source
+//   pf:<instanceId>      profile JSON (per-machine slices + summed totals);
+//                        90d TTL while unverified
+//   handle:<handle>      → owning instanceId (uniqueness)
+//   verify:<instanceId>  pending gist verification {githubUser, token, ts}, 1h TTL
+//   alias:<instanceId>   → canonical instanceId (linked machines, single hop)
+//   board:index          one blob: {instanceId: boardEntry} for the leaderboard
+//   wrapped:<id>:<year>  Wrapped record (per-machine slices + merged), ~14mo TTL
 //   gh:<login>           GitHub login → verified instanceId (web login link)
 //   squad:<id> / sqcode:<code> / sqmember:<instanceId> / sqbase:<id>:<week>
+//                        (weekly baselines carry a 35d TTL)
+//   pair:<code>          one-time link code → GitHub login, 10min TTL
 //
 // No PII is persisted beyond public GitHub logins users explicitly verify.
 // Cloudflare's request log retains IPs briefly for abuse mitigation — that's
@@ -447,14 +472,19 @@ export async function handleJson(env) {
 // linking a GitHub identity (proven via a public gist) earns a verified ✓ and
 // ranks first. You CANNOT make self-reported usage fraud-proof — there's no
 // oracle for "real" token counts — so the integrity is defense-in-depth:
-//   · the board sums SERVER-VALIDATED deltas, never a client-asserted total
-//   · per-report plausibility caps (MAX_DELTA_*) bound how fast a profile grows
+//   · a profile publish SETS clamped absolute lifetime totals per machine
+//     (validated + clamped to the MAX_PF_* ceilings below); the board shows
+//     the server-side sum across that identity's machines (streak = max).
+//     It is still self-reported — the clamps bound an absurd fake, they
+//     can't prove a real one. (MAX_DELTA_* above caps the anonymous
+//     /report deltas, not profiles.)
 //   · per-IP + per-instance rate limits bound volume
 //   · unverified entries are capped for ranking AND rank below every verified
 //     one, so an unverified profile can't top the board with fake numbers
 //   · verification ties the ✓ to a real GitHub account → attributable/ban-able
 // Stored in KV (ranking is over the opted-in set, which is small + cached):
-//   pf:<instanceId>   profile JSON (server-accumulated stats + identity)
+//   pf:<instanceId>   profile JSON (per-machine stat slices, their summed
+//                     totals, identity)
 //   handle:<handle>   → owning instanceId (uniqueness)
 //   verify:<id>       pending {githubUser, token}, 1h TTL
 // Profiles report ABSOLUTE lifetime totals (not deltas — a profile is per-user
@@ -506,8 +536,10 @@ const WRAPPED_TTL_SECONDS = 425 * 24 * 60 * 60; // ~14 months
 const WRAPPED_MIN_YEAR    = 2024;
 const WRAPPED_MAX_YEAR    = 2100;
 
-// Server-side identity normalizers. Mirrors src/leaderboard.js; the worker is a
-// separate package so it can't import that module — keep the rules in sync.
+// Server-side identity normalizers. Mirrors src/leaderboard.js — a duplicate,
+// not a constraint: src/leaderboard.js is import-free, so the worker could
+// import it the way it imports ../../src/heatmap.js above. Until that's
+// consolidated, keep the rules in sync.
 function normHandle(input) {
   if (typeof input !== 'string') return null;
   const h = input.trim().toLowerCase()

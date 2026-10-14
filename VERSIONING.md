@@ -27,16 +27,21 @@ The Cloudflare Worker's public HTTP surface — documented in full in
 dashboards, so the rule is **additive only**:
 
 - Every existing **path** stays at its current location and method:
-  `/badge/<handle>.svg`, `/card/<handle>.svg`, `/sessions.svg`, `/tokens.svg`,
-  `/total.json`, `/profile`, `/leaderboard`, `/squad`, `/squad/bycode`,
-  `/refs.json`, `/ref`, `/health`, `/auth/*`, and the POST routes
-  (`/report`, `/profile`, `/verify/*`, `/pair/*`, `/squad/*`, `/squads/mine`).
+  `/badge/<handle>.svg`, `/card/<handle>.svg`, `/heatmap/<handle>.svg`,
+  `/stats/<handle>.svg`, `/wrapped/<handle>.svg`, `/sessions.svg`,
+  `/tokens.svg`, `/total.json`, `/profile`, `/leaderboard`, `/wrapped`,
+  `/squad`, `/squad/bycode`, `/refs.json`, `/ref`, `/health`, `/auth/*`, and
+  the POST routes (`/report`, `/profile`, `/wrapped`, `/verify/*`, `/pair/*`,
+  `/squad/*`, `/squads/mine`).
 - Existing **query params** keep their names and meaning
-  (`?metric=`, `?label=`, `?handle=`, `?limit=`, `?id=`, `?code=`, `?s=`).
+  (`?metric=`, `?label=`, `?handle=`, `?year=`, `?limit=`, `?id=`, `?code=`,
+  `?s=`, `?return=`).
 - Existing **response fields** keep their names, types, and meaning. New fields
   may be added; the top-level `schemaVersion` marks the JSON shape.
-- The `?metric=` value set for badges/leaderboard
-  (`tokens` · `sessions` · `hours`/`activems` · `streak`) is stable.
+- The `?metric=` value sets are stable: badges
+  `tokens` · `sessions` · `hours` · `streak`; leaderboard
+  `tokens` · `sessions` · `activems` · `streak`; heatmap/stats
+  `tokens` · `hours`.
 
 The `*.svg` routes always return an SVG (a neutral placeholder for unknown
 input) so an embedded `<img>` never breaks.
@@ -46,14 +51,14 @@ input) so an embedded `<img>` never breaks.
 Command names (and their aliases) are stable; none are renamed or removed within
 a major version. The full set:
 
-`start` · `stop` · `restart` · `daemon` · `setup` (alias `install`) ·
-`uninstall` · `upgrade-config` · `status` (`--dump`) · `today` · `week` ·
+`start` · `stop` · `restart` · `daemon` · `setup` (alias `install`; `--link <code>`) ·
+`uninstall` · `upgrade-config` · `status` (`--dump`, alias `dump`) · `today` · `week` ·
 `compare` · `projects` (`--limit`) · `project <name>` ·
 `usage` · `preview` · `scan` · `rescan` · `backfill <dir>` ·
-`export` (`--csv`, `--out`) · `insights` · `vars` ·
+`export` (`--csv`, `--out`) · `insights` · `recap` (`today`/`week`/`<date>`, `--md`) · `vars` ·
 `badge` · `card` · `github-stat` · `statusline` · `calendar` · `session-card` ·
-`readme` · `mcp` (+ `mcp install` / `mcp uninstall`) · `serve` · `wrapped` ·
-`pause [dur]` · `resume` (alias `unpause`) ·
+`readme` · `mcp` (+ `mcp install` / `mcp uninstall`) · `serve` · `wrapped` (`--publish`) ·
+`pause [dur]` (+ `pause status` / `pause off`) · `resume` (alias `unpause`) ·
 `private` · `public` · `privacy` ·
 `community` (`on`/`off`/`status`/`report`) ·
 `profile` (`status`/`set`/`on`/`off`/`publish`/`verify`) ·
@@ -63,8 +68,9 @@ a major version. The full set:
 
 Documented per-command flags (e.g. `badge --metric/--range/--out/--gist/--label`,
 `card --range`, `github-stat --handle/--out/--gist`, `statusline --template`,
-`calendar --out/--gist`, `export --csv/--out`, `doctor --fix`) keep their names
-and short forms. New flags and new commands may be added.
+`calendar --metric/--card/--out/--gist`, `export --csv/--out`, `recap --md`,
+`wrapped --publish`, `setup --link`, `doctor --fix`) keep their names and short
+forms. New flags and new commands may be added.
 
 **Exit codes** are part of the contract (defined in [`src/ui.js`](src/ui.js)):
 
@@ -111,11 +117,14 @@ mechanism (skip a frame when a required variable is empty/zero) is also stable.
 These files are human-readable JSON you can `cat`/`jq`, and their shapes are
 stable for downstream tooling:
 
-- **`~/.claude-rpc/aggregate.json`** — all-time aggregates. Carries a `_v`
-  schema-version field (currently `4`); top-level keys (`activeMs`, `sessions`,
-  `streak`, `byDay`, `byHour`, `topEditedFiles`, `languages`, `estimatedCost`,
-  `modelSplit`, …) are stable and additive. The `_v` bump signals a shape change
-  the scanner handles by re-deriving.
+- **`~/.claude-rpc/aggregate.json`** — all-time aggregates. Top-level keys
+  (`activeMs`, `sessions`, `streak`, `byDay`, `byHour`, `topEditedFiles`,
+  `languages`, `estimatedCost`, `modelSplit`, …) are stable and additive. The
+  file also carries a `_v` field, but that is the scanner's internal cache
+  version (see *Scanner cache* below), stamped onto the aggregate so the
+  scanner knows when to re-derive it — not part of this contract. It changes
+  whenever transcripts need a re-parse, even when the aggregate's shape
+  doesn't, so don't key on its value.
 - **`claude-rpc export`** — emits the aggregate as JSON (default) or the per-day
   rows as CSV (`--csv`). Same shapes the dashboard's `/api/export` routes serve.
 - **`GET /total.json`** — the worker's community feed (see API reference).
@@ -145,11 +154,16 @@ patch. Do not build on them.
   cache with its own `_v` (`CACHE_VERSION`); it is rebuilt whenever the version or
   shape changes. Not for external consumption.
 - **Worker KV layout.** Every KV key the worker writes (`total:counters`,
-  `pf:<id>`, `handle:<h>`, `board:index`, `alias:<id>`, `gh:<login>`, `squad:*`,
-  `sqcode:*`, `sqmember:*`, `sqbase:*`, `verify:*`, `pair:*`, `seen:*`, `rate:*`,
-  `ref:*`) is internal. Consume the HTTP API, never the KV.
-- **Volatile session state.** `$TMPDIR/claude-rpc/state.json`, `daemon.pid`,
-  `daemon.log`, `pause.json`, `usage.json` — runtime scratch, cleared on reboot.
+  `pf:<id>`, `handle:<h>`, `board:index`, `alias:<id>`, `gh:<login>`,
+  `wrapped:<id>:<year>`, `squad:*`, `sqcode:*`, `sqmember:*`, `sqbase:*`,
+  `verify:*`, `pair:*`, `seen:*`, `rate:*`, `ref:*`) is internal. Consume the
+  HTTP API, never the KV.
+- **Volatile session state.** `$TMPDIR/claude-rpc/state-<session>.json` (and
+  the legacy `state.json`), `daemon.pid`, `daemon.log`, `pause.json`,
+  `usage.json` — runtime scratch, cleared on reboot.
+- **Bookkeeping files.** `~/.claude-rpc/community-cursor.json`,
+  `nudge-state.json` and `version` — the community-report cursor, the last
+  share nudge shown, and the last version that ran the on-update self-heal.
 - **Exact wording & visuals.** Insight phrasing (`claude-rpc insights`), default
   rotation-frame copy, and the precise pixels of SVG cards/badges are content and
   presentation — they get refined freely. The *routes* and *variables* that drive

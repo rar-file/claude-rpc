@@ -64,15 +64,17 @@ Detects Node (installs the npm package) or falls back to the prebuilt Apple-Sili
 brew install rar-file/claude-rpc/claude-rpc && claude-rpc setup
 ```
 
-**Windows (no Node required)** — [grab the portable exe from the latest release](https://github.com/rar-file/claude-rpc/releases/latest), then:
+**Windows (no Node required)** — [grab `claude-rpc.exe` from the latest release](https://github.com/rar-file/claude-rpc/releases/latest) (the standalone CLI — no installer), then run it from the folder you saved it to:
 
 ```sh
-claude-rpc setup
+.\claude-rpc.exe setup
 ```
+
+`setup` copies the exe to a fixed per-user location, so the download can go afterwards. Prefer a GUI? The release's `claude-rpc-<version>-x64-setup.exe` (installer, auto-updates) and `claude-rpc-<version>-x64-portable.exe` (no install) are the desktop dashboard app, which runs the same `setup` for you on first launch.
 
 That's the whole pitch.
 
-> `setup` registers a Windows startup entry and wires hooks into Claude Code's `settings.json`, and the daemon reports anonymous totals by default. It ends with one optional y/N — *connect GitHub?* — which publishes a verified public [leaderboard](https://claude-rpc.com/leaderboard) profile only if you say yes (asked once; Enter skips). All of it is reversible (`claude-rpc uninstall`, `community off`, `profile off`) and fully documented in [`SECURITY.md`](SECURITY.md) — read it first if you want to know exactly what runs.
+> `setup` registers a per-user login-autostart entry (a LaunchAgent on macOS, a `systemd --user` unit on Linux, an `HKCU\…\Run` value on Windows) and wires hooks into Claude Code's `settings.json`, and the daemon reports anonymous totals by default. It ends with one optional y/N — *connect GitHub?* — which publishes a verified public [leaderboard](https://claude-rpc.com/leaderboard) profile only if you say yes (asked once; Enter skips). All of it is reversible (`claude-rpc uninstall`, `community off`, `profile off`) and fully documented in [`SECURITY.md`](SECURITY.md) — read it first if you want to know exactly what runs.
 
 The Discord *desktop* app must be running. The browser client doesn't expose the local IPC bridge that Rich Presence uses.
 
@@ -123,7 +125,7 @@ Three local surfaces, all reading the same `~/.claude-rpc/aggregate.json`:
 <table>
 <tr>
 <td align="center" width="50%"><b>web dashboard</b><br/><sub><code>claude-rpc serve</code> · port 47474</sub><br/><br/><img src="docs/dashboard.png" alt="Web dashboard with range selector, activity chart, heatmap, cost panel, languages stack, and leaderboards" /></td>
-<td align="center" width="50%"><b>settings gui</b><br/><sub><code>npm run dashboard</code> · Electron</sub><br/><br/><img src="docs/electron.png" alt="Electron config editor with Presence / Discord / Assets / Timing / Daemon / Stats tabs" /></td>
+<td align="center" width="50%"><b>settings gui</b><br/><sub><code>npm run dashboard</code> · Electron</sub><br/><br/><img src="docs/electron.png" alt="Electron config editor with Presence / Discord / Assets / Timing / Daemon / Privacy / Stats tabs" /></td>
 </tr>
 </table>
 
@@ -185,12 +187,12 @@ claude-rpc calendar --card                    --out stats.svg               # st
   <img src="site/examples/month-on-claude.svg" width="270" alt="Month-on-claude summary card" />
   <img src="site/examples/year-on-claude.svg"  width="270" alt="Year-on-claude summary card — hours, prompts, tokens, lines, cost, daily activity strip" />
   <br/>
-  <sub><code>card --range week · month · year</code> (also <code>all</code>) — live at <code>/api/card.svg</code> while the daemon's up</sub>
+  <sub><code>card --range week · month · year</code> (also <code>all</code>) — live at <code>/api/card.svg</code> while <code>claude-rpc serve</code> is running</sub>
 </div>
 
 `badge --gist` writes the SVG to your own GitHub gist (creates one on first run, updates it after — id remembered in `config.json`). The URL printed back is README-ready and updates every time you re-run the command. Uses `gh` if available, else `GH_TOKEN` with `gist` scope.
 
-Live equivalents when the daemon is up:
+Live equivalents while `claude-rpc serve` is running (the local dashboard server — the daemon itself serves no HTTP):
 
 - `http://127.0.0.1:47474/api/badge.svg?metric=hours&range=7d`
 - `http://127.0.0.1:47474/api/card.svg?range=year`
@@ -220,7 +222,7 @@ For a complete account of the sensitive things claude-rpc does — startup persi
 
 No database, no message bus, no background polling when Claude Code isn't running. State on disk you can `cat` and `jq`. **Zero runtime dependencies** — even the Discord Rich Presence IPC client is hand-rolled (`src/discord-ipc.js`).
 
-1. **hook** ([`src/hook.js`](src/hook.js)) — Claude Code spawns it on every lifecycle event. Parses the JSON from stdin and mutates the shared state file. The per-tool-call hooks (`PreToolUse`/`PostToolUse`) are wired `async`, so Claude Code never waits on them; the once-per-turn ones take one node start-up (~90ms).
+1. **hook** ([`src/hook.js`](src/hook.js)) — Claude Code spawns it on every lifecycle event. Parses the JSON from stdin and mutates the shared state file. The per-tool-call hooks (`PreToolUse`/`PostToolUse`) are wired `async`, so Claude Code never waits on them; the once-per-turn ones cost one node start-up each (~60–90ms wall, Node's own boot included).
 2. **daemon** ([`src/daemon.js`](src/daemon.js)) — long-running. Connects to Discord's local IPC, watches the state file, pushes presence frames every few seconds. Idles at ~55MB. Exponential backoff with jitter on reconnect; `daemon.log` rotates at 5 MB.
 3. **scanner** ([`src/scanner.js`](src/scanner.js)) — walks `~/.claude/projects/**/*.jsonl` for all-time aggregates (active time, prompts, tools, tokens, streaks, hotspots, lines, languages, cost, bash, web, subagents). Incremental — re-parses only changed files, and runs in a short-lived child process so the daemon never holds the parse memory.
 
@@ -228,8 +230,9 @@ Persistent state, all human-readable JSON:
 
 | Path | What |
 | ---- | ---- |
-| `$TMPDIR/claude-rpc/state.json` | Current session, volatile |
+| `$TMPDIR/claude-rpc/state-<session>.json` | Live per-session state, volatile (`state.json` for events with no session id) |
 | `~/.claude-rpc/aggregate.json` | All-time aggregates |
+| `~/.claude-rpc/events.jsonl` | Notification / compaction events the hook logs (rotated at 5 MB) |
 | `~/.claude-rpc/scan-cache.json` | Per-transcript scan cache |
 | `~/.claude-rpc/private-list.json` | Runtime privacy toggles |
 | `~/.claude/settings.json` | Hook registrations (managed by `setup`) |
@@ -299,7 +302,7 @@ Prefer to install from inside Claude Code? There's a [plugin](plugin/) for that:
 /plugin install claude-rpc@claude-rpc
 ```
 
-It's a thin bootstrapper — on the first session it just runs `npx claude-rpc@latest setup` for you (the same install as above), then stays out of the way. macOS / Linux / WSL; on Windows use the portable exe. Nothing extra is added to your sessions — the plugin is a single `SessionStart` hook with no model-context cost.
+It's a thin bootstrapper — on the first session it just runs `npx claude-rpc@latest setup` for you (the same install as above), then stays out of the way. macOS / Linux / WSL; on native Windows use `claude-rpc.exe` (see [install](#install)). Nothing extra is added to your sessions — the plugin is a single `SessionStart` hook with no model-context cost.
 
 ## commands
 
@@ -312,19 +315,23 @@ It's a thin bootstrapper — on the first session it just runs `npx claude-rpc@l
 
 | Command          | What it does |
 | ---------------- | ------------ |
-| `setup`          | Install Claude Code hooks (test-fires one synthetic SessionStart to prove the pipe works) |
-| `uninstall`      | Remove Claude Code hooks |
+| `setup` (or `install`) | Install Claude Code hooks + login autostart, seed config, start the daemon (test-fires one synthetic SessionStart to prove the pipe works). `--link <code>` also links this machine to your verified profile |
+| `uninstall`      | Remove Claude Code hooks + the login-autostart entry (keeps your data) |
 | `upgrade-config` | Re-run idempotent migrations on `config.json` |
 | `start` / `stop` / `restart` | Lifecycle for the detached daemon |
-| `status`         | Interactive TUI — heatmap, hour histogram, leaderboards (`--dump` for plain output) |
+| `status`         | Interactive TUI — heatmap, hour histogram, leaderboards (`--dump`, or `dump`, for plain output) |
 | `today` / `week` | Focused views (today's stats, weekday breakdown) |
+| `compare`        | This week vs last week, side by side |
+| `projects` / `project <name>` | Every project ranked by active time (`--limit N`) / one project's full record + recent daily rhythm |
 | `usage`          | Subscription limits — session + weekly %, the same numbers `/usage` shows |
 | `serve`          | Open the local web dashboard (port 47474) |
 | `preview`        | Render every rotation frame against real state |
+| `vars`           | Dump the full template-var list as JSON |
 | `scan` / `rescan`| Incremental / forced re-parse of `~/.claude/projects` |
 | `backfill <dir>` | Import transcripts from any folder (backup, other machine) |
 | `insights`       | Print 3–5 auto-generated lines about your week |
 | `recap`          | Standup summary — yesterday's work, paste-ready (`today\|week\|date`, `--md`) |
+| `export`         | Dump the aggregate as JSON, or daily rows as CSV (`--csv` `--out`) |
 | `badge`          | Shields-style SVG (`--metric` `--range` `--out` `--gist`) |
 | `card`           | Poster-style SVG (`--range year\|month\|week\|all`) |
 | `github-stat`    | Embeddable profile stat card (`--handle` `--out` `--gist`) |
@@ -332,15 +339,18 @@ It's a thin bootstrapper — on the first session it just runs `npx claude-rpc@l
 | `session-card`   | Recap card for the current session (`--out`) |
 | `readme`         | Paste-ready README badge markdown for your profile (`--raw` to pipe) |
 | `statusline`     | One-line status for tmux/shell prompts (`--template`) |
-| `mcp install`    | Wire the stats MCP server into Claude Code (one command) |
+| `mcp install` / `mcp uninstall` | Wire / remove the stats MCP server in Claude Code (one command) |
 | `mcp`            | Run the MCP server (stdio) for Claude Code |
-| `wrapped`        | Open your animated year-in-review (Claude Wrapped) |
+| `wrapped`        | Open your animated year-in-review (Claude Wrapped); `--publish` puts it on `claude-rpc.com/wrapped/<handle>` |
+| `pause` / `resume` | Snooze the Discord card everywhere (`pause [30m\|2h]`, default 1h; `pause status`, `pause off`); `unpause` = `resume` |
 | `private` / `public` / `privacy` | Per-cwd visibility toggles + status |
-| `community`      | Opt-in community totals — `on` \| `off` \| `status` \| `report` |
-| `doctor`         | Diagnostic checklist with one-line fix hints |
-| `tail` / `logs`  | Tail the daemon log |
+| `community`      | Anonymous community totals, on by default for fresh installs — `status` \| `off` \| `on` \| `report` |
+| `profile`        | Opt-in public leaderboard profile — `status` \| `set` \| `on` \| `off` \| `publish` \| `verify` |
+| `squad`          | Private mini-leaderboards with friends — `status` \| `create <name>` \| `join <code>` \| `leave [id]` |
+| `link`           | One profile across machines: `link` mints a code on your verified machine, `link <code>` claims it on the new one |
+| `doctor`         | Diagnostic checklist with one-line fix hints (`--fix` to auto-repair) |
+| `tail` / `logs` / `log` | Tail the daemon log |
 | `daemon`         | Run the daemon in the foreground (debugging) |
-| `vars`           | Dump the full template-var list as JSON |
 
 Exit codes: `0` ok · `1` user error · `2` system error · `3` wrong state. `--version` and `--help` work as expected.
 
@@ -401,8 +411,8 @@ per-user [`launchd` LaunchAgent](src/install.js) on macOS and a
 [`systemd --user` service](src/install.js) on Linux; both start the daemon at
 login without `sudo` and don't fight a manual `claude-rpc stop`.
 
-**Windows is supported** — grab the portable exe (no Node required), then
-`claude-rpc setup`. One caveat documented honestly: `fs.watch` on Windows drops
+**Windows is supported** — grab `claude-rpc.exe` (no Node required), then
+run `claude-rpc.exe setup`. One caveat documented honestly: `fs.watch` on Windows drops
 events when a writer commits via atomic rename (which the state file, pause file,
 scanner, and settings GUI all do), so on Windows the **mtime poll is effectively
 the primary path** and runs an order of magnitude faster (every ~3s vs ~30s
@@ -412,7 +422,7 @@ Autostart is an `HKCU\…\Run` entry launched through a windowless `.vbs` shim (
 scheduled task, by design — see [`SECURITY.md`](SECURITY.md)).
 
 Everything else — the scanner, dashboards, cards, the worker client — is
-platform-neutral. CI runs the full suite on Node 18/20/22 and builds the macOS
+platform-neutral. CI runs the full suite on Node 18/20/22/24 and builds the macOS
 and Windows binaries every release.
 
 ## versioning
@@ -428,15 +438,15 @@ not. The worker's HTTP surface is documented in
 ## development
 
 ```sh
-npm test                  # 430+ tests, ~2s
-npm run lint              # eslint over src + test
+npm test                  # 550+ tests, a few seconds
+npm run lint              # eslint over src + test + vscode-extension
 npm run start             # run daemon in foreground
 npm run serve             # web dashboard against your real data
 npm run dashboard         # Electron settings GUI (dev mode)
 npm run build:exe         # SEA single-file binary for the current OS
 ```
 
-Tests are `node --test`, zero deps; CI ([release.yml](.github/workflows/release.yml)) runs the suite (+ the Worker's) across Node 18/20/22 and gates the matrix build and npm publish. Where the project's headed (and what it'll deliberately never do): [`ROADMAP.md`](ROADMAP.md).
+Tests are `node --test`, zero deps; CI ([ci.yml](.github/workflows/ci.yml) on every push and PR, [release.yml](.github/workflows/release.yml) on tags) runs the suite (+ the Worker's) across Node 18/20/22/24, and the release run gates the matrix build and npm publish on it. Where the project's headed (and what it'll deliberately never do): [`ROADMAP.md`](ROADMAP.md).
 
 ## license
 

@@ -1,7 +1,8 @@
 // Vendored shields-style SVG renderer. Mirrors src/badge.js renderBadge
 // from the main repo so the community badges share visual language with
-// users' personal `claude-rpc badge` output. Kept inline to keep the
-// worker dep-free (no bundler step needed for `wrangler deploy`).
+// users' personal `claude-rpc badge` output. Kept as a copy because
+// src/badge.js imports scanner.js (node:fs, node:os, paths.js), which would
+// drag Node-only modules into the Worker bundle.
 
 function escapeXml(s) {
   return String(s)
@@ -22,8 +23,10 @@ function textWidth(s) {
   return Math.ceil(w);
 }
 
-// Byte-for-byte mirror of src/fmt.js fmtNum — the worker deploys dependency-free
-// and can't import across the package boundary. Keep the two in sync.
+// Byte-for-byte mirror of src/fmt.js fmtNum. A duplicate, not a constraint:
+// src/fmt.js is import-free, so wrangler could bundle it straight in the way
+// index.js already imports ../../src/heatmap.js. Until that's consolidated,
+// keep the two in sync (test/format.test.js pins fmtNum's tier behavior).
 export function fmtNum(n) {
   if (!n) return '0';
   const neg = n < 0 ? '-' : '';

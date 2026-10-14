@@ -651,7 +651,19 @@ test('merge migrates squad membership incl. ownership and dedupe', async () => {
   // The alias machine can now manage W's squads (acts as the one identity).
   const mine = await (await handleSquadsMine(post('/squads/mine', { instanceId: IDS.bob }), env)).json();
   assert.equal(mine.squads.length, 3, 'alias sees the canonical\'s squads');
-  assert.ok(mine.squads.every((s) => s.owner || s.id === rSquad.id || true));
+  // ...and with the canonical's ownership: `owner` must track the stored
+  // ownerId against the CANONICAL id (not the calling machine's). W owns all
+  // three after the merge — R's solo squad by transfer — so the alias is the
+  // owner of every one of them.
+  for (const s of mine.squads) {
+    const stored = await getSquadRaw(env, s.id);
+    assert.equal(s.owner, stored.ownerId === IDS.alice, `owner flag matches stored ownership (${s.name})`);
+  }
+  assert.deepEqual(
+    new Set(mine.squads.filter((s) => s.owner).map((s) => s.id)),
+    new Set([wSquad.id, rSquad.id, shared.id]),
+    'alias is reported as owner of all three squads, incl. the transferred one',
+  );
 });
 
 test('rate-limit keys stay on the original machine id after a merge', async () => {

@@ -3,6 +3,12 @@
 # pipeline, which holds id-token + the npm token). Dependabot reads the trailing
 # `# vX.Y.Z` comment, so it bumps both the SHA and the comment together when a
 # new release ships. Grouped into a single weekly PR to keep the noise low.
+#
+# npm: one entry per package with its own lockfile (root CLI, Cloudflare
+# Worker, Electron dashboard). Minor + patch bumps are grouped into one weekly
+# PR per directory; majors still arrive one PR each so they get looked at on
+# their own. vscode-extension/ is not listed: it has no dependencies and no
+# lockfile, so there is nothing for Dependabot to update there.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -13,3 +19,46 @@ updates:
       actions:
         patterns:
           - '*'
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      root-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: npm
+    directory: /worker
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      worker-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: npm
+    directory: /dashboard
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      dashboard-minor-patch:
+        update-types:
+          - minor
+          - patch
+    # Electron / electron-builder majors change the runtime and the installer
+    # pipeline (signing, update feed) and are a deliberate maintainer upgrade,
+    # not a weekly bump. Minor and patch updates are still offered.
+    ignore:
+      - dependency-name: electron
+        update-types:
+          - version-update:semver-major
+      - dependency-name: electron-builder
+        update-types:
+          - version-update:semver-major

@@ -2,15 +2,15 @@
   "name": "claude-rpc-totals-worker",
   "version": "0.1.0",
   "private": true,
-  "description": "Cloudflare Worker that holds opt-in community totals for the claude-rpc README. Source for the badges shown on github.com/rar-file/claude-rpc.",
+  "description": "Cloudflare Worker backend for claude-rpc: community totals and README badges, public profiles and the leaderboard, squads, and Claude Wrapped.",
   "type": "module",
   "scripts": {
-    "test": "node --test test/*.test.js",
+    "test": "node ../scripts/run-tests.mjs",
     "deploy": "wrangler deploy",
     "dev": "wrangler dev",
     "tail": "wrangler tail",
-    "kv:create": "wrangler kv:namespace create TOTALS",
-    "kv:create:preview": "wrangler kv:namespace create TOTALS --preview"
+    "kv:create": "wrangler kv namespace create TOTALS",
+    "kv:create:preview": "wrangler kv namespace create TOTALS --preview"
   },
   "devDependencies": {
     "wrangler": "^4.94.0"

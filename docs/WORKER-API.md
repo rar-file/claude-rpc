@@ -16,7 +16,13 @@ not change or disappear within a major version.
 
 Notes that apply to every route:
 
-- **CORS:** the read-only JSON/SVG GET routes send `Access-Control-Allow-Origin: *`.
+- **CORS:** JSON responses (success and error) and the per-user SVGs (`/badge`,
+  `/card`, `/heatmap`, `/stats`, `/wrapped/<handle>.svg`) send
+  `Access-Control-Allow-Origin: *`, so the site can fetch them cross-origin.
+  Three routes don't: the community badges `/sessions.svg` and `/tokens.svg`,
+  and `/health` — they're meant for `<img>` tags and uptime checks, not
+  browser `fetch()`. (A successful `POST /report` reply also omits it; the CLI
+  is its only client.)
 - **Schema marker:** JSON responses carry a top-level `schemaVersion` (currently `1`).
 - **Errors:** failures return `{ "ok": false, "error": "<message>" }` with a 4xx/5xx
   status. The image routes (`*.svg`) are the exception — they always return an SVG
@@ -97,7 +103,7 @@ Response (abridged):
     "ships": 0, "cachePct": 0, "peakHour": 0, "peakDay": { "date": "2026-03-14", "activeMs": 0 },
     "longestSessionMs": 0, "marathonPct": 0, "compactions": 0, "subagentActiveMs": 0, "costUsd": 0,
     "topProjects": [{ "name": "...", "activeMs": 0 }],
-    "topLanguages": ["..."], "topModels": [{ "name": "...", "pct": 0 }],
+    "topLanguages": [{ "name": "...", "edits": 0 }], "topModels": [{ "name": "...", "pct": 0 }],
     "toolMix": [{ "name": "...", "pct": 0 }]
   },
   "ts": 1718600000000
@@ -193,7 +199,9 @@ Liveness check: `{ "ok": true, "schemaVersion": 1 }`.
 | `GET /auth/me` | Who am I + linked profile. Requires `Authorization: Bearer <session>`. |
 
 These require the deployment to be configured with `GITHUB_CLIENT_ID` /
-`GITHUB_CLIENT_SECRET` / `SESSION_SECRET`; otherwise they return `503`. Sessions
+`GITHUB_CLIENT_SECRET` / `SESSION_SECRET`; otherwise `/auth/login` and
+`/auth/callback` return `503`, and Bearer sessions are ignored everywhere
+(`/auth/me` answers `401`). Sessions
 carry only the public GitHub login — the browser never sees an `instanceId`.
 
 ---
@@ -201,15 +209,26 @@ carry only the public GitHub login — the browser never sees an `instanceId`.
 ## POST routes
 
 All POST bodies are JSON. The CLI is the primary client; the site uses a subset
-via Bearer sessions. Per-instance and per-IP rate limits apply.
+via Bearer sessions.
+
+Rate limits (a `429` when exceeded). The per-IP limit is one fixed window of
+20 accepted requests per IP per minute, **shared** across every route that
+uses it; the per-instance limit is one request per `instanceId` per minute,
+scoped per route.
+
+| Limit | Routes |
+| ----- | ------ |
+| per-IP **and** per-instance | `/report`, `/profile`, `/wrapped`, `/squad/create`, `/pair/start` (the per-instance window applies on the `instanceId` path, not to Bearer sessions) |
+| per-IP only | `/verify/start`, `/verify/check`, `/squad/join`, `/pair/claim` |
+| none | `/squad/leave`, `/squad/update`, `/squads/mine` |
 
 | Route | Body (key fields) | What it does |
 | ----- | ----------------- | ------------ |
 | `POST /report` | `instanceId`, `sessionsDelta`, `tokensDelta`, `version`, `osFamily` | Add anonymous community deltas. This is the **entire telemetry payload** — see [`validateReport`](../worker/src/index.js) and [`SECURITY.md`](../SECURITY.md). |
 | `POST /profile` | `instanceId`, `handle`, `tokens?`, `sessions?`, `activeMs?`, `streak?`, `displayName?`, `daily?`, `version`, `osFamily` | Upsert a public leaderboard profile (absolute totals, clamped). `verified`/`githubUser` are set only by the verify/link flow, never the client. `daily` is `{ end: 'YYYY-MM-DD', tokens: number[], activeMin: number[] }` (oldest → newest, ≤371 days, last value = `end`), stored per machine for `/heatmap` and `/stats`. A malformed `daily` is dropped, never a 400. Omitting it keeps the stored series; `null` clears it. Never returned by `GET /profile`. |
-| `POST /wrapped` | `instanceId`, `year`, `wrapped` (allowlisted blob — see `GET /wrapped`) | Publish a Claude Wrapped year-in-review under the caller's published profile handle (403 without one). Opt-in one-shot (`claude-rpc wrapped --publish`); values are clamped, unknown fields dropped. Returns the public page URL. |
+| `POST /wrapped` | `instanceId`, `year`, `wrapped` (allowlisted blob — see `GET /wrapped`) | Publish a Claude Wrapped year-in-review under the caller's published profile handle (403 without one). Opt-in one-shot (`claude-rpc wrapped --publish`); values are clamped, unknown fields dropped. Each machine of a linked identity publishes its own slice: a publish replaces only that machine's slice, and `GET /wrapped` serves the merge of all of them. Returns the public page URL. |
 | `POST /verify/start` | `instanceId`, `githubUser?` | Issue a one-time gist-verification token. |
-| `POST /verify/check` | `instanceId`, `gistId`, optional `resumed`, `pendingSince` | Confirm the token appears in a public gist; grants the verified check (merges into the canonical identity if one exists). `resumed: true` marks a verification completing an earlier consent (the CLI's background retry); the internal `verifiedAt` stamp is then back-dated to `pendingSince` (ms epoch), bounded to [profile `createdAt` − 2 days, now], or to `createdAt` when omitted. |
+| `POST /verify/check` | `instanceId`, optional `gistId`, `resumed`, `pendingSince` | Confirm the token appears in a public gist; grants the verified check (merges into the canonical identity if one exists). With `gistId` the worker reads that gist directly (the CLI always sends it); without it, it falls back to scanning the public gists of the `githubUser` hint given to `/verify/start` (no hint → `422`). `resumed: true` marks a verification completing an earlier consent (the CLI's background retry); the internal `verifiedAt` stamp is then back-dated to `pendingSince` (ms epoch), bounded to [profile `createdAt` − 2 days, now], or to `createdAt` when omitted. |
 | `POST /pair/start` | Bearer session **or** verified `instanceId` | Mint a one-time machine-link code (10-min TTL). |
 | `POST /pair/claim` | `instanceId`, `code` | Claim a link code on a new machine; grants the same verified check and merges machines into one identity. A machine with no profile anywhere gets one **minted on the spot** (verified, handle = the GitHub login, suffixed on collision; `created: true` in the response) — this is what makes `setup --link <code>` a one-liner. |
 | `POST /squad/create` | session/`instanceId`, `name` | Create a squad; returns id + invite code. |

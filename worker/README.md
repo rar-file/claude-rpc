@@ -1,120 +1,132 @@
-# claude-rpc community-totals worker
+# claude-rpc worker
 
-A Cloudflare Worker that accepts opt-in counters from `claude-rpc` installs
-and serves running totals as shields-style SVG badges. Powers the
-**community · sessions** / **community · tokens** badges on the main
-`claude-rpc` README.
+The Cloudflare Worker behind every network feature of `claude-rpc`:
 
-The source lives in this repo so the privacy story is auditable: there is
-no telemetry endpoint anywhere else.
+- **Community totals** — anonymous session/token counters from CLI installs
+  (on by default for fresh installs, `claude-rpc community off` opts out),
+  served as the **community · sessions** / **community · tokens** badges on the
+  main README.
+- **Public profiles + leaderboard** (opt-in, `claude-rpc profile`), with GitHub
+  verification via a public gist or the web login, and machine linking so
+  several installs count as one identity.
+- **Live per-user images** — `/badge`, `/card`, `/heatmap` and `/stats` SVGs
+  rendered from a published profile.
+- **Squads** — private mini-leaderboards among friends.
+- **Claude Wrapped** — the opt-in, one-shot year-in-review publish.
+- **Referral counters** for the landing page.
 
-## Leaderboard / public profiles (opt-in)
-
-A second, separate opt-in (`claude-rpc profile`) publishes a public profile to
-a leaderboard. Endpoints:
-
-- `POST /profile` — upsert a profile (handle, display name, optional GitHub user)
-  plus **server-validated** usage deltas. The board only ever sums deltas the
-  worker accepted — never a client-asserted total.
-- `GET /leaderboard?metric=tokens|sessions|activeMs|streak&limit=N` — top-N.
-- `POST /verify/start` / `POST /verify/check` — GitHub verification via a public
-  gist (the worker confirms a one-time token appears in one of the user's gists,
-  then sets the verified ✓).
-
-**Trust model (hybrid).** Self-reported usage can't be made fraud-*proof* — there
-is no oracle for real token counts — so integrity is defense-in-depth:
-per-report plausibility caps (`MAX_DELTA_*`), per-IP + per-instance rate limits,
-**verified profiles rank above every unverified one**, and unverified token
-counts are capped for ranking so a fake entry can't top the board. Verification
-ties the ✓ to a real, attributable GitHub account. The board is best-effort and
-unauthenticated by design.
-
-## What it stores
-
-Single KV namespace bound as `TOTALS`:
-
-| Key                  | Value                                            | TTL     |
-| -------------------- | ------------------------------------------------ | ------- |
-| `total:sessions`     | running sum of `sessionsDelta` across all opt-ins | none   |
-| `total:tokens`       | running sum of `tokensDelta` across all opt-ins   | none   |
-| `seen:<instanceId>`  | last-seen metadata (`ts`, `version`, `osFamily`)  | 30 days |
-| `rate:<instanceId>`  | per-instance rate-limiter marker                 | 60s     |
-| `rate:ip:<ip>:<win>` | per-IP fixed-window report counter               | 60s     |
-
-No IP addresses, paths, prompts, models, costs, or repos are *persisted as
-analytics*. The per-IP rate-limiter does derive a short-lived KV key from
-`CF-Connecting-IP` purely for abuse mitigation; it carries only a count and
-expires within a minute. The validator in `validateReport` strictly checks
-the schema below and rejects anything else.
-
-### Trust model
-
-These totals are **unauthenticated and best-effort**. Anyone can `POST /report`,
-so the numbers are a community vanity metric, not an audited figure. We defend
-against casual abuse with per-report magnitude caps (`MAX_DELTA_*`), a
-per-instance rate limit, and a per-IP fixed-window limit (20 reports/IP/minute),
-but a determined actor can still inflate the counters. The increment itself is a
-best-effort KV read-modify-write (no atomic increment), so under concurrency a
-report can rarely be lost; true atomicity would require Durable Objects. Treat
-the totals as approximate.
-
-## Schema
-
-```jsonc
-POST /report
-{
-  "instanceId":     "<uuid v4>",
-  "sessionsDelta":  <int 0..100000>,
-  "tokensDelta":    <int 0..5000000000>,
-  "version":        "<claude-rpc version string>",
-  "osFamily":       "linux" | "darwin" | "win32",
-  "ts":             <unix ms>
-}
-```
-
-`ts` is informational; the worker doesn't trust it (server time wins).
+The source lives in this repo so the privacy story is auditable: this is the
+only server the project runs, and everything `claude-rpc` sends to the project
+lands here. [`SECURITY.md`](../SECURITY.md) lists every outbound call the CLI
+makes, including the few that go elsewhere (Anthropic's usage endpoint with
+your own token, GitHub for gists).
 
 ## Routes
 
-- `POST /report`        — opt-in counter submission
-- `GET  /sessions.svg`  — badge with the running total of sessions
-- `GET  /tokens.svg`    — badge with the running total of tokens
-- `GET  /total.json`    — JSON of both totals (for dashboards)
-- `GET  /health`        — `{ "ok": true, "schemaVersion": 1 }`
+All 31 routes — path, params, request and response shapes, caching, CORS and
+rate limits — are documented in [`docs/WORKER-API.md`](../docs/WORKER-API.md).
+The router itself is the `fetch` handler at the bottom of
+[`src/index.js`](src/index.js), and the file header carries a one-line map of
+every route.
 
-Badge responses are cached for 5 minutes at the edge.
+## Trust model
+
+Everything here is **self-reported and best-effort**. Anyone can `POST /report`
+or `POST /profile`, so the numbers are a community vanity metric, not an
+audited figure. The defenses are about bounding abuse, not proving honesty:
+
+- **Community totals** take forward *deltas* only, with per-report magnitude
+  caps (`MAX_DELTA_*`). The increment is a KV read-modify-write (no atomic
+  increment), so under concurrency a report can rarely be lost; treat the
+  totals as approximate.
+- **Profiles** *set* absolute lifetime totals per machine (not deltas) — a
+  re-send is idempotent. Values are validated and clamped to plausibility
+  ceilings (`MAX_PF_*`); a linked identity's displayed totals are the sum
+  across its machines (streak: the max).
+- **Verified profiles rank above every unverified one**, and unverified token
+  counts are capped for ranking, so a fake entry can't top the board.
+  Verification ties the ✓ to a real, attributable GitHub account.
+- **Rate limits:** a per-IP fixed window (20 accepted requests per IP per
+  minute, shared across routes) plus a one-per-minute per-instance window on
+  the write routes. Which route gets which is listed in
+  [`docs/WORKER-API.md`](../docs/WORKER-API.md#post-routes).
+
+## What it stores
+
+A single KV namespace bound as `TOTALS`. The exact key layout is an internal
+detail (it is listed at the top of [`src/index.js`](src/index.js)); in short:
+
+| Keys | What | TTL |
+| ---- | ---- | --- |
+| `total:counters` | the community `{sessions, tokens}` totals | none |
+| `seen:<instanceId>` | last-seen `{ts, version, osFamily}` (active-install marker, refreshed at most daily) | 30 days |
+| `rate:<scope>:<instanceId>`, `rate:ip:<ip>:<window>` | rate-limiter markers / counters | 60s |
+| `ref:<source>` | referral count per allowlisted source | none |
+| `pf:`, `handle:`, `alias:`, `board:index`, `gh:` | opt-in profiles (per-machine slices, optional per-day series), handle ownership, machine links, the leaderboard index, GitHub login links | unverified profiles 90 days, otherwise none |
+| `verify:`, `pair:` | pending gist verification / one-time link codes | 1h / 10 min |
+| `squad:`, `sqcode:`, `sqmember:`, `sqbase:` | squads, invite codes, membership index, weekly baselines | baselines 35 days |
+| `wrapped:<id>:<year>` | published Claude Wrapped (per-machine slices + the merge) | ~14 months |
+
+No prompts, paths, file contents, models or repos are stored. The anonymous
+`/report` payload is exactly what `validateReport` accepts (see
+[`docs/WORKER-API.md`](../docs/WORKER-API.md#post-routes)); the per-IP
+limiter derives a short-lived KV key from `CF-Connecting-IP` purely for abuse
+mitigation — it carries only a count and expires within a minute.
 
 ## Deploy
 
 ```sh
 cd worker
-npm install                       # pulls wrangler as a devDep
-npx wrangler login                # one-time OAuth (browser)
-npm run kv:create                 # paste the returned id into wrangler.toml
+npm ci                                       # pulls wrangler as a devDep
+npx wrangler login                           # one-time OAuth (browser)
+npm run kv:create                            # first deploy only: paste the returned id into wrangler.toml
+npx wrangler secret put GITHUB_CLIENT_SECRET # from the GitHub OAuth app
+npx wrangler secret put SESSION_SECRET       # any long random string
 npm run deploy
 ```
 
-The CLI's default `community.endpoint` should be updated to the resulting
-`*.workers.dev` URL once deployed (see `src/default-config.js` in the main
-repo).
+Deploys are manual — nothing in CI runs `wrangler deploy`.
+
+The secrets are set once per deployment and survive redeploys.
+`GITHUB_CLIENT_ID` is public and lives in `wrangler.toml` `[vars]`, next to
+`SITE_ORIGIN`; register the OAuth app's callback URL as
+`https://<your-worker>.workers.dev/auth/callback`. Without the two secrets
+`/auth/login` and `/auth/callback` answer `503` and Bearer sessions are
+ignored (so `/auth/me` is a `401`); the CLI-facing routes still work, and the
+gist checks fall back to unauthenticated GitHub API calls (a much lower GitHub
+rate limit).
+
+The CLI's default endpoint (`community.endpoint` in
+[`src/default-config.js`](../src/default-config.js)) already points at the
+production worker, `https://claude-rpc-totals.claude-rpc.workers.dev`. For a
+deployment of your own, set `community.endpoint` in your `config.json`.
 
 ## Local dev
 
 ```sh
-wrangler kv:namespace create TOTALS --preview
+npx wrangler kv namespace create TOTALS --preview   # or: npm run kv:create:preview
 # paste the preview_id into wrangler.toml
-wrangler dev
+npx wrangler dev
 ```
 
-`wrangler dev` runs an in-process worker on `http://127.0.0.1:8787`.
+`wrangler dev` runs the worker locally on `http://127.0.0.1:8787`. For the
+web-login routes, put `GITHUB_CLIENT_SECRET` / `SESSION_SECRET` in a
+`.dev.vars` file next to `wrangler.toml` (don't commit it).
 
 ## Tests
 
-`test/index.test.js` covers `validateReport` plus the route handlers using
-an in-memory KV stub. Run via:
-
 ```sh
-node --test test/*.test.js
+npm test        # from worker/ — or `npm --prefix worker test` from the repo root
 ```
 
-(no deps needed — pure node test runner against the handlers).
+- `test/index.test.js` — `/report` validation and totals, the community and
+  per-user badges/cards, referrals, profiles and the leaderboard, gist
+  verification, Wrapped, the heatmap/stats series.
+- `test/squads.test.js` — web-login tokens and OAuth routes, squads, machine
+  pairing/linking and identity merges.
+
+Both drive the route handlers directly against an in-memory KV stub — no
+wrangler, miniflare or network needed, just Node's built-in test runner. The
+`npm test` script reuses the root's cross-platform runner
+(`../scripts/run-tests.mjs`) instead of a shell glob, so it works on Windows
+too.

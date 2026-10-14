@@ -25,7 +25,10 @@ mkdirSync(sbTmp, { recursive: true });
 mkdirSync(sbCfg, { recursive: true });
 mkdirSync(join(sb, 'appdata', 'claude-rpc'), { recursive: true });
 // autostart:false — the SessionStart hook would otherwise self-heal a daemon
-// into existence and leave it running on the CI runner.
+// into existence and leave it running on the CI runner. The config files
+// alone don't cover every runner: on macOS the config dir is
+// ~/Library/Application Support/claude-rpc, which neither write below
+// targets — so the env var further down is the guarantee.
 const cfg = JSON.stringify({ autostart: false, community: { enabled: false } });
 writeFileSync(join(sbCfg, 'config.json'), cfg);
 writeFileSync(join(sb, 'appdata', 'claude-rpc', 'config.json'), cfg);
@@ -40,6 +43,9 @@ const env = {
   TMPDIR: sbTmp,
   TEMP: sbTmp,
   TMP: sbTmp,
+  // Per-environment autostart opt-out the SessionStart hook honors on every
+  // OS, whatever config it finds (src/hook.js).
+  CLAUDE_RPC_NO_AUTOSTART: '1',
 };
 
 let failures = 0;

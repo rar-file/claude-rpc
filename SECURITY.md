@@ -19,7 +19,7 @@ fetch-and-execute anywhere in `src/`.
 | Startup persistence | `src/install.js` → `addStartupEntry` (Windows Run key, macOS LaunchAgent, Linux `systemd --user`) + `selfHealOnUpdate` (installs it on update); `src/hook.js` → `ensureDaemonRunning` (SessionStart self-heal) | Per-user login autostart (no admin/root/system service) + a detached daemon (re)launched when you start a Claude Code session | Yes — `claude-rpc uninstall` / `removeStartupEntry`; disable every auto-start path with `autostart:false` (or `CLAUDE_RPC_NO_AUTOSTART=1` in the environment for the SessionStart self-heal) |
 | Hook injection | `src/install.js` → `installHooks` | Only into Claude Code's own `settings.json`, only our own commands | Yes — `uninstallHooks` removes exactly what it added |
 | Outbound network | `src/community.js`, `src/gist.js`, `src/usage.js`, `src/notify.js`, `default-config.js` | Anonymous counters + (opt-in) profile/gist/webhook + own read-only OAuth-usage poll + GIF assets | Telemetry: `community off`. Profile: `profile off`. Gist/webhook: opt-in only. Usage: `usage.enabled:false`. |
-| Local subprocess | `reg.exe`, `wscript`, the daemon itself (`node`/packaged exe — via the Run key and the SessionStart self-heal), `git`, `gh`, `npm`, `claude`, `security`, notifiers | Static or escaped args, no shell interpolation of untrusted input | n/a |
+| Local subprocess | `reg.exe`, `wscript`, the daemon itself (`node`/packaged exe — via the Run key and the SessionStart self-heal) and its short-lived scan worker, `git`, `gh`, `npm`, `claude`, `security`, notifiers | Static or escaped args, no shell interpolation of untrusted input | n/a |
 
 No credential access beyond the read-only Claude Code OAuth-token read for usage
 polling (§3d), no filesystem scanning outside `~/.claude-rpc` and Claude Code
@@ -86,16 +86,33 @@ manage the daemon yourself via `claude-rpc start` / `stop`).
 **Source:** `src/install.js`, `installHooks` / `uninstallHooks`.
 
 `setup` adds command hooks to Claude Code's `settings.json` for nine lifecycle
-events: `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`,
-`Stop`, `SubagentStop`, `Notification`, `SessionEnd`, `PreCompact`. Each entry looks like:
+events — `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`,
+`Stop`, `SubagentStop`, `Notification`, `SessionEnd`, `PreCompact` — plus up to
+three newer ones that are **version-gated**: `PostToolUseFailure` (Claude Code
+2.0.56+), `PostCompact` (2.1.76+) and `StopFailure` (2.1.78+). Claude Code
+rejects the *whole* hooks block (yours included) when it sees an event name it
+doesn't know, so each of the three is wired only once the installed Claude Code
+version — read from the newest transcript (`detectClaudeCodeVersion`) — is known
+to support it, and is removed again if it isn't. Each entry looks like:
 
 ```jsonc
-{ "matcher": "", "hooks": [{ "type": "command", "command": "\"<exe>\" hook PostToolUse" }] }
+{ "matcher": "", "hooks": [{ "type": "command", "command": "\"<exe>\" hook Stop", "_claudeRpc": true }] }
+// the per-tool-call events (PreToolUse, PostToolUse, PostToolUseFailure) also run async:
+{ "matcher": "", "hooks": [{ "type": "command", "command": "\"<exe>\" hook PostToolUse", "async": true, "_claudeRpc": true }] }
 ```
+
+`<exe>` is the packaged binary. npm and from-source installs write
+`"<absolute node>" "<absolute path to src/hook.js>" <Event>` instead, because
+Claude Code's hook shell may have neither `claude-rpc` nor `node` on its `PATH`.
+`"async": true` makes Claude Code run the per-tool-call hooks in the background
+instead of holding up each tool call; the once-per-turn events stay synchronous
+so status changes land in order. `"_claudeRpc": true` is the ownership marker
+described under **Scope** below.
 
 - **Why:** this *is* the integration. Claude Code's hook system is the
   supported, documented way for a tool to observe session lifecycle. The hook
-  reads the event JSON on stdin, updates `~/.claude-rpc/state.json`, and prints
+  reads the event JSON on stdin, updates its session's state file in the temp
+  dir (`<tmp>/claude-rpc/state-<session>.json`, §5), and prints
   `{"continue":true}`. It never blocks, rewrites, or vetoes a tool call — see
   `src/hook.js`, `processHookEvent`.
 - **What the hook reads:** tool name, file path of the active tool, token usage
@@ -107,9 +124,13 @@ events: `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`,
   and `ensureDaemonRunning`. Best-effort, gated by `autostart` (default on). It
   is the **only** hook event that launches a process; every other event just
   writes state and acks.
-- **Scope:** the installer only ever touches entries whose command matches
-  `isOurHookCommand` (contains `claude-rpc` or `hook.js`). It will not modify,
-  reorder, or delete anyone else's hooks.
+- **Scope:** the installer only ever touches hook objects it owns
+  (`isOurHook`): ones carrying its `"_claudeRpc": true` marker or — for entries
+  written before the marker existed — whose command contains `claude-rpc` or
+  the exact absolute path of *this* install's `src/hook.js` (never just any
+  `hook.js`). It rewrites its own objects in place, leaves other hooks in the
+  same matcher group alone, and will not modify, reorder, or delete anyone
+  else's hooks.
 - **Reverse it:** `claude-rpc uninstall` (or `uninstallHooks`) strips exactly
   the entries it added and leaves the rest of `settings.json` intact.
 
@@ -154,8 +175,11 @@ values — only forward deltas since the last accepted report.
   flow `claude-rpc community on`, which prints the payload schema first.
 - **Why on by default:** the live badges in the README aggregate these counters.
   The trade-off is disclosed here, in the README, and at install time.
-- **Auditable:** the Worker persists only two running integers and a 30-day
-  `seen:<instanceId>` dedup marker. The source is in this repo.
+- **Auditable:** for these reports the Worker persists only one
+  `total:counters` value (the two running sums, `{sessions, tokens}`), a
+  30-day `seen:<instanceId>` active-install marker (`{ts, version, osFamily}`,
+  refreshed at most daily), and rate-limit keys that expire within a minute.
+  The source is in this repo.
 
 ### 3b. Gist badge publishing — only on explicit command
 
@@ -258,8 +282,9 @@ language names, 4 model names with share %, and 3 tool names with share %. No
 file paths, no prompts, no per-day breakdowns. Project names respect the
 privacy lists and `privacy.patterns` before they ever appear in the preview;
 anything you see in the confirmation box is everything the server sees. Each
-publish overwrites the previous one; records expire worker-side after ~14
-months unless re-published.
+publish replaces the previous one *from the same machine*: with linked
+machines, each one publishes its own slice and the page shows their merge.
+Records expire worker-side after ~14 months unless re-published.
 
 ### 3d. Subscription usage — your own token, to its issuer, ON by default
 
@@ -337,6 +362,12 @@ untrusted or remote input into a shell:
 - `systemctl --user enable/disable/daemon-reload` — the Linux user service
   (`src/install.js`); args are the fixed unit name.
 - `chcp.com 65001` — set the console to UTF-8 on Windows TTYs (`src/cli.js`).
+- the claude-rpc runtime itself, as a short-lived **scan worker** — the daemon
+  runs each transcript scan in a child process (`"<exe>" scan-worker`, or
+  `"<node>" "<absolute src/scan-worker.js>"`) so the parse memory goes back to
+  the OS when it exits (`src/scan-worker.js`). Fixed args (plus `--force` for a
+  rescan), no shell; it writes `aggregate.json`, prints one JSON summary line,
+  and exits. If it can't run, the daemon scans in-process instead.
 - `git` — read last commit subject / branch for the "just shipped" card
   (`src/git.js`).
 - `gh repo view --json isPrivate` — auto-hide GitHub-private repos from the card
@@ -366,11 +397,41 @@ gist `gh` wrapper on Windows) use only trusted args.
 
 ## 5. What it stores locally
 
-Under `~/.claude-rpc/` (a.k.a. `%APPDATA%\claude-rpc\` on Windows):
-`config.json`, `state.json`, `aggregate.json`, `events.jsonl` (rotated at 5 MB),
-`private-list.json`, `community-cursor.json`. The scanner also reads Claude Code
-transcript files to build aggregates. None of this leaves your machine except
-the minimal telemetry in 3a.
+Three per-user locations (paths are defined in `src/paths.js`):
+
+- **Data dir — `~/.claude-rpc/` on every OS** (`DATA_DIR`): `aggregate.json`
+  (all-time stats), `scan-cache.json` (per-transcript scan cache),
+  `events.jsonl` (Notification / compaction events, rotated to `.1` at 5 MB),
+  `private-list.json` (runtime privacy toggles; `CLAUDE_RPC_PRIVATE_LIST`
+  overrides the path), `version` (the last version that ran the on-update
+  self-heal), `community-cursor.json` (how far the 3a counters have been
+  reported) and `nudge-state.json` (which share-a-milestone nudge was last
+  shown).
+- **Config dir — per OS** (`USER_CONFIG_DIR`): `$XDG_CONFIG_HOME/claude-rpc/`
+  (default `~/.config/claude-rpc/`) on Linux, `~/Library/Application
+  Support/claude-rpc/` on macOS, `%APPDATA%\claude-rpc\` on Windows. Holds
+  `config.json` (a from-source checkout keeps it next to the source instead)
+  and `bin/` — the packaged binary's canonical copy and, on Windows, the
+  windowless `claude-rpc-daemon.vbs` startup shim.
+- **Temp dir — `<tmp>/claude-rpc/`** (`os.tmpdir()`, so a reboot clears it by
+  design): `state-<session>.json` per live Claude Code session (plus a
+  short-lived `.lock`), `state.json` for events that carry no session id,
+  `daemon.pid`, `daemon.log` (rotated at 5 MB), `pause.json`
+  (`claude-rpc pause`) and `usage.json` (the 3d percentage cache).
+
+Beyond these (and any file you name yourself with `--out`), claude-rpc writes
+only what §1 and §2 describe — the login-autostart entry and its own hooks in
+`~/.claude/settings.json` — plus, when `setup` runs from `npx`, the global
+`npm install -g claude-rpc` it promotes itself to (§4), and, if you run
+`mcp install`, the registration `claude mcp add` makes. The scanner reads
+Claude Code's transcript files (`~/.claude/projects/**/*.jsonl`) to build the
+aggregates; it never writes there.
+
+None of these files is uploaded. What leaves your machine is exactly what §3
+lists: the anonymous counters (3a, on by default); the public profile, its
+per-day heatmap series, squads and Wrapped (3c — opt-in); gist badges (3b) and
+the status webhook (3f), only when you set them up; and for the usage poll
+(3d) your own Claude Code OAuth token, sent only to `api.anthropic.com`.
 
 ## 6. Privacy controls
 
@@ -380,8 +441,22 @@ per-project `.claude-rpc.json`, a runtime private-list, config glob patterns, an
 Local dashboards and aggregates are never redacted — privacy is a one-way valve
 from local state to Discord only.
 
+## Supported versions
+
+Security fixes land on the latest release line only.
+
+| Version | Supported |
+| ------- | --------- |
+| 1.5.x   | Yes |
+| < 1.5   | No — upgrade (`npx claude-rpc@latest setup`, `brew upgrade claude-rpc`, or the [latest release](https://github.com/rar-file/claude-rpc/releases/latest)) |
+
+The community worker is a single always-current deployment, so a worker fix
+reaches everyone without an upgrade.
+
 ## Reporting a vulnerability
 
-Open an issue at https://github.com/rar-file/claude-rpc/issues, or for anything
-sensitive email c.archer.simmons@gmail.com. Please include version
-(`claude-rpc --version`), OS, and repro steps.
+Please **don't open a public issue** for a security problem. Report it
+privately through GitHub's private vulnerability reporting:
+https://github.com/rar-file/claude-rpc/security/advisories/new — or, if that
+isn't available to you, email c.archer.simmons@gmail.com. Please include the
+version (`claude-rpc --version`), OS, and repro steps.

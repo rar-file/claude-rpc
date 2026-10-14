@@ -81,7 +81,7 @@ All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachang
 ## [1.3.1] - 2026-07-06
 
 Four presence-liveness fixes adopted from a community fork — thanks
-[@Teksya](https://github.com/Teksya/claude-rpc) for the diagnosis, the
+[@Teksya](https://github.com/Teksya) for the diagnosis, the
 implementation groundwork, and the tests.
 
 **Fixed**
@@ -815,3 +815,76 @@ Polish pass. Install once, never think about it again.
 **Tests**
 
 - 81 → 134 tests. New coverage for `format.humanModel / humanTool / humanProject / fmtNum / fmtDuration / fmtHours / plural`, `languages.languageOf`, `insights.generateInsights`, `scanner.dayKey / weekKey / hourKey`, `state.readState / writeState / updateState / resetState`, `server/api.windowedAggregate / rangeToDays`, `server/page.buildHtml`, and a live route-walker over the dashboard. Every public `src/*.js` export is exercised at least once.
+
+[Unreleased]: https://github.com/rar-file/claude-rpc/compare/v1.5.2...HEAD
+[1.5.2]: https://github.com/rar-file/claude-rpc/compare/v1.5.1...v1.5.2
+[1.5.1]: https://github.com/rar-file/claude-rpc/compare/v1.5.0...v1.5.1
+[1.5.0]: https://github.com/rar-file/claude-rpc/compare/v1.4.3...v1.5.0
+[1.4.3]: https://github.com/rar-file/claude-rpc/compare/v1.4.2...v1.4.3
+[1.4.2]: https://github.com/rar-file/claude-rpc/compare/v1.4.1...v1.4.2
+[1.4.1]: https://github.com/rar-file/claude-rpc/compare/v1.4.0...v1.4.1
+[1.4.0]: https://github.com/rar-file/claude-rpc/compare/v1.3.1...v1.4.0
+[1.3.1]: https://github.com/rar-file/claude-rpc/compare/v1.3.0...v1.3.1
+[1.3.0]: https://github.com/rar-file/claude-rpc/compare/v1.2.1...v1.3.0
+[1.2.1]: https://github.com/rar-file/claude-rpc/compare/v1.2.0...v1.2.1
+[1.2.0]: https://github.com/rar-file/claude-rpc/compare/v1.1.4...v1.2.0
+[1.1.4]: https://github.com/rar-file/claude-rpc/compare/v1.1.3...v1.1.4
+[1.1.3]: https://github.com/rar-file/claude-rpc/compare/v1.1.2...v1.1.3
+[1.1.2]: https://github.com/rar-file/claude-rpc/compare/v1.1.1...v1.1.2
+[1.1.1]: https://github.com/rar-file/claude-rpc/compare/v1.1.0...v1.1.1
+[1.1.0]: https://github.com/rar-file/claude-rpc/compare/v1.0.3...v1.1.0
+[1.0.3]: https://github.com/rar-file/claude-rpc/compare/v1.0.2...v1.0.3
+[1.0.2]: https://github.com/rar-file/claude-rpc/compare/v1.0.1...v1.0.2
+[1.0.1]: https://github.com/rar-file/claude-rpc/compare/v0.24.1...v1.0.1
+[0.24.1]: https://github.com/rar-file/claude-rpc/compare/v0.24.0...v0.24.1
+[0.24.0]: https://github.com/rar-file/claude-rpc/compare/v0.23.0...v0.24.0
+[0.23.0]: https://github.com/rar-file/claude-rpc/compare/v0.22.1...v0.23.0
+[0.22.1]: https://github.com/rar-file/claude-rpc/compare/v0.22.0...v0.22.1
+[0.22.0]: https://github.com/rar-file/claude-rpc/compare/v0.21.0...v0.22.0
+[0.21.0]: https://github.com/rar-file/claude-rpc/compare/v0.20.4...v0.21.0
+[0.20.4]: https://github.com/rar-file/claude-rpc/compare/v0.20.3...v0.20.4
+[0.20.3]: https://github.com/rar-file/claude-rpc/compare/v0.20.2...v0.20.3
+[0.20.2]: https://github.com/rar-file/claude-rpc/compare/v0.20.1...v0.20.2
+[0.20.1]: https://github.com/rar-file/claude-rpc/compare/v0.19.1...v0.20.1
+[0.19.1]: https://github.com/rar-file/claude-rpc/compare/v0.18.0...v0.19.1
+[0.18.0]: https://github.com/rar-file/claude-rpc/compare/v0.17.2...v0.18.0
+[0.17.2]: https://github.com/rar-file/claude-rpc/compare/v0.17.1...v0.17.2
+[0.17.1]: https://github.com/rar-file/claude-rpc/compare/v0.17.0...v0.17.1
+[0.17.0]: https://github.com/rar-file/claude-rpc/compare/v0.16.2...v0.17.0
+[0.16.2]: https://github.com/rar-file/claude-rpc/compare/v0.16.1...v0.16.2
+[0.16.1]: https://github.com/rar-file/claude-rpc/compare/v0.16.0...v0.16.1
+[0.16.0]: https://github.com/rar-file/claude-rpc/compare/v0.15.6...v0.16.0
+[0.15.6]: https://github.com/rar-file/claude-rpc/compare/v0.15.5...v0.15.6
+[0.15.5]: https://github.com/rar-file/claude-rpc/compare/v0.15.4...v0.15.5
+[0.15.4]: https://github.com/rar-file/claude-rpc/compare/v0.15.3...v0.15.4
+[0.15.3]: https://github.com/rar-file/claude-rpc/compare/v0.15.2...v0.15.3
+[0.15.2]: https://github.com/rar-file/claude-rpc/compare/v0.15.1...v0.15.2
+[0.15.1]: https://github.com/rar-file/claude-rpc/compare/v0.15.0...v0.15.1
+[0.15.0]: https://github.com/rar-file/claude-rpc/compare/v0.14.0...v0.15.0
+[0.14.0]: https://github.com/rar-file/claude-rpc/compare/v0.13.7...v0.14.0
+[0.13.7]: https://github.com/rar-file/claude-rpc/compare/v0.13.6...v0.13.7
+[0.13.6]: https://github.com/rar-file/claude-rpc/compare/v0.13.5...v0.13.6
+[0.13.5]: https://github.com/rar-file/claude-rpc/compare/v0.13.4...v0.13.5
+[0.13.4]: https://github.com/rar-file/claude-rpc/compare/v0.13.3...v0.13.4
+[0.13.3]: https://github.com/rar-file/claude-rpc/compare/v0.13.2...v0.13.3
+[0.13.2]: https://github.com/rar-file/claude-rpc/compare/v0.13.1...v0.13.2
+[0.13.1]: https://github.com/rar-file/claude-rpc/compare/v0.12.1...v0.13.1
+[0.12.1]: https://github.com/rar-file/claude-rpc/compare/v0.12.0...v0.12.1
+[0.12.0]: https://github.com/rar-file/claude-rpc/compare/v0.11.2...v0.12.0
+[0.11.2]: https://github.com/rar-file/claude-rpc/compare/v0.11.1...v0.11.2
+[0.11.1]: https://github.com/rar-file/claude-rpc/compare/v0.11.0...v0.11.1
+[0.11.0]: https://github.com/rar-file/claude-rpc/compare/v0.10.0...v0.11.0
+[0.10.0]: https://github.com/rar-file/claude-rpc/compare/v0.9.1...v0.10.0
+[0.9.1]: https://github.com/rar-file/claude-rpc/compare/v0.9.0...v0.9.1
+[0.9.0]: https://github.com/rar-file/claude-rpc/compare/v0.8.1...v0.9.0
+[0.8.1]: https://github.com/rar-file/claude-rpc/compare/v0.8.0...v0.8.1
+[0.8.0]: https://github.com/rar-file/claude-rpc/compare/v0.7.4...v0.8.0
+[0.7.4]: https://github.com/rar-file/claude-rpc/compare/v0.7.3...v0.7.4
+[0.7.3]: https://github.com/rar-file/claude-rpc/compare/v0.7.2...v0.7.3
+[0.7.2]: https://github.com/rar-file/claude-rpc/compare/v0.7.1...v0.7.2
+[0.7.1]: https://github.com/rar-file/claude-rpc/compare/v0.7.0...v0.7.1
+[0.7.0]: https://github.com/rar-file/claude-rpc/compare/v0.6.3...v0.7.0
+[0.6.3]: https://github.com/rar-file/claude-rpc/compare/v0.6.2...v0.6.3
+[0.6.2]: https://github.com/rar-file/claude-rpc/compare/v0.6.1...v0.6.2
+[0.6.1]: https://github.com/rar-file/claude-rpc/compare/v0.6.0...v0.6.1
+[0.6.0]: https://github.com/rar-file/claude-rpc/compare/v0.5.0...v0.6.0

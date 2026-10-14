@@ -4,11 +4,13 @@ compatibility_date = "2026-05-01"
 workers_dev = true
 preview_urls = false
 
-# The KV namespace that holds total:sessions, total:tokens, seen:<id>,
-# and rate:<id>. Create one with:
-#   wrangler kv:namespace create TOTALS
+# The single KV namespace that holds everything the worker stores (community
+# totals, profiles, the leaderboard index, squads, Wrapped, rate-limit
+# markers — the key prefixes are listed at the top of src/index.js). Create
+# one with:
+#   wrangler kv namespace create TOTALS
 # and paste the returned `id` below. For local development add a `preview_id`
-# from `wrangler kv:namespace create TOTALS --preview`.
+# from `wrangler kv namespace create TOTALS --preview`.
 
 [[kv_namespaces]]
 binding = "TOTALS"

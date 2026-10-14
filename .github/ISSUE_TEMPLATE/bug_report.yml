@@ -40,7 +40,7 @@ body:
     attributes:
       label: claude-rpc version
       description: Output of `claude-rpc --version`.
-      placeholder: "0.13.0"
+      placeholder: "1.5.2"
     validations:
       required: true
   - type: dropdown
@@ -57,7 +57,7 @@ body:
     id: node
     attributes:
       label: Node version
-      description: "Output of `node --version`. (N/A if you use the portable Windows exe.)"
+      description: "Output of `node --version`. (N/A if you use the standalone claude-rpc.exe or the desktop app.)"
       placeholder: "v20.x"
   - type: textarea
     id: logs

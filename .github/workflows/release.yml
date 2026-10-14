@@ -9,38 +9,49 @@ on:
       - 'v*'
   workflow_dispatch:
 
+# Read-only by default. The test and build jobs run third-party install
+# scripts (npm ci), so they must not inherit write access or an OIDC token.
+# The two jobs that need more ask for it themselves: `release` gets
+# contents: write to create the GitHub Release, `publish-npm` gets
+# id-token: write for npm provenance.
 permissions:
-  contents: write   # required for the release job to upload assets
-  id-token: write   # required for npm provenance attestation
+  contents: read
 
 jobs:
   test:
     # Single-platform run, but across the full supported Node range (engines
-    # says >=18) so the compatibility claim is actually verified. The codebase
-    # is platform-neutral except for the SEA build step (which the `build` job
-    # covers per-OS), so testing once per Node version on Linux is enough to
-    # gate the build matrix and the publish jobs below.
+    # says >=18, plus the current Active LTS) so the compatibility claim is
+    # actually verified. The codebase is platform-neutral except for the SEA
+    # build step (which the `build` job covers per-OS), so testing once per
+    # Node version on Linux is enough to gate the build matrix and the publish
+    # jobs below.
     name: Test (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        node-version: ['18', '20', '22']
+        node-version: ['18', '20', '22', '24']
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ matrix.node-version }}
+      # Plain `npm ci`, no `|| npm install` fallback: a package.json /
+      # package-lock.json mismatch has to fail here, not get silently
+      # re-resolved into a dependency tree nobody reviewed.
       - name: Install deps
-        run: npm ci || npm install
+        run: npm ci
       - name: Run tests
         run: npm test
       # The Cloudflare Worker is the only public-facing telemetry surface, so
       # its tests must gate releases too. It's a separate package with its own
       # lockfile; run them here rather than leaving them unverified in CI.
+      # (wrangler declares node >=22, so npm prints an EBADENGINE warning on
+      # 18/20 — harmless: the tests import the worker source directly and
+      # never load wrangler or miniflare.)
       - name: Run worker tests
         run: |
-          npm --prefix worker ci || npm --prefix worker install
+          npm --prefix worker ci
           npm --prefix worker test
 
   build:
@@ -50,21 +61,27 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest      # Apple Silicon — produces arm64 .dmg
+          - os: macos-latest      # Apple Silicon — produces arm64 .dmg + .zip
             cli-out: claude-rpc
             artifact-name: claude-rpc-macos-arm64
-            # .yml + .blockmap are the auto-update feed files electron-updater
-            # reads to discover new versions. They MUST land in the release.
+            # latest-mac.yml + the .zip (+ .blockmap) are the auto-update feed
+            # electron-updater reads: MacUpdater can only apply an update from
+            # a .zip listed in latest-mac.yml — the .dmg is for first installs.
+            # They MUST land in the release. Match latest*.yml, not *.yml:
+            # electron-builder also writes builder-debug.yml into dist/, which
+            # is not a feed file and collides between the two OS jobs at
+            # flatten time.
             dist-glob: |
               dashboard/dist/*.dmg
-              dashboard/dist/*.yml
+              dashboard/dist/*.zip
+              dashboard/dist/latest*.yml
               dashboard/dist/*.blockmap
           - os: windows-latest    # x64 Windows — produces NSIS .exe + portable .exe
             cli-out: claude-rpc.exe
             artifact-name: claude-rpc-windows-x64
             dist-glob: |
               dashboard/dist/*.exe
-              dashboard/dist/*.yml
+              dashboard/dist/latest*.yml
               dashboard/dist/*.blockmap
     runs-on: ${{ matrix.os }}
 
@@ -77,7 +94,7 @@ jobs:
 
       # Root deps (esbuild, postject for the SEA build).
       - name: Install root deps
-        run: npm ci || npm install
+        run: npm ci
 
       # Build the SEA CLI binary for THIS runner's platform.
       - name: Build CLI binary
@@ -101,17 +118,24 @@ jobs:
       # Dashboard deps + installer build.
       - name: Install dashboard deps
         working-directory: dashboard
-        run: npm ci || npm install
+        run: npm ci
 
       - name: Build installer (mac)
         if: runner.os == 'macOS'
         working-directory: dashboard
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        # Targets on the command line REPLACE package.json's mac.target, so
+        # list both: dmg for first installs, zip for updates. A dmg-only build
+        # still writes latest-mac.yml, but it lists only the .dmg, which
+        # MacUpdater can't install — auto-update then silently does nothing
+        # (issue #11; v1.5.2 shipped exactly that). test/dashboard-mac-
+        # updater.test.js guards this line.
         # --publish never: electron-builder picks up the github publish config
         # from package.json but we want the release job (not the build job) to
-        # attach files, so explicitly tell it not to publish itself.
-        run: npx electron-builder --mac dmg --publish never
+        # attach files, so explicitly tell it not to publish itself. The feed
+        # files (latest*.yml) are still written to dist/.
+        run: npx electron-builder --mac dmg zip --publish never
 
       # The app must carry a VALID (ad-hoc) signature or Apple Silicon refuses
       # to launch it at all — v1.1.2 and earlier shipped with no bundle
@@ -146,6 +170,8 @@ jobs:
     needs: build
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # create the GitHub Release and upload its assets
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -153,14 +179,16 @@ jobs:
           path: artifacts
 
       - name: Flatten artifact tree
-        # Include update-feed files (latest*.yml, *.blockmap) alongside the
-        # installers so electron-updater can discover new versions.
+        # Include update-feed files (latest*.yml, the mac .zip, *.blockmap)
+        # alongside the installers so electron-updater can discover and apply
+        # new versions.
         run: |
           mkdir -p release
           find artifacts -type f \( \
               -name '*.dmg' \
+              -o -name '*.zip' \
               -o -name '*.exe' \
-              -o -name '*.yml' \
+              -o -name 'latest*.yml' \
               -o -name '*.blockmap' \
               -o -name 'claude-rpc' \
             \) -exec cp {} release/ \;

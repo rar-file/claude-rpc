@@ -21,19 +21,24 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node-version: ['18', '20', '22']
+        node-version: ['18', '20', '22', '24']
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ matrix.node-version }}
+      # Plain `npm ci` everywhere, no `|| npm install` fallback: lockfile
+      # drift has to fail CI, not get silently re-resolved.
       - name: Install deps
-        run: npm ci || npm install
+        run: npm ci
       - name: Run tests
         run: npm test
+      # wrangler declares node >=22, so npm prints an EBADENGINE warning on
+      # 18/20 — harmless: the worker tests import the source directly and
+      # never load wrangler or miniflare.
       - name: Run worker tests
         run: |
-          npm --prefix worker ci || npm --prefix worker install
+          npm --prefix worker ci
           npm --prefix worker test
 
   test-windows:
@@ -52,7 +57,7 @@ jobs:
         with:
           node-version: '20'
       - name: Install deps
-        run: npm ci || npm install
+        run: npm ci
       - name: Run tests
         run: npm test
 
@@ -65,7 +70,7 @@ jobs:
         with:
           node-version: '20'
       - name: Install deps
-        run: npm ci || npm install
+        run: npm ci
       - name: Lint
         run: npm run lint
       - name: Typecheck

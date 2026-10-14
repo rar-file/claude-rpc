@@ -4,6 +4,8 @@ node_modules/
 # Build output
 dist/
 dashboard/dist/
+# prep-dashboard.js stages the (~100MB) CLI binary here for electron-builder
+dashboard/resources/
 *.exe
 
 # Personal config (copy config.example.json → config.json and edit)
