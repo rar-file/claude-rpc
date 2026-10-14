@@ -197,7 +197,7 @@
           <p class="small">detects Node 18+ (installs the npm package) or falls back to the prebuilt Apple-Silicon binary, then runs setup for you. <a href="/install">read install.sh before piping it</a>.</p>
 
           <h3>Windows: no Node required</h3>
-          <p>Download the <code>…-setup.exe</code> from the <a href="https://github.com/rar-file/claude-rpc/releases/latest">latest GitHub release</a> and run it. Since v1.1.2 the desktop app runs the full <code>setup</code> itself on first launch and after every update (hooks, daemon, autostart, all of it) and reports the outcome in its Daemon tab. The exe is unsigned (solo project), so SmartScreen's <em>More info → Run anyway</em> is expected. Prefer no GUI? There's also a portable <code>…-portable.exe</code>: run <code>claude-rpc setup</code> from it once.</p>
+          <p>Download the <code>…-setup.exe</code> from the <a href="https://github.com/rar-file/claude-rpc/releases/latest">latest GitHub release</a> and run it. Since v1.1.2 the desktop app runs the full <code>setup</code> itself on first launch and after every update (hooks, daemon, autostart, all of it) and reports the outcome in its Daemon tab. The exe is unsigned (solo project), so SmartScreen's <em>More info → Run anyway</em> is expected. Prefer no install? <code>…-portable.exe</code> is the same desktop app without the installer. Prefer no GUI? Download the standalone CLI <code>claude-rpc.exe</code> from the same release and run <code>claude-rpc.exe setup</code> once.</p>
 
           <h3>from inside Claude Code: the plugin</h3>
           <div class="code" data-copy="/plugin marketplace add rar-file/claude-rpc
