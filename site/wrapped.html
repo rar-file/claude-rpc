@@ -267,7 +267,7 @@ body.page { overflow: auto; user-select: text; -webkit-user-select: text; }
   const GIF = 'https://cdn.qualit.ly/';
 
   // anim-stagger style helper
-  let _i = 0; const A = () => `style="--i:${_i++}"`;
+  let _i = 0; const A = (extra) => `style="--i:${_i++}${extra ? ';' + extra : ''}"`;
 
   let _shareText = '';   // built in the finale slide, consumed by wireFinale
   let _shareUrl = SITE + '/wrapped';
@@ -329,7 +329,7 @@ body.page { overflow: auto; user-select: text; -webkit-user-select: text; }
       const age = d.hotspot.daysSinceLastEdit == null ? '' : d.hotspot.daysSinceLastEdit === 0 ? ' · still warm today' : ` · last touched ${d.hotspot.daysSinceLastEdit}d ago`;
       S('ink', `
         <div class="kicker anim" ${A()}>always coming back to</div>
-        <div class="big anim" ${A()} style="font-family:'JetBrains Mono',monospace;font-size:clamp(30px,9vw,68px);--i:1">${esc(d.hotspot.name)}</div>
+        <div class="big anim" ${A("font-family:'JetBrains Mono',monospace;font-size:clamp(30px,9vw,68px)")}>${esc(d.hotspot.name)}</div>
         <div class="sub anim" ${A()}>${fmtNum(d.hotspot.count)} edits${age}</div>`);
     }
 
@@ -342,14 +342,17 @@ body.page { overflow: auto; user-select: text; -webkit-user-select: text; }
 
     // 9. model split
     if (d.modelSplit && d.modelSplit.length) {
+      // The rows are built before the slide markup, so stagger slot 0 is
+      // reserved for the kicker that sits above them.
+      const kicker = A();
       const rows = d.modelSplit.filter((mm) => mm.costPct > 0).map((mm) => {
         const pct = Math.round(mm.costPct * 100);
         return `<div class="msrow anim" ${A()}><span class="lbl">${esc(mm.model)}</span><span class="mstrack"><span class="msfill" style="--w:${pct}%"></span></span><span class="pct">${pct}%</span></div>`;
       }).join('');
       S('paper', `
-        <div class="kicker anim" ${A()} style="--i:0">the models, by spend</div>
+        <div class="kicker anim" ${kicker}>the models, by spend</div>
         <div class="msplit">${rows}</div>
-        <div class="sub anim" ${A()} style="opacity:.7">${esc((d.modelSplit[0] || {}).model || '')} did most of the heavy lifting</div>`);
+        <div class="sub anim" ${A()}><span style="opacity:.7">${esc((d.modelSplit[0] || {}).model || '')} did most of the heavy lifting</span></div>`);
     }
 
     // 10. lines
