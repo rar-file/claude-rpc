@@ -4,6 +4,31 @@ All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachang
 
 ## [Unreleased]
 
+**Changed — faster**
+
+- **Every hook is ~10ms faster** (9–17%, about 60–67ms wall per event including Node start-up). The hook no longer loads `fs/promises`, the fs streams, `child_process` or `perf_hooks` it never uses.
+- **Full transcript scans are ~25% faster** and use ~12% less memory; `claude-rpc --version`, `vars` and other light commands start 11–12% faster because each command now loads only the modules it uses.
+- The Discord card is byte-for-byte unchanged (golden-tested across every status, model and rotation frame).
+
+**Fixed**
+
+- **Community totals no longer inflate after a reboot.** The "already reported" cursor lived in the temp dir; a reboot or temp purge reset it and the next flush re-sent the install's whole lifetime. It now lives in `~/.claude-rpc`, is adopted once from the old location, and an install whose old cursor was already wiped reports only new growth. Share nudges also stop re-appearing after a reboot.
+- **Privacy patterns ignore case everywhere**, as documented. A plain pattern whose case differed from the folder name hid it on the card but not from `wrapped --publish` (or the reverse).
+- `claude-rpc private` / `public` now take effect even when the desktop app has a visibility setting for the same folder.
+- **Desktop app:** saving settings no longer deletes the default "Get claude-rpc" button (or freezes other defaults into `config.json`): only fields you changed are written. One instance at a time; Dock click reopens the window on macOS; the header shows the real version; "Open web dashboard" opens one tab.
+- **macOS auto-update feed:** releases now ship the zip that `latest-mac.yml` points the updater at (previously only the `.dmg` was listed). `builder-debug.yml` is no longer uploaded.
+- **Web dashboard** follows per-session state again (the live rail only refreshed on rescans), its Discord preview shows the `byStatus` frames the card actually renders, a second `serve` on a busy port exits with a clear message instead of hanging, and heatmap clicks, "All time" charts and range totals are correct.
+- **VS Code extension** reads per-session state files; real sessions no longer show "Away".
+- **Discord IPC:** a login that timed out no longer leaves an orphaned socket that later knocked the healthy connection offline.
+- `doctor` checks the per-session state files (it passed on a days-old legacy file); EPERM pids count as alive. `wrapped --publish --year` without a value errors instead of publishing "NaN". `config.json` writes are atomic. `recap`/MCP numbers format like everything else (`999999` → `1.00M`, was `1000.0k`).
+- **Site:** `/examples` card images (404 since the clean-URL move), Linux/iOS download buttons, `/install` served as text, consistent fonts and number formatting across pages, `install.sh` swaps the binary in atomically and keeps setup's prompt under `curl | sh`.
+- Plugin bootstrap: a clean no-op on native Windows, and it runs setup when claude-rpc is installed but its hooks were never wired.
+- `npm test` no longer writes into your real `~/.claude-rpc` or temp state.
+
+**Removed**
+
+- Unused site images (735 KB), dead CSS/UI code (the web dashboard's theme toggle had no light theme), and renderer IPC nothing called.
+
 ## [1.5.2] - 2026-10-14
 
 **Added — newer Claude Code**
