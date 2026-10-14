@@ -12,7 +12,8 @@ const { calendarSvg } = await import('../src/calendar.js');
 const { cardSvg } = await import('../src/card.js');
 const { sessionCardSvg } = await import('../src/session-card.js');
 const { postWebhook, desktopNotify, sanitizeLabel } = await import('../src/notify.js');
-const { runDoctor, fixPlan, classifyClientId, ipcStateFromLog, bridgeFromLog, classifyHookCommand } = await import('../src/doctor.js');
+const { runDoctor, fixPlan, classifyClientId, ipcStateFromLog, bridgeFromLog, classifyHookCommand,
+  classifySessionState, STATE_FRESH_MS } = await import('../src/doctor.js');
 
 const fakeAgg = {
   activeMs: 100 * 3_600_000,
@@ -92,6 +93,15 @@ test('calendarSvg / cardSvg / sessionCardSvg delegate and return SVG markup', ()
 
   const sc = sessionCardSvg({ vars: { project: 'claude-rpc', todayHours: '2.5h' } });
   assert.ok(sc.includes('<svg'), 'sessionCardSvg returns svg');
+});
+
+// The cell shows todayCostFmt — the whole day across every session — so it
+// must not read as this session's cost ("Est. cost" did).
+test('sessionCardSvg labels the cost cell as today\'s cost', () => {
+  const sc = sessionCardSvg({ vars: { project: 'p', todayCostFmt: '$4.20' } });
+  assert.match(sc, />COST TODAY</);
+  assert.doesNotMatch(sc, /EST\. COST/);
+  assert.match(sc, /\$4\.20/);
 });
 
 test('SVG wrappers tolerate an empty/absent payload without throwing', () => {
@@ -192,6 +202,30 @@ test('runDoctor: runs the full checklist and returns a 0|1 exit code', () => {
   } finally {
     console.log = realLog;
   }
+});
+
+// checkState used to read only the legacy global state.json (real sessions
+// write state-<sid>.json) and passed "fresh" whatever its age.
+test('classifySessionState: judges the active per-session state by age', () => {
+  const now = 1_000_000_000_000;
+  const none = classifySessionState({ sessionCount: 0, legacyExists: false, active: null, liveTranscripts: false, now });
+  assert.equal(none.status, 'warn');
+
+  const fresh = classifySessionState({ sessionCount: 2, legacyExists: false, active: { status: 'working', lastActivity: now - 60_000 }, liveTranscripts: true, now });
+  assert.equal(fresh.status, 'pass');
+  assert.match(fresh.detail, /2 sessions · status=working · last hook event 1\.0 min ago/);
+
+  const stale = { status: 'working', lastActivity: now - 3 * 86_400_000 };
+  const idle = classifySessionState({ sessionCount: 0, legacyExists: true, active: stale, liveTranscripts: false, now });
+  assert.notEqual(idle.status, 'pass', 'a days-old state is not "fresh"');
+  assert.equal(idle.status, 'info', 'but with no live Claude Code session that is just idle, not a failure');
+
+  const broken = classifySessionState({ sessionCount: 1, legacyExists: false, active: stale, liveTranscripts: true, now });
+  assert.equal(broken.status, 'warn', 'transcript being written but no hook event → hooks not firing');
+  assert.equal(broken.fixKind, 'setup');
+
+  const edge = classifySessionState({ sessionCount: 1, legacyExists: false, active: { status: 'idle', lastActivity: now - STATE_FRESH_MS - 1 }, liveTranscripts: true, now });
+  assert.equal(edge.status, 'warn', 'threshold is exclusive past STATE_FRESH_MS');
 });
 
 test('classifyClientId: unset / placeholder / malformed / ok', () => {

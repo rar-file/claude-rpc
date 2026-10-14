@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 
 const { pickShareNudge, maybeNudge } = await import('../src/nudge.js');
 
@@ -50,6 +51,26 @@ test('maybeNudge: shows once, then dedupes the same milestone', () => {
   assert.match(first || '', /14-day streak/, 'first call shows the nudge');
   const second = maybeNudge(agg, {}, { path });
   assert.equal(second, null, 'same milestone is not shown again');
+});
+
+test('nudge state lives in the persistent data dir; the old tmp file is adopted once', async () => {
+  const { NUDGE_STATE, LEGACY_NUDGE_STATE, readShownKeys } = await import('../src/nudge.js');
+  const { DATA_DIR, STATE_DIR } = await import('../src/paths.js');
+  assert.equal(NUDGE_STATE, join(DATA_DIR, 'nudge-state.json'));
+  assert.equal(LEGACY_NUDGE_STATE, join(STATE_DIR, 'nudge-state.json'));
+
+  const dir = mkdtempSync(join(tmpdir(), 'crpc-nudge-mig-'));
+  try {
+    const path = join(dir, 'data', 'nudge-state.json');
+    const legacy = join(dir, 'tmp', 'nudge-state.json');
+    mkdirSync(join(dir, 'tmp'));
+    writeFileSync(legacy, JSON.stringify({ shown: ['streak:7'] }));
+    assert.deepEqual([...readShownKeys(path, legacy)], ['streak:7'], 'shown keys survive the move');
+    assert.equal(existsSync(legacy), false, 'legacy file moved, not copied');
+    assert.equal(existsSync(path), true);
+    // The 7-day streak was already shown before the upgrade → not re-shown.
+    assert.equal(maybeNudge({ streak: 7, longestStreak: 7 }, {}, { path }), null);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 // ── pickTodayMilestone — the local celebration line in `claude-rpc today` ──

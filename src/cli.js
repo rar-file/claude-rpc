@@ -2,13 +2,14 @@
 // First, before anything probes stdio (ui.js does at load): the dashboard and
 // npm scripts run this file directly, not through bin/claude-rpc.js.
 import './safe-stdio.js';
-import { readFileSync, writeFileSync, existsSync, watchFile, unlinkSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, watchFile, unlinkSync } from 'node:fs';
 import process from 'node:process';
-import { basename, join, dirname } from 'node:path';
-import { DAEMON_SCRIPT, STATE_PATH, LOG_PATH, AGGREGATE_PATH, CONFIG_PATH, IS_PACKAGED, IS_NPX, EXE_PATH } from './paths.js';
+import { basename, join } from 'node:path';
+import { DAEMON_SCRIPT, STATE_PATH, STATE_DIR, LOG_PATH, AGGREGATE_PATH, CONFIG_PATH, IS_PACKAGED, IS_NPX, EXE_PATH } from './paths.js';
 import { VERSION } from './version.js';
 import { c, fail, tailLines, heat, sparkline, fmtDelta, topPercentile, EX_USER_ERROR, EX_BAD_STATE, EX_SYS_ERROR } from './ui.js';
 import * as lb from './leaderboard.js';
+import { writeFileAtomic } from './atomic-rename.js';
 
 // ── Lazy-loaded module graph ─────────────────────────────────────────────────
 // Only the static imports above (all cheap) load up front, so --version,
@@ -19,7 +20,7 @@ import * as lb from './leaderboard.js';
 // (install, tui, insights, nudge, badge, privacy, pause, week, hook,
 // node:crypto, node:readline, node:child_process) are imported inside that
 // command's handler, like doctor.js/card.js/mcp.js always were.
-let readActiveState, loadConfig, hasUserConfig, spawnDaemonDetached, daemonAlive;
+let readActiveState, statePathFor, loadConfig, hasUserConfig, spawnDaemonDetached, daemonAlive;
 let buildVars, fillTemplate, humanProject, humanTool, applyIdle, framePasses, fmtNum, fmtHours;
 let scan, readAggregate, findLiveSessions, dayKey, weekKey;
 let fmtCost;
@@ -35,7 +36,7 @@ async function loadCore() {
     import('./state.js'), import('./config.js'), import('./format.js'),
     import('./scanner.js'), import('./pricing.js'), import('./usage.js'), loadDaemonCtl(),
   ]);
-  ({ readActiveState } = st);
+  ({ readActiveState, statePathFor } = st);
   ({ loadConfig, hasUserConfig } = cfg);
   ({ buildVars, fillTemplate, humanProject, humanTool, applyIdle, framePasses, fmtNum, fmtHours } = fmt);
   ({ scan, readAggregate, findLiveSessions, dayKey, weekKey } = scn);
@@ -54,13 +55,13 @@ function readJson(path, fallback) {
   try { return JSON.parse(readFileSync(path, 'utf8')); } catch { return fallback; }
 }
 
-// Persist a mutated config.json. The config dir doesn't exist until `setup`
-// runs (npm/npx install no install script), so a bare writeFileSync threw an
-// uncaught ENOENT for any config-mutating command run before setup
-// (`profile set`, `community on`, `link`, …). mkdirSync first.
+// Persist a mutated config.json. tmp + rename (like verify.updateUserConfig),
+// so the daemon's config watcher never reads a half-written file. The helper
+// also creates the config dir, which doesn't exist until `setup` runs — a
+// config-mutating command run before setup (`profile set`, `community on`,
+// `link`, …) used to throw an uncaught ENOENT.
 function writeUserConfig(userCfg) {
-  mkdirSync(dirname(CONFIG_PATH), { recursive: true });
-  writeFileSync(CONFIG_PATH, JSON.stringify(userCfg, null, 2) + '\n');
+  writeFileAtomic(CONFIG_PATH, JSON.stringify(userCfg, null, 2) + '\n');
 }
 
 // Validate a flag's value taken with `argv[++i]`. A value that's missing or
@@ -249,7 +250,7 @@ function renderHeatmap(byDay, days = 91) {
   const cursor = new Date(start);
   while (cursor <= today) {
     const k = dayKey(cursor.getTime());
-    cells.push({ key: k, ms: byDay?.[k]?.activeMs || 0, future: cursor > today });
+    cells.push({ key: k, ms: byDay?.[k]?.activeMs || 0 });
     cursor.setDate(cursor.getDate() + 1);
   }
   const cols = Math.ceil(cells.length / 7);
@@ -304,7 +305,7 @@ function renderHeatmap(byDay, days = 91) {
     let line = `  ${c.dim}${dayLabels[row]}${c.reset}  `;
     for (let col = 0; col < cols; col++) {
       const cell = cells[col * 7 + row];
-      if (!cell || cell.future) line += '  ';
+      if (!cell) line += '  '; // past today: the walk stops there
       else line += shade(cell.ms) + ' ';
     }
     lines.push(line);
@@ -420,7 +421,9 @@ async function showStatus() {
     pair('status',  pid ? `${c.green}● running${c.reset}  pid ${pid}` : `${c.red}○ not running${c.reset}`, ''),
     pair('client',  config.clientId || '—'),
     pair('config',  shortPath(CONFIG_PATH), c.gray),
-    pair('state',   shortPath(STATE_PATH), c.gray),
+    // The file behind the session shown below (hooks write one per session),
+    // or the state dir when no session has written one yet.
+    pair('state',   shortPath(state.sessionId ? statePathFor(state.sessionId) : STATE_DIR), c.gray),
     pair('log',     shortPath(LOG_PATH), c.gray),
   ]);
   console.log('');
@@ -1298,11 +1301,13 @@ async function doPrivate() {
 }
 
 async function doPublic() {
-  const { listPrivateCwds, removePrivateCwd } = await import('./privacy.js');
+  const { listPrivateCwds, listVisibility, removePrivateCwd } = await import('./privacy.js');
   const cwd = process.cwd();
-  const before = listPrivateCwds().length;
-  const list = removePrivateCwd(cwd);
-  if (list.length === before) {
+  // Either store may have hidden it: the private list or the dashboard's map.
+  const snapshot = () => JSON.stringify([listPrivateCwds(), listVisibility()]);
+  const before = snapshot();
+  removePrivateCwd(cwd);
+  if (snapshot() === before) {
     console.log(`  ${c.yellow}!${c.reset}  ${c.cyan}${cwd}${c.reset} wasn't in the private list`);
   } else {
     console.log(`  ${c.green}✓${c.reset}  ${c.cyan}${cwd}${c.reset} removed from the private list`);
@@ -1683,13 +1688,17 @@ async function communityOn() {
   }
   const userCfg = readJson(CONFIG_PATH, {});
   const { randomUUID } = await import('node:crypto');
+  const priorId = userCfg.community?.instanceId || community.instanceId;
   const next = {
     ...(userCfg.community || {}),
     enabled: true,
-    instanceId: userCfg.community?.instanceId || community.instanceId || randomUUID(),
+    instanceId: priorId || randomUUID(),
   };
   userCfg.community = next;
   writeUserConfig(userCfg);
+  // A brand-new id has reported nothing: its first flush sends the history.
+  // A re-enable keeps its cursor (see community.ensureCursor).
+  if (!priorId) (await import('./community.js')).markCursorFresh();
   console.log('');
   console.log(`  ${c.green}✓${c.reset} community totals enabled`);
   console.log(`    ${c.dim}id: …${next.instanceId.slice(-8)}${c.reset}`);
@@ -1883,6 +1892,7 @@ async function profileEnable(on) {
     if (!community.instanceId) {
       community.instanceId = (await import('node:crypto')).randomUUID();
       userCfg.community = community;
+      (await import('./community.js')).markCursorFresh();
     }
   }
   userCfg.profile = next;
@@ -2103,8 +2113,11 @@ async function doWrappedPublish(argv) {
   const instanceId = cfg.community?.instanceId;
   if (!instanceId) return fail('no instanceId — run `claude-rpc setup`', { code: EX_BAD_STATE });
 
-  const yearFlag = argv.indexOf('--year');
-  const year = yearFlag !== -1 ? Number(argv[yearFlag + 1]) : new Date().getFullYear();
+  const opts = parseFlags(argv, { year: String(new Date().getFullYear()), yes: false }, { year: ['--year'], yes: ['--yes'] });
+  if (!/^\d{4}$/.test(opts.year)) {
+    return fail(`--year needs a 4-digit year, got \`${opts.year}\``, { hint: 'e.g. --year 2025', code: EX_USER_ERROR });
+  }
+  const year = Number(opts.year);
   const { buildWrappedPayload, publishWrapped } = await import('./community.js');
   const payload = buildWrappedPayload(aggregate, cfg, { instanceId, year });
   const w = payload.wrapped;
@@ -2129,7 +2142,7 @@ async function doWrappedPublish(argv) {
   console.log(`  ${c.dim}full payload: the fields above plus lines/cache%/peaks — nothing else.${c.reset}`);
   console.log(`  ${c.dim}private-listed and pattern-matched project names are already excluded.${c.reset}\n`);
 
-  if (!argv.includes('--yes')) {
+  if (!opts.yes) {
     if (!process.stdout.isTTY) {
       return fail('refusing to publish without confirmation on a non-TTY', {
         hint: 'pass --yes to publish non-interactively', code: EX_USER_ERROR,
@@ -2277,14 +2290,16 @@ function overview() {
 
 function help() {
   const cmds = [
-    ['setup',     'Install Claude Code hooks + Windows startup entry (~/.claude/settings.json)'],
+    ['setup',     'Install Claude Code hooks + login autostart (Run key / LaunchAgent / systemd --user)'],
+    ['install',   'Same as setup'],
     ['setup --link <code>', 'One-liner onboarding: install + verify via a claude-rpc.com code (+ --wrapped publishes your year)'],
-    ['uninstall', 'Remove Claude Code hooks + Windows startup entry'],
+    ['uninstall', 'Remove Claude Code hooks + the login autostart entry'],
     ['upgrade-config', 'Re-run idempotent migrations on an existing config.json'],
     ['start',     'Start the Discord RPC daemon (detached)'],
     ['stop',      'Stop the daemon'],
     ['restart',   'Stop then start the daemon'],
     ['status',    'Interactive stats TUI; --dump (or piped) prints static text'],
+    ['dump',      'Same as status --dump'],
     ['today',     'Focus view: today\'s stats + 24h activity histogram'],
     ['week',      'Focus view: this week, daily breakdown'],
     ['compare',   'This week vs last week — the full side-by-side diff'],
@@ -2293,6 +2308,7 @@ function help() {
     ['usage',     'Subscription limits — session + weekly % (what /usage shows)'],
     ['serve',     'Open a live web dashboard in your browser'],
     ['preview',   'Show how each rotation frame renders right now'],
+    ['vars',      'Print every template variable and its live value (JSON)'],
     ['scan',      'Incrementally scan ~/.claude/projects for all-time totals'],
     ['rescan',    'Force re-parse every transcript (ignores cache)'],
     ['backfill',  'Import transcripts from any folder (e.g. a backup)'],
@@ -2311,7 +2327,9 @@ function help() {
     ['wrapped',   'Open your animated year-in-review (Claude Wrapped)'],
     ['wrapped --publish', 'Put your Wrapped on the web at claude-rpc.com/wrapped/<handle>'],
     ['pause',     'Snooze the Discord card globally (pause [30m|2h], default 1h)'],
+    ['pause status|off', 'Show whether presence is paused / lift a pause early'],
     ['resume',    'Lift a pause early'],
+    ['unpause',   'Same as resume'],
     ['export',    'Dump the aggregate as JSON, or daily rows as CSV (--csv --out)'],
     ['private',   'Mark the current directory as private (hide from Discord)'],
     ['public',    'Un-mark the current directory'],
@@ -2322,6 +2340,7 @@ function help() {
     ['link',      'Link machines into one profile (mints a code; `link <code>` claims it)'],
     ['doctor',    'Run a diagnostic checklist — common-failure triage (--fix to auto-repair)'],
     ['tail',      'Tail the daemon log file'],
+    ['logs',      'Same as tail (also: log)'],
     ['daemon',    'Run daemon in foreground (debug)'],
   ];
   const colW = cmds.reduce((m, [name]) => Math.max(m, name.length), 0);
@@ -2383,9 +2402,10 @@ process.on('unhandledRejection', (e) => {
     case '-h':
     case 'help':      help(); break;
     // `setup` and `install` are aliases as of v0.7: both register hooks AND
-    // the Windows startup entry. Older behavior split them (setup = no
-    // startup, install = with) but in practice users expect one command
-    // to do everything. Non-Windows: addStartupEntry is a no-op + warning.
+    // the login autostart entry (Windows Run key, macOS LaunchAgent, Linux
+    // systemd --user unit). Older behavior split them (setup = no startup,
+    // install = with) but in practice users expect one command to do
+    // everything. Other platforms skip autostart with an info row.
     case 'setup':
     case 'install': {
       // runInstall prints the phased checklist (or a one-line "already set
@@ -2450,8 +2470,7 @@ process.on('unhandledRejection', (e) => {
         const linkCode = linkAt !== -1 ? (args[linkAt + 1] || '').trim() : null;
         if (linkCode) {
           console.log('');
-          await doLink([linkCode]);
-          if (process.exitCode) break; // link failed — its own message + hint already printed
+          await doLink([linkCode]); // a failed link exits via fail() with its own message + hint
           console.log(`  ${c.dim}first scan — counting your history…${c.reset}`);
           doScan(false);
           const { flushProfile } = await import('./community.js');

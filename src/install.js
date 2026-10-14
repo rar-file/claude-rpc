@@ -1,6 +1,8 @@
-// One-shot installer logic invoked by the bundled exe.
-// Seeds %APPDATA%\claude-rpc\config.json, points Claude Code's hooks at the
-// exe, and registers a Windows startup entry so the daemon comes up on login.
+// Installer logic behind `claude-rpc setup` (packaged exe, npm and dev
+// installs alike). Seeds config.json under USER_CONFIG_DIR (or the repo in dev
+// mode), points Claude Code's hooks at this install, and registers a login
+// autostart entry — Windows Run key, macOS LaunchAgent, Linux systemd --user
+// unit — so the daemon comes up on login.
 
 import {
   existsSync, mkdirSync, readFileSync, writeFileSync,
@@ -61,7 +63,8 @@ export const EVENTS = [
 ];
 
 // Wired `"async": true`: Claude Code runs them in the background instead of
-// blocking every tool call on a node cold start (~90ms each, two per call).
+// blocking every tool call on a node cold start (~60–90ms wall per event
+// including Node startup, two per call).
 // Presence never feeds anything back to Claude, so nothing waits on them;
 // hook.js orders late arrivals by process start time. The once-per-turn events
 // stay synchronous so status transitions (prompt → Stop) are always ordered.
@@ -162,11 +165,9 @@ export function installHooks(exePath, { silent = false, ccVersion = detectClaude
   const settings = readJson(CLAUDE_SETTINGS, {});
   const before = JSON.stringify(settings.hooks || {});
   settings.hooks = settings.hooks || {};
-  // Three modes, three shapes:
-  //   packaged → `"<exe>" hook <event>`         (canonical exe, no node)
-  //   npm     → `claude-rpc hook <event>`       (bin shim resolves through PATH;
-  //              survives `npm update` and nvm version switches)
-  //   dev     → `node "<src/hook.js>" <event>`  (cloned-source iteration)
+  // Two shapes:
+  //   packaged  → `"<exe>" hook <event>`                  (canonical exe, no node)
+  //   npm / dev → `"<abs node>" "<abs src/hook.js>" <event>`
   // Hook commands must resolve under Claude Code's hook shell — `/bin/sh` with a
   // minimal PATH that, under nvm, has neither `claude-rpc` nor `node` on it (no
   // system node). So use the ABSOLUTE node (process.execPath) + absolute hook.js
@@ -464,8 +465,10 @@ export function ensureCanonicalExe(currentExe) {
   try {
     // Windows won't let you overwrite a currently-executing file. If
     // canonical is the running daemon, move it aside first — that succeeds
-    // even while the file handle is open, and Windows will delete the
-    // renamed copy when the process exits.
+    // even while the file handle is open. Windows does NOT delete the renamed
+    // copy when the process exits; sweepStaleCanonicalBackups after the copy
+    // removes every `.old-<ts>` that's no longer locked, so a copy still held
+    // by the running daemon goes on the next replacement.
     if (process.platform === 'win32' && existsSync(CANONICAL_EXE)) {
       try { renameSync(CANONICAL_EXE, CANONICAL_EXE + '.old-' + Date.now()); }
       catch { /* not running, no rename needed — copyFileSync below will just overwrite */ }
@@ -523,14 +526,6 @@ export function seedConfig() {
   return true;
 }
 
-// Non-destructive merge of any new top-level keys / presence blocks the
-// shipped DEFAULT_CONFIG has but the user's existing file doesn't.
-//
-// Runs every time install/setup or the packaged default launcher fires,
-// so an upgraded exe pulls in new shape (e.g. v0.3.6's presence.byStatus)
-// without clobbering the user's customizations. Anything the user already
-// has — including a pre-existing byStatus, custom rotation array, custom
-// appName etc. — is left untouched.
 // How Claude Code should invoke the MCP server — same three-mode resolution
 // as the hook commands (packaged exe / npm bin / dev source).
 export function mcpServerCommand(exePath) {
@@ -560,6 +555,14 @@ export function uninstallMcp({ scope = 'user' } = {}) {
   return { ok: r.status === 0 };
 }
 
+// Non-destructive merge of any new top-level keys / presence blocks the
+// shipped DEFAULT_CONFIG has but the user's existing file doesn't.
+//
+// Runs every time install/setup or the packaged default launcher fires,
+// so an upgraded exe pulls in new shape (e.g. v0.3.6's presence.byStatus)
+// without clobbering the user's customizations. Anything the user already
+// has — including a pre-existing byStatus, custom rotation array, custom
+// appName etc. — is left untouched.
 export function migrateConfig({ silent = false } = {}) {
   if (!existsSync(CONFIG_PATH)) return false;
   let cfg;
@@ -738,12 +741,6 @@ function verifyHookPipe(exePath) {
   return { ok: true, detail: 'SessionStart round-trip succeeded' };
 }
 
-// `npx claude-rpc setup` runs from npm's throwaway _npx cache, so the
-// `claude-rpc` bin the hooks resolve through PATH disappears the moment npx
-// exits. Promote to a real global install first, then the rest of setup wires
-// hooks to the now-persistent global bin exactly like a normal npm install.
-// Best-effort + loud: a failed -g (perms, offline) returns false so the caller
-// can stop with the manual command rather than wire a dead hook.
 // Version of the GLOBALLY-installed claude-rpc, read straight off disk via
 // `npm root -g` — NOT through PATH. While setup runs under `npx
 // claude-rpc@latest`, npx prepends its own throwaway cache (the current
@@ -761,6 +758,15 @@ function globalInstalledVersion() {
   } catch { return null; }   // not installed / npm missing / unreadable
 }
 
+// `npx claude-rpc setup` runs from npm's _npx cache, which npm may evict at
+// any time, so first install the same version globally (`npm install -g`).
+// Best-effort + loud: a failed -g (perms, offline) returns false so the caller
+// stops with the manual command. What happens next: the rest of setup still
+// runs in THIS process, so installHooks and addStartupEntry wire the cache
+// copy's absolute HOOK_SCRIPT / DAEMON_SCRIPT paths; only the daemon launch
+// (cli.js `setup`) explicitly runs the global copy. That global daemon's
+// selfHealOnUpdate then re-wires hooks + autostart to the global paths — but
+// only when the version stamp doesn't already match this version.
 function promoteNpxToGlobal() {
   // Already promoted on a previous run AND current? Skip the redundant -g (also
   // lets setup succeed when a correct global exists but `npm -g` would fail —
@@ -845,7 +851,7 @@ export function selfHealOnUpdate({ exePath = null, silent = true } = {}) {
   return { changed: true, from, rewired, autostart };
 }
 
-export async function install({ exePath, withStartup = true } = {}) {
+export async function install({ exePath } = {}) {
   resetRun();
   console.log('');
   console.log(`  ${c.bold}${c.magenta}◆ claude-rpc setup${c.reset}  ${c.dim}v${VERSION}${c.reset}`);
@@ -870,7 +876,9 @@ export async function install({ exePath, withStartup = true } = {}) {
   phase('config');
   // Order matters: seed creates the file if missing, then migrate fills in
   // any blocks new exe versions added (e.g. presence.byStatus from v0.3.6).
-  seedConfig();
+  // A freshly seeded config carries a newly minted instanceId: record that it
+  // has reported nothing yet, so its first community flush sends the history.
+  if (seedConfig()) (await import('./community.js')).markCursorFresh();
   migrateConfig();
 
   phase('claude code');
@@ -891,13 +899,11 @@ export async function install({ exePath, withStartup = true } = {}) {
   // The CLI's setup case launches the daemon right after this returns, so its
   // row lands under this heading; setupOutro() then closes the screen.
   phase('daemon');
-  if (withStartup) {
-    // Cross-platform login autostart: Windows Run-key, macOS LaunchAgent, Linux
-    // systemd --user. Best-effort — a failure leaves the SessionStart self-heal
-    // as the (already reliable) fallback, so setup never fails on this.
-    try { await addStartupEntry(target); }
-    catch (e) { step(SYM_WARN, 'startup entry', `failed: ${e.message} — session self-heal still covers it`, console.warn); }
-  }
+  // Cross-platform login autostart: Windows Run-key, macOS LaunchAgent, Linux
+  // systemd --user. Best-effort — a failure leaves the SessionStart self-heal
+  // as the (already reliable) fallback, so setup never fails on this.
+  try { await addStartupEntry(target); }
+  catch (e) { step(SYM_WARN, 'startup entry', `failed: ${e.message} — session self-heal still covers it`, console.warn); }
   // Nothing changed: the checklist above stayed silent, so say so in one line.
   if (!runDirty && probe.ok) {
     console.log(`  ${SYM_OK}  ${c.bold}already set up${c.reset}  ${c.dim}${noopFacts.join(' · ')}${c.reset}`);

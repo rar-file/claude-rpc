@@ -3,33 +3,48 @@
 // pre-v0.7 config keep the explicit-opt-in flow via `claude-rpc community
 // on`. Reads aggregate.json + a small cursor file to compute counter
 // DELTAs (not absolute values — the cursor moves forward as we report),
-// then POSTs to the configured worker endpoint.
+// then POSTs to the configured worker endpoint. Also builds and sends the
+// opt-in leaderboard profile (/profile) and the one-shot Claude Wrapped
+// (/wrapped) payloads.
 //
 // Three guarantees this module owes the rest of the codebase:
 //
 //   1. Never throws. The daemon calls this from a setInterval and must
 //      not crash on a network burp or a malformed response. All failure
 //      modes resolve to `{ ok: false, reason }` and move on.
-//   2. Never sends anything beyond the documented payload. No file paths,
-//      no prompts, no models, no cwd — the buildPayload function is the
-//      complete schema, and it's audited by the worker's validateReport.
+//   2. Never sends anything beyond the documented payloads. Each build*Payload
+//      function is the complete schema for its endpoint, mirrored by the
+//      worker's validators. The anonymous /report carries only counter
+//      deltas, version and OS family. The opt-in /profile adds the chosen
+//      identity, lifetime totals and a per-day token/active-time series.
+//      /wrapped (sent only by `wrapped --publish`, after showing the user the
+//      payload) adds that year's stats, including privacy-filtered project
+//      names, the model mix, languages and the top file's basename. Never
+//      file paths, prompts or cwd.
 //   3. Never advances the cursor on a failed flush. A 5xx today + a
 //      successful flush tomorrow still reports today's deltas.
 //
 // See worker/src/index.js for the receiving end.
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { readFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { platform } from 'node:os';
-import { AGGREGATE_PATH, STATE_DIR } from './paths.js';
+import { AGGREGATE_PATH, DATA_DIR, STATE_DIR } from './paths.js';
 import { VERSION } from './version.js';
 import { profileIsPublishable } from './leaderboard.js';
 import { projectNameIsPrivate } from './privacy.js';
 import { cleanProjectName, dayKey } from './scanner.js';
 import { HEATMAP_DAYS } from './heatmap.js';
 import { humanModel } from './format.js';
+import { adoptLegacyFile, writeFileAtomic } from './atomic-rename.js';
 
-const CURSOR_PATH = join(STATE_DIR, 'community-cursor.json');
+// How much of this install's lifetime has already been reported. It must
+// survive reboots: the worker adds every delta blindly, so a lost cursor
+// re-sends the whole lifetime and inflates the public counter. Through v1.5.2
+// it lived in os.tmpdir() (LEGACY_CURSOR_PATH), which a reboot or temp purge
+// wipes; ensureCursor / markCursorFresh move it here once.
+export const CURSOR_PATH = join(DATA_DIR, 'community-cursor.json');
+export const LEGACY_CURSOR_PATH = join(STATE_DIR, 'community-cursor.json');
 
 export function readCursor(path = CURSOR_PATH) {
   if (!existsSync(path)) return { sessions: 0, tokens: 0, ts: 0 };
@@ -39,13 +54,51 @@ export function readCursor(path = CURSOR_PATH) {
 
 export function writeCursor(c, path = CURSOR_PATH) {
   try {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, JSON.stringify(c, null, 2));
+    writeFileAtomic(path, JSON.stringify(c, null, 2));
   } catch {
     // Cursor write failure is recoverable — the next flush will resend
     // the same delta, which the worker accepts (we accumulate at the
     // server, not de-dup on payload content).
   }
+}
+
+// A parsed cursor file, or null when it's missing or unreadable.
+function loadCursorFile(path) {
+  try {
+    const c = JSON.parse(readFileSync(path, 'utf8'));
+    return c && typeof c === 'object' ? { sessions: 0, tokens: 0, ts: 0, ...c } : null;
+  } catch { return null; }
+}
+
+// A new identity has reported nothing yet: write an explicit zero cursor so
+// its first flush sends the install's whole history. Called wherever an
+// instanceId is minted (setup's seeded config, `community on`, `profile on`).
+// Leaves an existing cursor alone (adopting a legacy one), so a reused machine
+// only ever reports new growth. Returns true when it wrote the zero cursor.
+export function markCursorFresh({ path = CURSOR_PATH, legacyPath = LEGACY_CURSOR_PATH } = {}) {
+  adoptLegacyFile(path, legacyPath);
+  if (existsSync(path)) return false;
+  writeCursor({ sessions: 0, tokens: 0, ts: 0 }, path);
+  return true;
+}
+
+// The cursor flushCommunity diffs against, in order:
+//   1. the cursor at `path` (the normal case);
+//   2. the legacy tmpdir cursor, moved into `path` (first flush after upgrade);
+//   3. neither (or an unreadable file): seed it from the current aggregate, so
+//      only growth from now on is reported. A missing cursor does NOT mean
+//      "never reported" — a new identity gets an explicit zero cursor from
+//      markCursorFresh — so landing here means an install from before the move
+//      whose tmp cursor was wiped. Re-sending its lifetime would double-count
+//      it on the public counter; seeding at worst skips history it never got
+//      to report, the much smaller error.
+export function ensureCursor(aggregate, { path = CURSOR_PATH, legacyPath = LEGACY_CURSOR_PATH, now = Date.now() } = {}) {
+  adoptLegacyFile(path, legacyPath);
+  const existing = loadCursorFile(path);
+  if (existing) return existing;
+  const seeded = { sessions: aggregate?.sessions || 0, tokens: totalTokens(aggregate), ts: now, seeded: true };
+  writeCursor(seeded, path);
+  return seeded;
 }
 
 export function osFamily() {
@@ -82,13 +135,6 @@ export function buildPayload(aggregate, cursor, { instanceId, now = Date.now() }
   };
 }
 
-// ── leaderboard profile flush ──────────────────────────────────────────
-// Publishes the opt-in public profile (identity + lifetime totals) to the
-// worker's /profile endpoint. Reuses the anonymous community instanceId as the
-// profile's row key. Unlike flushCommunity this is cursor-free and idempotent —
-// it POSTs absolute totals, so the worker SETs (never accumulates) and a resend
-// is a no-op. Same safety guarantees: never throws, sends only documented fields.
-
 function totalTokens(aggregate) {
   return (aggregate?.inputTokens || 0)
     + (aggregate?.outputTokens || 0)
@@ -96,11 +142,13 @@ function totalTokens(aggregate) {
     + (aggregate?.cacheWriteTokens || 0);
 }
 
-// A profile reports ABSOLUTE lifetime totals (not deltas). It's per-user and
-// keyed by the instanceId, so the server just stores the latest value — no
-// cursor, no double-count risk, and the board matches your real aggregate
-// exactly. (Deltas were wrong here: the first publish carried the entire
-// lifetime total, which blew past the per-report caps for any established user.)
+// ── leaderboard profile flush ──────────────────────────────────────────
+// Publishes the opt-in public profile (identity + lifetime totals) to the
+// worker's /profile endpoint. Reuses the anonymous community instanceId as the
+// profile's row key. Unlike flushCommunity this is cursor-free and idempotent —
+// it POSTs absolute totals, so the worker SETs (never accumulates) and a resend
+// is a no-op. Same safety guarantees: never throws, sends only documented fields.
+
 // The last year of per-day tokens + active minutes, for the live heatmap
 // (/heatmap/<h>.svg, /stats/<h>.svg). Keyed by LOCAL date like aggregate.byDay;
 // oldest → newest with leading empty days trimmed. Only day totals — nothing
@@ -123,6 +171,11 @@ export function buildDailySeries(aggregate, now = Date.now(), days = HEATMAP_DAY
   return { end, tokens: tokens.slice(first), activeMin: activeMin.slice(first) };
 }
 
+// A profile reports ABSOLUTE lifetime totals (not deltas). It's per-user and
+// keyed by the instanceId, so the server just stores the latest value — no
+// cursor, no double-count risk, and the board matches your real aggregate
+// exactly. (Deltas were wrong here: the first publish carried the entire
+// lifetime total, which blew past the per-report caps for any established user.)
 export function buildProfilePayload(aggregate, profileCfg, { instanceId, now = Date.now() }) {
   return {
     instanceId,
@@ -328,6 +381,9 @@ export async function flushProfile(cfg, {
 export async function flushCommunity(cfg, {
   aggregatePath = AGGREGATE_PATH,
   cursorPath = CURSOR_PATH,
+  // Only the real cursor migrates from its old tmpdir home; a caller-supplied
+  // path (tests) never touches it.
+  legacyCursorPath = cursorPath === CURSOR_PATH ? LEGACY_CURSOR_PATH : null,
   fetchImpl = globalThis.fetch,
 } = {}) {
   const community = cfg?.community || {};
@@ -340,7 +396,7 @@ export async function flushCommunity(cfg, {
   try { aggregate = JSON.parse(readFileSync(aggregatePath, 'utf8')); }
   catch { return { ok: false, reason: 'unreadable-aggregate' }; }
 
-  const cursor = readCursor(cursorPath);
+  const cursor = ensureCursor(aggregate, { path: cursorPath, legacyPath: legacyCursorPath });
   const payload = buildPayload(aggregate, cursor, { instanceId: community.instanceId });
   if (payload.sessionsDelta === 0 && payload.tokensDelta === 0) {
     return { ok: true, reason: 'no-delta' };

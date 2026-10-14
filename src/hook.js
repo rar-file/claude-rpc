@@ -7,10 +7,8 @@ import { detectLastCommitSubject, detectGitBranch } from './git.js';
 import { EVENTS_LOG_PATH } from './paths.js';
 import { loadConfig } from './config.js';
 import { ensureDaemonRunning } from './ensure-daemon.js';
-// Ship classification lives in ships.js (shared with the scanner); re-exported
-// here so existing importers/tests keep working.
+// Ship classification lives in ships.js (shared with the scanner).
 import { classifyShip } from './ships.js';
-export { classifyShip };
 
 // require()d, not imported: a builtin's ESM facade reads every export, and
 // fs's lazy getters then load fs/promises and the fs streams on every hook
@@ -94,9 +92,10 @@ export function processHookEvent(event, input = {}, now = Date.now()) {
         status: 'idle',
       });
       // Self-heal the daemon. A reboot, crash, OS sleep, or closed terminal can
-      // leave nothing running, so the card silently never appears — and on
-      // macOS/Linux there's no login-autostart entry at all (only Windows wires
-      // a Run key). Every Claude Code session begins with this hook, so make it
+      // leave nothing running, so the card silently never appears — and the
+      // login-autostart entry (Run key / LaunchAgent / systemd --user) can be
+      // missing, unloaded or unsupported (no systemd --user session, other
+      // platforms). Every Claude Code session begins with this hook, so make it
       // (best-effort) guarantee the daemon is up: presence is then assured
       // exactly when you're using Claude, on every platform. ensureDaemonRunning
       // is a no-op when a daemon is already alive and is cooldown-guarded against
@@ -160,10 +159,11 @@ export function processHookEvent(event, input = {}, now = Date.now()) {
       const toolName = input.tool_name || input.toolName || '';
       const toolInput = input.tool_input || input.toolInput || {};
       const file = toolInput.file_path || toolInput.path || toolInput.notebook_path || null;
-      // Just-shipped detection: any Bash command that contains `git push`
-      // or `git commit`. Capture cwd + branch + last commit subject NOW
-      // — by the time the daemon renders the next frame this info may be
-      // gone (Claude often `cd`s after a commit).
+      // Just-shipped detection: a Bash command that pushes, commits, or opens
+      // a PR / issue / release (ships.classifyShip: push|commit|pr|issue|tag).
+      // Capture cwd + branch + last commit subject NOW — by the time the
+      // daemon renders the next frame this info may be gone (Claude often
+      // `cd`s after a commit).
       let shipKind = null;
       let shipSubject = null;
       let shipBranch = null;

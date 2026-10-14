@@ -6,7 +6,6 @@
 // Output is pure SVG — GitHub renders it inline in a README <img>.
 
 import { fmtCost } from './pricing.js';
-import { VERSION } from './version.js';
 import { fmtNum, fmtHours, localDateStamp } from './fmt.js';
 
 const W = 520;

@@ -194,3 +194,101 @@ test('central visibility map: subdirectory inherits a marked parent', async () =
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ── Pattern case-insensitivity ──────────────────────────────────────────
+// Plain (non-glob) patterns used to be compared case-sensitively, and
+// projectNameIsPrivate lowercases the name first — so `patterns: ["ClientX"]`
+// never matched there and `wrapped --publish` sent "ClientX".
+
+test('plain config patterns match case-insensitively, both directions', () => {
+  const cfg = (patterns) => ({ privacy: { patterns, autoDetectGithubPrivate: false } });
+  assert.equal(resolveVisibility('/w/ClientX', cfg(['clientx'])).visibility, 'hidden', 'lower pattern vs mixed-case cwd');
+  assert.equal(resolveVisibility('/w/clientx', cfg(['ClientX'])).visibility, 'hidden', 'mixed-case pattern vs lower cwd');
+  assert.equal(resolveVisibility('/w/clientx', cfg(['CLIENT*'])).visibility, 'hidden', 'globs too');
+  assert.equal(resolveVisibility('/w/clientxy', cfg(['clientx'])).visibility, 'public', 'plain pattern is still an exact match');
+});
+
+test('projectNameIsPrivate: plain and glob patterns ignore case', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rpc-vis-'));
+  process.env.CLAUDE_RPC_PRIVATE_LIST = join(dir, 'private-list.json'); // empty store, not the real one
+  try {
+    const mod = await import('../src/privacy.js?case=' + Date.now());
+    const cfg = (patterns) => ({ privacy: { patterns } });
+    assert.equal(mod.projectNameIsPrivate('ClientX', cfg(['ClientX'])), true, 'same-case plain pattern');
+    assert.equal(mod.projectNameIsPrivate('ClientX', cfg(['clientx'])), true);
+    assert.equal(mod.projectNameIsPrivate('clientx', cfg(['CLIENTX'])), true);
+    assert.equal(mod.projectNameIsPrivate('Client-Acme', cfg(['client-*'])), true);
+    assert.equal(mod.projectNameIsPrivate('other', cfg(['ClientX'])), false);
+  } finally {
+    delete process.env.CLAUDE_RPC_PRIVATE_LIST;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── `claude-rpc private` / `public` vs the dashboard's visibility map ───
+// The map outranks the legacy paths list, so both commands used to be silent
+// no-ops for any cwd the Electron dashboard had an entry for.
+
+test('addPrivateCwd hides a cwd the dashboard map marked public (or name-only, or via a parent)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rpc-vis-'));
+  process.env.CLAUDE_RPC_PRIVATE_LIST = join(dir, 'private-list.json');
+  try {
+    const mod = await import('../src/privacy.js?priv=' + Date.now());
+    const noGh = { privacy: { autoDetectGithubPrivate: false } };
+    const proj = join(dir, 'work', 'proj');
+    mod.setCwdVisibility(proj, 'public');
+    mod.addPrivateCwd(proj);
+    assert.equal(mod.resolveVisibility(proj, noGh).visibility, 'hidden');
+    assert.ok(mod.listPrivateCwds().includes(proj), 'still recorded in the private list');
+
+    const other = join(dir, 'work', 'other');
+    mod.setCwdVisibility(other, 'name-only');
+    mod.addPrivateCwd(other);
+    assert.equal(mod.resolveVisibility(other, noGh).visibility, 'hidden');
+
+    const parent = join(dir, 'mono');
+    mod.setCwdVisibility(parent, 'public');
+    mod.addPrivateCwd(join(parent, 'pkg'));
+    assert.equal(mod.resolveVisibility(join(parent, 'pkg'), noGh).visibility, 'hidden', 'parent public entry no longer wins');
+    assert.equal(mod.resolveVisibility(parent, noGh).visibility, 'public', 'parent itself untouched');
+
+    // No map entry → the map is left alone (legacy list only).
+    const plain = join(dir, 'plain');
+    mod.addPrivateCwd(plain);
+    assert.equal(plain in mod.listVisibility(), false);
+    assert.equal(mod.resolveVisibility(plain, noGh).visibility, 'hidden');
+  } finally {
+    delete process.env.CLAUDE_RPC_PRIVATE_LIST;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('removePrivateCwd un-hides a cwd the dashboard map marked hidden (or via a parent)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rpc-vis-'));
+  process.env.CLAUDE_RPC_PRIVATE_LIST = join(dir, 'private-list.json');
+  try {
+    const mod = await import('../src/privacy.js?pub=' + Date.now());
+    const noGh = { privacy: { autoDetectGithubPrivate: false } };
+    const proj = join(dir, 'work', 'proj');
+    mod.setCwdVisibility(proj, 'hidden');
+    mod.removePrivateCwd(proj);
+    assert.equal(mod.resolveVisibility(proj, noGh).visibility, 'public');
+    assert.equal(proj in mod.listVisibility(), false, 'hiding entry cleared, not flipped');
+
+    const parent = join(dir, 'secret');
+    mod.setCwdVisibility(parent, 'hidden');
+    mod.removePrivateCwd(join(parent, 'oss'));
+    assert.equal(mod.resolveVisibility(join(parent, 'oss'), noGh).visibility, 'public', 'parent hidden entry no longer wins');
+    assert.equal(mod.resolveVisibility(parent, noGh).visibility, 'hidden', 'parent itself untouched');
+
+    // An explicit public entry survives (it also opts out of pattern hiding).
+    const pinned = join(dir, 'client-a');
+    mod.setCwdVisibility(pinned, 'public');
+    mod.removePrivateCwd(pinned);
+    const cfg = { privacy: { patterns: ['client-*'], autoDetectGithubPrivate: false } };
+    assert.equal(mod.resolveVisibility(pinned, cfg).visibility, 'public');
+  } finally {
+    delete process.env.CLAUDE_RPC_PRIVATE_LIST;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -50,8 +50,9 @@ export function normalizeGithubUser(input) {
 }
 
 // The public identity fields a profile contributes to the board. Deliberately
-// tiny — identity only; usage stats are sent as server-validated deltas
-// separately, never trusted as a client-asserted total.
+// tiny — identity only. Usage stats travel next to them in the /profile
+// payload as absolute lifetime totals (community.buildProfilePayload), which
+// the worker clamps to plausibility ceilings — client-asserted, not deltas.
 export function profileFields(profileCfg = {}) {
   return {
     handle: profileCfg.handle || null,

@@ -1,7 +1,9 @@
 // Shared CLI output primitives.
 //
-// Three duplicates of the same ANSI table + symbol set existed in cli.js,
-// doctor.js, and tui.js. This is the one place; everything else imports.
+// The ANSI palette, status symbols and check/fail/hint rows for the line-
+// oriented commands (cli.js, doctor.js, install.js import them). tui.js keeps
+// its own full-screen palette and box primitives (it borrows only `heat`): it
+// only ever runs on a TTY and gates color on NO_COLOR alone.
 //
 // All output goes to stdout/stderr via console.log/console.error. The
 // daemon's file-bound `log()` is a separate concern (no tty, no color)
@@ -153,9 +155,9 @@ export function tailLines(raw, n = 30) {
   return lines.slice(-n);
 }
 
-// Compatibility with doctor.js's existing API. Same `check(label, status,
-// detail, hint)` signature; doctor.js can switch its private copy out for
-// this without behavior change.
+// One checklist row: `check(label, status, detail, hint)`, status one of
+// pass | fail | warn | info. doctor.js wraps it to count results and record
+// fix kinds for `doctor --fix`.
 export function check(label, status, detail = '', hint = '') {
   let sym;
   if (status === 'pass')      sym = SYM_OK;

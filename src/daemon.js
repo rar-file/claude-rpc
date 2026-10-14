@@ -76,19 +76,14 @@ function loadConfigWithLog() {
   return loadConfig({ onError: (msg) => log(msg) });
 }
 
-// Bring an existing config.json up to date with the current defaults before
-// we load it. This is how upgrades reach users who just `npm update` + restart
-// the daemon without re-running `claude-rpc setup` — e.g. the v0.8.1 button-URL
-// move. Idempotent: only writes when something actually changes, so steady-state
-// restarts are a no-op and can't loop the config watcher. Best-effort — a
-// migration failure must never stop the daemon from starting.
 // Self-heal on update — when this daemon is a newer version than the last one
 // that ran, re-wire hooks (their command/path drifts across versions) and
 // migrate config to the current shape, then stamp the version. This is how an
 // `npm update` reaches users who never re-run setup: there is no install script
 // (by design), so the daemon — itself brought up by the SessionStart self-heal —
 // carries the update forward. A since-0.1.0 install converges to the current
-// hooks + config the first time it's used after updating.
+// hooks + config the first time it's used after updating. Runs before the
+// config load below; best-effort — a failure must never stop the daemon.
 try {
   const healed = selfHealOnUpdate({ silent: true });
   if (healed.changed) {
@@ -205,36 +200,31 @@ if (sweepTimer.unref) sweepTimer.unref();
 // clear-vs-push decision and the rendered frame are guaranteed to agree —
 // previously this chain ran twice and only buildActivity applied the trigger
 // overlay, so the two could diverge.
-function resolvePresence(opts = {}) {
+function resolvePresence() {
   let state;
-  if (opts.state) {
-    state = opts.state; // standalone caller (preview/api) passes an explicit state
+  // Multi-session: each session writes its own state-<id>.json. Pick which one
+  // to show, sticking with the current session while it's active so the card
+  // doesn't thrash between projects (which also stabilizes the elapsed timer
+  // and the GitHub button — both follow the displayed session). Fall back to
+  // the legacy global state.json when there are no per-session files.
+  const sessions = listSessionStates();
+  if (sessions.length) {
+    const idleMs = Math.max(30_000, (config.idleThresholdSec || 60) * 1000);
+    const picked = pickActiveSession(sessions, displayedSessionId, Date.now(), idleMs);
+    displayedSessionId = picked.sessionId;
+    state = picked.state || readState();
+    // Party count from the SAME per-session list we selected from, so the
+    // "N sessions" field stays consistent with the card instead of wobbling
+    // on transcript-mtime timing.
+    state._liveCount = picked.liveCount;
   } else {
-    // Multi-session: each session writes its own state-<id>.json. Pick which one
-    // to show, sticking with the current session while it's active so the card
-    // doesn't thrash between projects (which also stabilizes the elapsed timer
-    // and the GitHub button — both follow the displayed session). Fall back to
-    // the legacy global state.json when there are no per-session files.
-    const sessions = listSessionStates();
-    if (sessions.length) {
-      const idleMs = Math.max(30_000, (config.idleThresholdSec || 60) * 1000);
-      const picked = pickActiveSession(sessions, displayedSessionId, Date.now(), idleMs);
-      displayedSessionId = picked.sessionId;
-      state = picked.state || readState();
-      // Party count from the SAME per-session list we selected from, so the
-      // "N sessions" field stays consistent with the card instead of wobbling
-      // on transcript-mtime timing.
-      state._liveCount = picked.liveCount;
-    } else {
-      state = readState();
-    }
+    state = readState();
   }
   // Attach live sessions BEFORE applyIdle so the stale/idle decision can
   // see ongoing transcript activity, not just this daemon's hook state.
-  state.liveSessions = opts.liveSessions || liveSessions;
-  // Same injection pattern for OS-level process liveness — standalone callers
-  // (preview/api) that pass an explicit state simply leave it undefined and
-  // get the historical transcript-only behavior.
+  state.liveSessions = liveSessions;
+  // Same for OS-level process liveness (claude-proc poll), unless the state
+  // already carries a verdict.
   if (state.claudeProcessAlive === undefined) state.claudeProcessAlive = claudeProcAlive;
   state = applyIdle(state, config);
   // Shipped overlay sits on top of idle/working/thinking — but never over
@@ -297,15 +287,13 @@ function resolvePresence(opts = {}) {
   return state;
 }
 
-function buildActivity(opts = {}) {
-  // opts.resolved is an already-resolved state (the common path, from
-  // pushPresence). Fall back to resolving here for any standalone caller.
-  const state = opts.resolved || resolvePresence(opts);
-
+// Render the Discord activity for a state resolvePresence() already resolved
+// (pushPresence's single resolution per tick).
+function buildActivity(state) {
   // Subscription usage rides in like liveSessions: injected onto state so
   // buildVars stays pure. Stale/missing cache → null → usage frames vanish.
   state.usage = readUsageCache();
-  const vars = buildVars(state, config, opts.aggregate || aggregate);
+  const vars = buildVars(state, config, aggregate);
   const p = config.presence || {};
 
   // Pick the active set of frames + any status-level largeImageText override.
@@ -470,7 +458,7 @@ function pushPresence() {
       return;
     }
 
-    const activity = buildActivity({ resolved });
+    const activity = buildActivity(resolved);
     transmit('set', activity, `Presence updated: ${activity.details || '-'} | ${activity.state || '-'}`);
   } catch (e) {
     log('pushPresence failed:', e.message);
@@ -617,9 +605,19 @@ async function connect() {
   // both hold, so the watchdog's "down, nothing pending" branch would spawn a
   // second connect() that overwrites `client` and orphans this socket. Block it.
   connecting = true;
-  client = new Client({ clientId: config.clientId, transport: { type: 'ipc' } });
+  // Retire the previous client before replacing it. Left alive, a socket it
+  // still held (e.g. from a login that timed out) would close later and its
+  // 'disconnected' would mark the NEW, healthy client down and reconnect.
+  if (client) {
+    client.removeAllListeners();
+    try { client.destroy(); } catch { /* already gone */ }
+  }
+  const self = new Client({ clientId: config.clientId, transport: { type: 'ipc' } });
+  client = self;
 
-  client.on('ready', () => {
+  // Every handler ignores events from a client that has since been replaced.
+  self.on('ready', () => {
+    if (client !== self) return;
     connected = true;
     // Reset backoff so the next outage also starts at RECONNECT_BASE_MS.
     reconnectDelayMs = RECONNECT_BASE_MS;
@@ -635,15 +633,16 @@ async function connect() {
     resetTransmit();
     pushPresence();
   });
-  client.on('disconnected', () => {
+  self.on('disconnected', () => {
+    if (client !== self) return;
     connected = false;
     scheduleReconnect('Discord disconnected');
   });
-  try { await client.login(); }
+  try { await self.login(); }
   catch (e) {
-    scheduleReconnect(`Discord login failed: ${e.message}`);
+    if (client === self) scheduleReconnect(`Discord login failed: ${e.message}`);
   } finally {
-    connecting = false;
+    if (client === self) connecting = false;
   }
 }
 

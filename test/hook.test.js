@@ -2,29 +2,35 @@
 // These tests pin the state transitions that matter — especially the
 // claudeClosed flag which underpins the v0.3.5 close-detection rework.
 //
-// processHookEvent mutates the real state.json on disk. To keep tests
-// hermetic we redirect STATE_DIR / STATE_PATH via env before importing.
+// processHookEvent mutates real files on disk: the state files under
+// os.tmpdir() and ~/.claude-rpc/events.jsonl (PreCompact / Notification append
+// to it). To keep tests hermetic we point TMPDIR *and* HOME at a temp dir
+// before importing — paths.js resolves both at import time.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 const TMP = mkdtempSync(join(tmpdir(), 'rpc-hook-'));
 process.env.TMPDIR = TMP;
+// Without these, every `npm test` appended synthetic events to the
+// developer's real ~/.claude-rpc/events.jsonl. (node --test runs each test
+// file in its own process, so this doesn't leak into other files.)
+process.env.HOME = TMP;
+process.env.USERPROFILE = TMP;
+process.env.XDG_CONFIG_HOME = join(TMP, '.config');
 // SessionStart would otherwise autostart a REAL daemon that outlives the test.
 process.env.CLAUDE_RPC_NO_AUTOSTART = '1';
-// macOS uses $TMPDIR. tmpdir() on linux falls back to /tmp regardless of env,
-// so we ALSO need to swap STATE_PATH directly. paths.js reads at import time
-// — so we have to override before importing state/hook modules.
 
-// Re-export-stage trick: prepend a synthetic module that overrides paths.
-// Simplest reliable approach: just exercise the pure switch logic by calling
-// processHookEvent and asserting via readState (both touch the same shared
-// state file). Tests run serially within this file, so we reset between.
+// Tests drive processHookEvent and assert via readState (both touch the same
+// sandboxed state files). Tests run serially within this file, so we reset
+// between.
 
-const { processHookEvent, classifyShip } = await import('../src/hook.js');
+const { processHookEvent } = await import('../src/hook.js');
+const { classifyShip } = await import('../src/ships.js');
+const { EVENTS_LOG_PATH } = await import('../src/paths.js');
 const { readState, listSessionStates, statePathFor } = await import('../src/state.js');
 const { pickActiveSession } = await import('../src/presence.js');
 const { STATE_PATH } = await import('../src/paths.js');
@@ -191,6 +197,12 @@ test('PreCompact sets status=compacting with start timestamp + trigger', () => {
   assert.equal(s.compactTrigger, 'auto');
   assert.equal(s.currentTool, null, 'compaction wipes active tool');
   assert.equal(s.currentFile, null);
+});
+
+test('hook events log into the sandboxed HOME, never the real ~/.claude-rpc', () => {
+  assert.ok(EVENTS_LOG_PATH.startsWith(TMP), `events log resolved inside the test sandbox: ${EVENTS_LOG_PATH}`);
+  processHookEvent('PreCompact', { trigger: 'auto' });
+  assert.ok(existsSync(EVENTS_LOG_PATH), 'the precompact event landed in the sandbox log');
 });
 
 test('PreCompact falls back to matcher field when trigger missing', () => {

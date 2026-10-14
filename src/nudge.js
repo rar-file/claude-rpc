@@ -12,9 +12,13 @@
 
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { STATE_DIR } from './paths.js';
+import { DATA_DIR, STATE_DIR } from './paths.js';
+import { adoptLegacyFile } from './atomic-rename.js';
 
-const NUDGE_STATE = join(STATE_DIR, 'nudge-state.json');
+// Persistent, so a reboot doesn't re-show every nudge. Through v1.5.2 it lived
+// in os.tmpdir(); readShownKeys moves that file here once.
+export const NUDGE_STATE = join(DATA_DIR, 'nudge-state.json');
+export const LEGACY_NUDGE_STATE = join(STATE_DIR, 'nudge-state.json');
 
 // Largest milestone in `list` that `value` has reached, or null.
 function reached(value, list) {
@@ -93,7 +97,8 @@ export function pickTodayMilestone(agg, todayTokens = 0) {
 
 // Set of every nudge key already shown. Older state files stored a single
 // `key`; fold it in so upgrading doesn't re-show the last nudge.
-function readShownKeys(path = NUDGE_STATE) {
+export function readShownKeys(path = NUDGE_STATE, legacyPath = path === NUDGE_STATE ? LEGACY_NUDGE_STATE : null) {
+  adoptLegacyFile(path, legacyPath);
   try {
     const raw = JSON.parse(readFileSync(path, 'utf8'));
     const keys = Array.isArray(raw.shown) ? raw.shown : [];

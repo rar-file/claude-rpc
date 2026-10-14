@@ -40,6 +40,8 @@ function tape(x, y, text) {
 export function renderSessionCard(vars = {}, { generatedAt = new Date() } = {}) {
   const v = vars || {};
   const C = [40, 210, 380];
+  // The day's estimated spend across ALL sessions — there's no per-session cost
+  // var — so the cell is labeled as today's, not this session's.
   const cost = v.todayCostFmt || '$0';
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Claude Code session recap">
   <defs><pattern id="dg" width="22" height="22" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="${PALETTE.ink}" opacity="0.06"/></pattern></defs>
@@ -58,7 +60,7 @@ export function renderSessionCard(vars = {}, { generatedAt = new Date() } = {}) 
   ${statCell(C[2], 120, 'Tokens', String(v.tokensFmt || '0'), PALETTE.rust)}
 
   ${statCell(C[0], 184, 'Files edited', String(v.filesEdited ?? 0), PALETTE.grass)}
-  ${statCell(C[1], 184, 'Est. cost', String(cost), PALETTE.blurple)}
+  ${statCell(C[1], 184, 'Cost today', String(cost), PALETTE.blurple)}
   ${statCell(C[2], 184, 'Reads', String(v.filesRead ?? 0))}
 
   <text x="40" y="${H - 16}" font-family="JetBrains Mono, ui-monospace, monospace" font-size="10" fill="${PALETTE.inkFaint}">${escapeXml(`${v.currentFilePretty ? 'last: ' + v.currentFilePretty + ' · ' : ''}claude-rpc.com · v${VERSION}`)}</text>

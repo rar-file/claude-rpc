@@ -5,12 +5,12 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 const { buildPayload, osFamily, readCursor, writeCursor, flushCommunity,
-  buildProfilePayload, flushProfile } =
+  buildProfilePayload, flushProfile, ensureCursor, markCursorFresh, CURSOR_PATH, LEGACY_CURSOR_PATH } =
   await import('../src/community.js');
 
 const VALID_ID = '12345678-1234-4abc-abcd-1234567890ab';
@@ -86,6 +86,108 @@ test('writeCursor → readCursor: round-trips', () => {
     writeCursor({ sessions: 3, tokens: 100, ts: 42 }, cursorPath);
     assert.deepEqual(readCursor(cursorPath), { sessions: 3, tokens: 100, ts: 42 });
   } finally { cleanup(); }
+});
+
+// ── cursor home + migration (ensureCursor / markCursorFresh) ───────────
+// The cursor used to live in os.tmpdir(); a reboot wiped it and the next
+// flush re-sent the install's whole lifetime, which the worker adds blindly.
+
+test('cursor lives in the persistent data dir, not os.tmpdir()', async () => {
+  const { DATA_DIR, STATE_DIR } = await import('../src/paths.js');
+  assert.equal(CURSOR_PATH, join(DATA_DIR, 'community-cursor.json'));
+  assert.equal(LEGACY_CURSOR_PATH, join(STATE_DIR, 'community-cursor.json'));
+});
+
+test('ensureCursor: adopts the legacy tmp cursor once and removes it', () => {
+  const { dir, cleanup } = makeTempPaths();
+  try {
+    const path = join(dir, 'data', 'cursor.json');
+    const legacyPath = join(dir, 'tmp', 'cursor.json');
+    writeCursor({ sessions: 7, tokens: 900, ts: 5 }, legacyPath);
+    const cur = ensureCursor({ sessions: 10, inputTokens: 1000 }, { path, legacyPath });
+    assert.deepEqual(cur, { sessions: 7, tokens: 900, ts: 5 }, 'legacy cursor carried over verbatim');
+    assert.deepEqual(readCursor(path), { sessions: 7, tokens: 900, ts: 5 });
+    assert.equal(existsSync(legacyPath), false, 'legacy file removed after adoption');
+  } finally { cleanup(); }
+});
+
+test('ensureCursor: an existing cursor wins over a stale legacy one', () => {
+  const { dir, cleanup } = makeTempPaths();
+  try {
+    const path = join(dir, 'data', 'cursor.json');
+    const legacyPath = join(dir, 'tmp', 'cursor.json');
+    writeCursor({ sessions: 9, tokens: 990, ts: 9 }, path);
+    writeCursor({ sessions: 1, tokens: 1, ts: 1 }, legacyPath);
+    assert.equal(ensureCursor({ sessions: 10 }, { path, legacyPath }).sessions, 9);
+  } finally { cleanup(); }
+});
+
+test('ensureCursor: no cursor anywhere → seeded from the aggregate (no lifetime re-send)', () => {
+  const { dir, cleanup } = makeTempPaths();
+  try {
+    const path = join(dir, 'data', 'cursor.json');
+    const agg = { sessions: 40, inputTokens: 1000, outputTokens: 200, cacheReadTokens: 30, cacheWriteTokens: 4 };
+    const cur = ensureCursor(agg, { path, legacyPath: join(dir, 'tmp', 'none.json'), now: 123 });
+    assert.equal(cur.sessions, 40);
+    assert.equal(cur.tokens, 1234);
+    assert.equal(cur.seeded, true);
+    assert.equal(readCursor(path).sessions, 40, 'seed persisted');
+    const p = buildPayload(agg, cur, { instanceId: VALID_ID });
+    assert.equal(p.sessionsDelta, 0);
+    assert.equal(p.tokensDelta, 0);
+  } finally { cleanup(); }
+});
+
+test('ensureCursor: an unreadable cursor file is re-seeded, not treated as zero', () => {
+  const { dir, cleanup } = makeTempPaths();
+  try {
+    const path = join(dir, 'cursor.json');
+    writeFileSync(path, '{not json');
+    assert.equal(ensureCursor({ sessions: 12 }, { path, legacyPath: null }).sessions, 12);
+  } finally { cleanup(); }
+});
+
+test('markCursorFresh: a new identity gets a zero cursor → first flush reports the history', async () => {
+  const paths = makeTempPaths();
+  try {
+    const legacyPath = join(paths.dir, 'tmp', 'none.json');
+    assert.equal(markCursorFresh({ path: paths.cursorPath, legacyPath }), true);
+    assert.deepEqual(readCursor(paths.cursorPath), { sessions: 0, tokens: 0, ts: 0 });
+    writeFileSync(paths.aggregatePath, JSON.stringify({ sessions: 25, inputTokens: 5000 }));
+    const calls = [];
+    const r = await flushCommunity(
+      { community: { enabled: true, instanceId: VALID_ID, endpoint: 'https://w' } },
+      { aggregatePath: paths.aggregatePath, cursorPath: paths.cursorPath, fetchImpl: fakeFetch({}, calls) },
+    );
+    assert.deepEqual(r.delta, { sessions: 25, tokens: 5000 });
+  } finally { paths.cleanup(); }
+});
+
+test('markCursorFresh: keeps (or adopts) an existing cursor instead of zeroing it', () => {
+  const { dir, cleanup } = makeTempPaths();
+  try {
+    const path = join(dir, 'data', 'cursor.json');
+    const legacyPath = join(dir, 'tmp', 'cursor.json');
+    writeCursor({ sessions: 3, tokens: 30, ts: 3 }, legacyPath);
+    assert.equal(markCursorFresh({ path, legacyPath }), false);
+    assert.equal(readCursor(path).sessions, 3, 'legacy cursor adopted, not replaced by zeros');
+    assert.equal(markCursorFresh({ path, legacyPath }), false, 'idempotent');
+    assert.equal(readCursor(path).sessions, 3);
+  } finally { cleanup(); }
+});
+
+test('flushCommunity: a missing cursor never re-sends the lifetime as a delta', async () => {
+  const paths = makeTempPaths();
+  try {
+    writeFileSync(paths.aggregatePath, JSON.stringify({ sessions: 500, inputTokens: 1_000_000 }));
+    const calls = [];
+    const r = await flushCommunity(
+      { community: { enabled: true, instanceId: VALID_ID, endpoint: 'https://w' } },
+      { aggregatePath: paths.aggregatePath, cursorPath: paths.cursorPath, fetchImpl: fakeFetch({}, calls) },
+    );
+    assert.equal(r.reason, 'no-delta');
+    assert.equal(calls.length, 0, 'nothing POSTed');
+  } finally { paths.cleanup(); }
 });
 
 // ── flushCommunity branches ────────────────────────────────────────────

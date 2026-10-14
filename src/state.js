@@ -36,12 +36,13 @@ const DEFAULT_STATE = {
   // from this when the working tool has been running long enough to be
   // worth surfacing (>5s by default — quick reads don't flicker on the card).
   toolStartedAt: null,
-  // Set by PostToolUse when a `git push` or `git commit` is observed.
+  // Set by PostToolUse when a ship is observed (a git push / commit, or a
+  // `gh pr|issue|release create` — see ships.classifyShip).
   // format.applyShipped promotes status to 'shipped' for shippedFrameSec
   // (default 60s) after this timestamp, so the card briefly celebrates
   // a ship instead of immediately returning to "Working in <project>".
   justShipped: null,
-  justShippedKind: null,     // 'push' | 'commit'
+  justShippedKind: null,     // 'push' | 'commit' | 'pr' | 'issue' | 'tag'
   justShippedSubject: null,
   justShippedBranch: null,
   model: 'claude',

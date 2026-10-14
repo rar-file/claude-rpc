@@ -1,7 +1,7 @@
-// Shared Monday-anchored current-week grid. cli.js (showWeek) and tui.js
-// (tabWeek) render it with different ANSI widths but compute the same seven
-// days, future/today flags, and peak — extracted here so the date math can't
-// drift between the two and is unit-testable against a fixed clock.
+// Monday-anchored current-week grid behind `claude-rpc week` (cli.js
+// showWeek): the seven days, future/today flags, and peak — kept in its own
+// module so the date math is unit-testable against a fixed clock. (The TUI's
+// week tab shows a rolling last-7-days window instead; see tui.js last7Days.)
 
 import { dayKey } from './scanner.js';
 

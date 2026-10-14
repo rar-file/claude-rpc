@@ -9,10 +9,9 @@
 // Consent is now recorded locally as `profile.verifyPending`, and the daemon
 // finishes the same flow the user already agreed to once the server answers.
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { readFileSync, existsSync } from 'node:fs';
 import { CONFIG_PATH } from './paths.js';
-import { renameSyncRetry } from './atomic-rename.js';
+import { writeFileAtomic } from './atomic-rename.js';
 import { normalizeGithubUser, profileIsPublishable } from './leaderboard.js';
 
 const FETCH_TIMEOUT_MS = 10_000;
@@ -154,10 +153,7 @@ export function updateUserConfig(mutate, { path = CONFIG_PATH } = {}) {
   }
   if (!cfg || typeof cfg !== 'object') return false;
   if (mutate(cfg) === false) return false;
-  mkdirSync(dirname(path), { recursive: true });
-  const tmp = `${path}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify(cfg, null, 2) + '\n');
-  renameSyncRetry(tmp, path);
+  writeFileAtomic(path, JSON.stringify(cfg, null, 2) + '\n');
   return true;
 }
 

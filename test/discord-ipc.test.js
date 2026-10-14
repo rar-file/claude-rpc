@@ -298,6 +298,40 @@ test('server close after ready emits disconnected', async (t) => {
   await disconnected; // resolves only if 'disconnected' fired
 });
 
+// A peer that accepts the socket but never sends READY. login() used to reject
+// with ETIMEDOUT yet leave the socket open; when the peer later closed it, the
+// abandoned client emitted 'disconnected', and the daemon (which had already
+// replaced it) marked its healthy new client down and reconnected.
+test('a READY timeout tears the socket down — no late disconnected from the dead login', async (t) => {
+  const fake = await startFakeDiscord(t); // never answers the handshake
+  const client = new Client({ clientId: 'c', transport: { pathList: [fake.sockPath] }, readyTimeoutMs: 150 });
+  t.after(() => client.destroy());
+  let disconnected = 0;
+  client.on('disconnected', () => disconnected++);
+
+  await assert.rejects(() => client.login(), (e) => e.code === 'ETIMEDOUT');
+  assert.equal(client.socket, null, 'socket released on failed login');
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(fake.getConn().destroyed, true, 'server sees the connection closed');
+
+  fake.getConn().destroy(); // the peer goes away later (e.g. Discord quits)
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(disconnected, 0, 'a dead login never reports a disconnect');
+});
+
+test('a client can log in again after a READY timeout', async (t) => {
+  let answer = false;
+  const fake = await startFakeDiscord(t, {
+    onHandshake: (socket) => { if (answer) sendReady(socket, { username: 'second-try' }); },
+  });
+  const client = new Client({ clientId: 'c', transport: { pathList: [fake.sockPath] }, readyTimeoutMs: 150 });
+  t.after(() => client.destroy());
+  await assert.rejects(() => client.login());
+  answer = true;
+  await client.login();
+  assert.equal(client.user.username, 'second-try');
+});
+
 test('in-flight setActivity rejects if the connection drops', async (t) => {
   const fake = await startFakeDiscord(t, {
     onHandshake: (socket) => sendReady(socket, { username: 'u' }),

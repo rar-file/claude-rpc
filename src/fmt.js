@@ -1,11 +1,13 @@
 // Canonical number/duration formatters shared across the card, badge, profile,
-// insights and the live presence engine (format.js re-exports these). Single
-// source of truth so tier-boundary rounding behaves identically everywhere —
-// the copies had drifted (sub-1000 rounding, a missing Billion tier).
+// insights, recap, the MCP tools and the live presence engine (format.js
+// re-exports these), so tier-boundary rounding behaves identically everywhere —
+// the copies had drifted (sub-1000 rounding, a missing Billion tier, 999_999
+// printing "1000.0k").
 //
-// NOTE: worker/src/badge.js keeps a byte-for-byte copy of fmtNum — the worker
-// deploys dependency-free and can't import across the package boundary. Keep
-// the two in sync; test/format.test.js pins fmtNum's tier behavior.
+// NOTE: worker/src/badge.js still keeps byte-for-byte copies of fmtNum and
+// fmtHours. It could import this file the way worker/src/index.js already
+// imports src/heatmap.js (this one has no imports either); until it does, keep
+// them in sync — test/format.test.js pins fmtNum's tier behavior.
 
 // Compact integer: 999 → "999", 1_500 → "1.5k", 1_500_000 → "1.50M", up to "T".
 // The unit is chosen from the ROUNDED value, so 999_999 → "1.00M" (not the old

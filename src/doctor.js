@@ -15,6 +15,8 @@ import {
   CLAUDE_HOME, CLAUDE_PROJECTS, CLAUDE_SETTINGS,
 } from './paths.js';
 import { findLiveSessions } from './scanner.js';
+import { listSessionStates, readActiveState } from './state.js';
+import { isAlive } from './ensure-daemon.js';
 import { detectGithubUrl } from './git.js';
 import { resolveVisibility, listPrivateCwds, detectGithubPrivate } from './privacy.js';
 import { readClaudeCredentials, readUsageCache } from './usage.js';
@@ -274,10 +276,6 @@ function checkCanonicalExe() {
   }
 }
 
-function isAlive(pid) {
-  try { process.kill(pid, 0); return true; } catch { return false; }
-}
-
 function checkDaemon() {
   if (!existsSync(PID_PATH)) {
     check('daemon running', 'warn', 'no pid file',
@@ -344,23 +342,47 @@ function checkDaemonLog() {
   }
 }
 
+// Hook-written session state. Real sessions write per-session
+// state-<sid>.json files (the global state.json only backs hook payloads
+// without a session id), so judge the session the card would show. An old
+// last hook event is only a problem while Claude Code is visibly active —
+// that's hooks not firing; otherwise it's just an idle machine.
+export const STATE_FRESH_MS = 5 * 60_000;
+
+export function classifySessionState({ sessionCount, legacyExists, active, liveTranscripts, now = Date.now() }) {
+  if (!sessionCount && !legacyExists) {
+    return { label: 'session state', status: 'warn', detail: 'none yet', hint: 'created by the first hook event of a Claude Code session' };
+  }
+  const ageMs = active?.lastActivity ? now - active.lastActivity : Infinity;
+  const ageLabel = ageMs === Infinity ? 'never' : `${(ageMs / 60_000).toFixed(1)} min ago`;
+  const files = sessionCount ? `${sessionCount} session${sessionCount === 1 ? '' : 's'}` : 'legacy state.json only';
+  const detail = `${files} · status=${active?.status} · last hook event ${ageLabel}`;
+  if (ageMs <= STATE_FRESH_MS) return { label: 'session state fresh', status: 'pass', detail };
+  if (liveTranscripts) {
+    return {
+      label: 'session state fresh', status: 'warn', detail,
+      hint: 'claude code is writing a transcript but no hook has updated the state — run `claude-rpc setup` to re-wire the hooks',
+      fixKind: 'setup',
+    };
+  }
+  return { label: 'session state', status: 'info', detail: `${detail} · no session active` };
+}
+
 function checkState() {
-  if (!existsSync(STATE_PATH)) {
-    check('state.json', 'warn', 'not present', 'created by the first hook event');
-    return;
+  try {
+    const sessions = listSessionStates();
+    let liveTranscripts = false;
+    try { liveTranscripts = findLiveSessions({ thresholdMs: 90_000 }).length > 0; } catch { /* unknown → treat as idle */ }
+    const r = classifySessionState({
+      sessionCount: sessions.length,
+      legacyExists: existsSync(STATE_PATH),
+      active: readActiveState(),
+      liveTranscripts,
+    });
+    check(r.label, r.status, r.detail, r.hint, r.fixKind);
+  } catch (e) {
+    check('session state', 'warn', `lookup failed: ${e.message}`);
   }
-  let state;
-  try { state = JSON.parse(readFileSync(STATE_PATH, 'utf8')); }
-  catch (e) {
-    check('state.json', 'fail', `parse error: ${e.message}`,
-      `delete ${STATE_PATH} and let the next hook event recreate it`);
-    return;
-  }
-  const ageMin = state.lastActivity
-    ? (Date.now() - state.lastActivity) / 60_000
-    : Infinity;
-  const ageLabel = ageMin === Infinity ? 'never' : `${ageMin.toFixed(1)} min ago`;
-  check('state.json fresh', 'pass', `status=${state.status} · last activity ${ageLabel}`);
 }
 
 function checkAggregate() {

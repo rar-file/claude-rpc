@@ -9,7 +9,9 @@
 import { createRequire } from 'node:module';
 
 // require()d, not imported — on the hook hot path; see hook.js.
-const { renameSync } = createRequire(import.meta.url)('node:fs');
+const require = createRequire(import.meta.url);
+const { renameSync, writeFileSync, mkdirSync, existsSync, copyFileSync, unlinkSync } = require('node:fs');
+const { dirname } = require('node:path');
 
 const RETRY_CODES = new Set(['EPERM', 'EBUSY', 'EACCES']);
 const MAX_ATTEMPTS = 5;
@@ -47,4 +49,41 @@ export function renameSyncRetry(src, dest, {
     }
   }
   throw lastErr;
+}
+
+// Write `data` to `path` via a sibling tmp file + rename, so a reader (the
+// daemon's config watcher, a concurrent CLI) never sees a half-written file.
+// Creates the parent dir. Throws on failure, after removing the tmp file.
+export function writeFileAtomic(path, data) {
+  mkdirSync(dirname(path), { recursive: true });
+  const tmp = `${path}.${process.pid}.tmp`;
+  try {
+    writeFileSync(tmp, data);
+    renameSyncRetry(tmp, path);
+  } catch (e) {
+    try { unlinkSync(tmp); } catch { /* never created / already renamed */ }
+    throw e;
+  }
+}
+
+// One-time move of a file from an old location to its new home: does nothing
+// when `dest` already exists or there's nothing at `legacy`. rename() first;
+// tmpdir is often a different filesystem (tmpfs), so EXDEV falls back to
+// copy + unlink. Returns true when it adopted the legacy file. Never throws.
+// `rename` is injectable so the EXDEV fallback is testable.
+export function adoptLegacyFile(dest, legacy, { rename = renameSync } = {}) {
+  try {
+    if (!legacy || existsSync(dest) || !existsSync(legacy)) return false;
+    mkdirSync(dirname(dest), { recursive: true });
+    try {
+      rename(legacy, dest);
+    } catch (e) {
+      if (e.code !== 'EXDEV') throw e;
+      copyFileSync(legacy, dest);
+      try { unlinkSync(legacy); } catch { /* copied; a stale legacy file is harmless */ }
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }

@@ -12,6 +12,7 @@
 //   week        — the last 7 local days, ending today
 //   YYYY-MM-DD  — one explicit local day
 import { dayKeyAt } from './scanner.js';
+import { fmtNum as fmtN } from './fmt.js';
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const SHIP_LABELS = [
@@ -22,20 +23,13 @@ const SHIP_LABELS = [
   ['tag', 'release', 'releases'],
 ];
 
+// Not fmt.fmtHours: a recap keeps one decimal past 10h ("23.4h" for a week)
+// and prints an empty day as "0m".
 function fmtDur(ms) {
   const m = Math.round((ms || 0) / 60_000);
   if (m < 1) return '0m';
   if (m < 60) return `${m}m`;
   return `${(m / 60).toFixed(1)}h`;
-}
-
-function fmtN(n) {
-  if (!n) return '0';
-  if (n < 1000) return String(Math.round(n));
-  if (n < 1e6) return `${(n / 1e3).toFixed(1)}k`;
-  if (n < 1e9) return `${(n / 1e6).toFixed(2)}M`;
-  if (n < 1e12) return `${(n / 1e9).toFixed(2)}B`;
-  return `${(n / 1e12).toFixed(2)}T`;
 }
 
 // "Tue 2026-07-01" — manual weekday names so output is locale-stable.

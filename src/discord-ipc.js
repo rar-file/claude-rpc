@@ -177,6 +177,8 @@ export class Client extends EventEmitter {
     // pathList override is used by tests to point at a fake server; production
     // leaves it undefined and we discover the real Discord socket.
     this._pathList = options.transport?.pathList;
+    // Likewise test-only: how long login() waits for READY.
+    this._readyTimeoutMs = options.readyTimeoutMs ?? CONNECT_TIMEOUT_MS;
     this.socket = null;
     this.user = null;
     this._pending = new Map(); // nonce → { resolve, reject }
@@ -243,7 +245,7 @@ export class Client extends EventEmitter {
         const err = new Error('Connection timed out');
         err.code = 'ETIMEDOUT';
         reject(err);
-      }, CONNECT_TIMEOUT_MS);
+      }, this._readyTimeoutMs);
       if (typeof timer === 'object' && 'unref' in timer) timer.unref();
       this._readyResolve = () => {
         clearTimeout(timer);
@@ -261,7 +263,18 @@ export class Client extends EventEmitter {
 
     this._send(OP_HANDSHAKE, { v: 1, client_id: this.clientId });
 
-    await ready;
+    try {
+      await ready;
+    } catch (e) {
+      // A failed login must not leave its socket behind. After a READY timeout
+      // it used to stay open, and when the peer closed it later this client
+      // emitted 'disconnected' — which the daemon read as its (by then
+      // replaced, healthy) connection dropping, and reconnected again.
+      this._readyResolve = this._readyReject = null;
+      this._teardownSocket();
+      this._connected = false;
+      throw e;
+    }
     // No OAuth scopes are ever requested, so READY === ready, same as the lib.
     this.emit('ready');
   }

@@ -17,6 +17,14 @@ import { tmpdir } from 'node:os';
 // the pure helpers (pushUnique, shortFile) and round-trip with the actual
 // state file isolated to this test.
 
+// …except the round-trip tests below DO go through the IO wrappers, and with
+// the real os.tmpdir() they rewrote the developer's live state.json (the one
+// a running daemon reads). paths.js resolves os.tmpdir() at import time, so
+// point it at a temp dir before the first import of src/.
+const TMP = mkdtempSync(join(tmpdir(), 'rpc-state-'));
+process.env.TMPDIR = process.env.TMP = process.env.TEMP = TMP;
+test.after?.(() => { try { rmSync(TMP, { recursive: true, force: true }); } catch { /* best-effort */ } });
+
 const { pushUnique, shortFile } = await import('../src/state.js');
 
 test('pushUnique adds to front and dedupes', () => {
@@ -62,6 +70,11 @@ test('shortFile returns basename', () => {
 // no other test would catch it.
 
 const { readState, writeState, updateState, resetState, readActiveState, statePathFor } = await import('../src/state.js');
+
+test('state files resolve inside this file\'s temp dir, not the live one', async () => {
+  const { STATE_PATH } = await import('../src/paths.js');
+  assert.ok(STATE_PATH.startsWith(TMP), STATE_PATH);
+});
 
 test('writeState + readState round-trip preserves shape', () => {
   const before = readState();

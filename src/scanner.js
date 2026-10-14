@@ -592,10 +592,10 @@ function listTranscripts(projectsDir) {
   return results;
 }
 
-// Walk multiple project roots in one pass. Used by scan() to support
-// `additionalProjectsDirs` config + the `claude-rpc backfill <path>` command
-// for ad-hoc imports. Deduplicates by absolute path so overlapping roots
-// don't double-count.
+// Walk multiple project roots in one pass. Used by scan() for its
+// projectsDirs / extraDirs options — the latter is how `claude-rpc backfill
+// <path>` adds an ad-hoc import root. Deduplicates by absolute path so
+// overlapping roots don't double-count.
 function listAllTranscripts(dirs) {
   const all = new Set();
   for (const d of dirs) {

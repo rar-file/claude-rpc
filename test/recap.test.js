@@ -116,6 +116,18 @@ test('recapTitle: labels ranges the way humans say them', () => {
   assert.equal(recapTitle(buildRecap(AGG, 'week', NOW)), 'last 7 days (2026-06-26 → 2026-07-02)');
 });
 
+// recap.js and mcp.js each had their own fmtN that picked the unit before
+// rounding: 999_999 printed "1000.0k". Both now use fmt.js fmtNum.
+test('recap + mcp: counts at a tier boundary roll over to the next unit', () => {
+  const edge = { byDay: { '2026-07-01': day({ activeMs: 60_000, inputTokens: 999_999, sessions: 1 }) } };
+  const md = renderRecapMarkdown(buildRecap(edge, '2026-07-01', NOW));
+  assert.match(md, /Tokens:\*\* 1\.00M/);
+  assert.doesNotMatch(md, /1000\.0k/);
+  const life = callTool('get_lifetime_stats', () => ({ sessions: 999_999, userMessages: 999_999_999 }), {});
+  assert.match(life, /Sessions:\s+1\.00M/);
+  assert.match(life, /Prompts:\s+1\.00B/);
+});
+
 // ── MCP tool ──────────────────────────────────────────────────────────
 
 test('mcp get_recap: threads the range argument and defaults to yesterday', () => {

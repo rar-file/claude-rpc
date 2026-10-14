@@ -10,16 +10,10 @@
 import { readAggregate, dayKey } from './scanner.js';
 import { buildRecap, renderRecapMarkdown } from './recap.js';
 import { VERSION } from './version.js';
+import { fmtNum as fmtN } from './fmt.js';
 
+// Not fmt.fmtHours: this keeps one decimal past 10h ("123.4h" lifetime totals).
 function fmtH(ms) { const h = (ms || 0) / 3_600_000; return h < 1 ? `${Math.round(h * 60)}m` : `${h.toFixed(1)}h`; }
-function fmtN(n) {
-  if (!n) return '0';
-  if (n < 1000) return String(Math.round(n));
-  if (n < 1e6) return `${(n / 1e3).toFixed(1)}k`;
-  if (n < 1e9) return `${(n / 1e6).toFixed(2)}M`;
-  if (n < 1e12) return `${(n / 1e9).toFixed(2)}B`;
-  return `${(n / 1e12).toFixed(2)}T`;
-}
 
 // ── Tool handlers — pure(aggregate) → string. Exported for tests. ──────────
 export const TOOLS = {

@@ -16,7 +16,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { cpSync, mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -33,7 +33,13 @@ function sandbox() {
 function runCli(dir, args, { input } = {}) {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [join(dir, 'src', 'cli.js'), ...args], {
-      env: { ...process.env, HOME: dir, XDG_CONFIG_HOME: dir, NO_COLOR: '1' },
+      // TMPDIR too: the state dir (and legacy file locations some commands
+      // migrate from) live under os.tmpdir(), never the developer's real one.
+      env: {
+        ...process.env, HOME: dir, USERPROFILE: dir, XDG_CONFIG_HOME: dir,
+        TMPDIR: join(dir, 'tmp'), TMP: join(dir, 'tmp'), TEMP: join(dir, 'tmp'),
+        CLAUDE_RPC_NO_AUTOSTART: '1', NO_COLOR: '1',
+      },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     let out = '', err = '';
@@ -74,6 +80,84 @@ test('cli: a second config write merges, not clobbers (config dir already exists
   const cfg = JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8'));
   assert.equal(cfg.profile.displayName, 'First', 'prior field survived the second write');
   assert.equal(cfg.profile.handle, 'second-handle');
+});
+
+test('cli: config writes are atomic (tmp + rename) — no partial or leftover tmp file', async (t) => {
+  const dir = sandbox();
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const { code } = await runCli(dir, ['profile', 'set', '--name', 'Atomic']);
+  assert.equal(code, 0);
+  assert.equal(JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8')).profile.displayName, 'Atomic');
+  assert.deepEqual(readdirSync(dir).filter((f) => f.startsWith('config.json')), ['config.json'], 'no config.json.<pid>.tmp left behind');
+});
+
+test('cli: `community on` with a freshly minted id records a zero cursor (first flush sends history)', async (t) => {
+  const dir = sandbox();
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  writeFileSync(join(dir, 'config.json'), JSON.stringify({ community: { enabled: false } }));
+  const { code, out, err } = await runCli(dir, ['community', 'on'], { input: 'y\n' });
+  assert.equal(code, 0, out + err);
+  const cfg = JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8'));
+  assert.equal(cfg.community.enabled, true);
+  assert.match(cfg.community.instanceId, /^[0-9a-f-]{36}$/);
+  const cursor = JSON.parse(readFileSync(join(dir, '.claude-rpc', 'community-cursor.json'), 'utf8'));
+  assert.deepEqual(cursor, { sessions: 0, tokens: 0, ts: 0 });
+});
+
+test('cli: `community on` re-enabling a kept id leaves the cursor alone', async (t) => {
+  const dir = sandbox();
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  writeFileSync(join(dir, 'config.json'), JSON.stringify({ community: { enabled: false, instanceId: '12345678-1234-4abc-abcd-1234567890ab' } }));
+  const { code } = await runCli(dir, ['community', 'on'], { input: 'y\n' });
+  assert.equal(code, 0);
+  assert.equal(existsSync(join(dir, '.claude-rpc', 'community-cursor.json')), false,
+    'no zero cursor: this id may already have reported (the flush seeds or adopts instead)');
+});
+
+test('cli: `wrapped --publish --year` validates the value; `--year=N` works', async (t) => {
+  const dir = sandbox();
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  writeFileSync(join(dir, 'config.json'), JSON.stringify({
+    profile: { handle: 'tester', enabled: true },
+    community: { enabled: false, instanceId: '12345678-1234-4abc-abcd-1234567890ab', endpoint: 'http://127.0.0.1:9' },
+  }));
+  mkdirSync(join(dir, '.claude-rpc'), { recursive: true });
+  writeFileSync(join(dir, '.claude-rpc', 'aggregate.json'), JSON.stringify({ sessions: 1, byDay: { '2025-03-01': { activeMs: 3_600_000 } } }));
+
+  // No value: used to print "Claude Wrapped NaN" and carry on.
+  const bare = await runCli(dir, ['wrapped', '--publish', '--year']);
+  assert.equal(bare.code, 1);
+  assert.match(bare.err, /--year needs a value/);
+  assert.doesNotMatch(bare.out, /NaN/);
+
+  const flagNext = await runCli(dir, ['wrapped', '--publish', '--year', '--yes']);
+  assert.equal(flagNext.code, 1, 'a flag is not a year — and must not publish');
+  assert.match(flagNext.err, /--year needs a value/);
+
+  const junk = await runCli(dir, ['wrapped', '--publish', '--year', 'abc']);
+  assert.equal(junk.code, 1);
+  assert.match(junk.err, /4-digit year/);
+
+  // `--year=2025` used to be ignored (published the current year). Non-TTY
+  // without --yes stops at the confirmation, after the preview header.
+  const eq = await runCli(dir, ['wrapped', '--publish', '--year=2025']);
+  assert.match(eq.out, /Claude Wrapped 2025/);
+  assert.match(eq.err, /refusing to publish without confirmation/);
+  const spaced = await runCli(dir, ['wrapped', '--publish', '--year', '2025']);
+  assert.match(spaced.out, /Claude Wrapped 2025/);
+});
+
+test('cli: help lists every user-facing command, including aliases', async (t) => {
+  const dir = sandbox();
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const { code, out } = await runCli(dir, ['help']);
+  assert.equal(code, 0);
+  const names = out.split('\n').map((l) => l.trim().split(/\s{2,}/)[0]);
+  for (const name of ['setup', 'install', 'status', 'dump', 'vars', 'pause', 'pause status|off', 'resume', 'unpause', 'tail', 'logs']) {
+    assert.ok(names.includes(name), `help lists \`${name}\``);
+  }
+  assert.doesNotMatch(out, /Windows startup entry/, 'autostart is cross-platform now');
+  assert.match(out, /LaunchAgent/);
 });
 
 test('cli: projects/project/compare run clean with no aggregate (v1.2)', async (t) => {

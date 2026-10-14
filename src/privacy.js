@@ -99,13 +99,20 @@ function readPrivateList() {
 }
 
 function writePrivateList(list) {
-  if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
+  // The list's own dir (not DATA_DIR), so a CLAUDE_RPC_PRIVATE_LIST override
+  // doesn't also create ~/.claude-rpc.
+  mkdirSync(dirname(PRIVATE_LIST_PATH), { recursive: true });
   writeFileSync(PRIVATE_LIST_PATH, JSON.stringify(list, null, 2));
 }
 
+// `claude-rpc private`. The GUI-managed visibility map below outranks this
+// list, so a map entry for the cwd (or a parent) saying public / name-only
+// would make the command a silent no-op: pin the cwd hidden in the map too.
 export function addPrivateCwd(cwd) {
-  const list = readPrivateList();
   const abs = resolvePath(cwd);
+  const mapped = visibilityForCwd(abs);
+  if (mapped && mapped !== 'hidden') setCwdVisibility(abs, 'hidden');
+  const list = readPrivateList();
   if (!list.paths.includes(abs)) {
     list.paths.push(abs);
     writePrivateList(list);
@@ -113,9 +120,16 @@ export function addPrivateCwd(cwd) {
   return list.paths;
 }
 
+// `claude-rpc public`. Same precedence in reverse: drop the cwd's own hiding
+// map entry, and if a parent's entry would still hide it, mark it public.
+// An explicit 'public' entry is kept — it also opts out of pattern/gh hiding.
 export function removePrivateCwd(cwd) {
-  const list = readPrivateList();
   const abs = resolvePath(cwd);
+  const own = listVisibility()[abs];
+  if (own && own !== 'public') setCwdVisibility(abs, null);
+  const inherited = visibilityForCwd(abs);
+  if (inherited && inherited !== 'public') setCwdVisibility(abs, 'public');
+  const list = readPrivateList();
   list.paths = list.paths.filter((p) => p !== abs);
   writePrivateList(list);
   return list.paths;
@@ -279,11 +293,12 @@ export function projectNameIsPrivate(name, config = {}, clean = (s) => s) {
   return false;
 }
 
-// Glob-lite. '*' matches any run; otherwise plain text. Case-insensitive.
+// Glob-lite. '*' matches any run; otherwise plain text. Case-insensitive on
+// both sides, for plain and glob patterns alike ("ClientX" ≡ "clientx").
 function matchesPattern(name, pattern) {
-  if (pattern === name) return true;
-  if (!pattern.includes('*')) return false;
-  const re = new RegExp('^' + pattern.split('*').map(escapeRe).join('.*') + '$', 'i');
+  const p = String(pattern);
+  if (!p.includes('*')) return p.toLowerCase() === String(name).toLowerCase();
+  const re = new RegExp('^' + p.split('*').map(escapeRe).join('.*') + '$', 'i');
   return re.test(name);
 }
 function escapeRe(s) { return s.replace(/[.+?^${}()|[\]\\]/g, '\\$&'); }

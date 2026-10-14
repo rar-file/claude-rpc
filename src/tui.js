@@ -7,12 +7,11 @@
 // previewable without a live TTY; startTui() owns the IO/loop.
 
 import process from 'node:process';
-import { readFileSync, existsSync } from 'node:fs';
 import { readActiveState } from './state.js';
 import { readAggregate, findLiveSessions, dayKey } from './scanner.js';
 import { buildVars, applyIdle, humanProject, fmtNum } from './format.js';
 import { loadConfig } from './config.js';
-import { PID_PATH } from './paths.js';
+import { daemonAlive } from './ensure-daemon.js';
 import { fmtCost } from './pricing.js';
 import { heat } from './ui.js';
 
@@ -175,16 +174,8 @@ export function loadSnapshot() {
   state = applyIdle(state, config);
   const aggregate = readAggregate() || {};
   const vars = buildVars(state, config, aggregate);
-  return { state, config, aggregate, vars, pid: daemonPid() };
-}
-
-function daemonPid() {
-  if (!existsSync(PID_PATH)) return null;
-  try {
-    const pid = Number(readFileSync(PID_PATH, 'utf8'));
-    process.kill(pid, 0);
-    return pid;
-  } catch { return null; }
+  // daemonAlive treats EPERM as alive (the pid exists, we just can't signal it).
+  return { state, config, aggregate, vars, pid: daemonAlive() || null };
 }
 
 const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
