@@ -1,90 +1,51 @@
 #!/usr/bin/env node
-import { spawn, spawnSync } from 'node:child_process';
+// First, before anything probes stdio (ui.js does at load): the dashboard and
+// npm scripts run this file directly, not through bin/claude-rpc.js.
+import './safe-stdio.js';
 import { readFileSync, writeFileSync, existsSync, watchFile, unlinkSync, mkdirSync } from 'node:fs';
 import process from 'node:process';
-
-// Force the console code page to UTF-8 (65001) on Windows so Unicode box
-// drawing, block elements, and other chars render correctly. Default cmd.exe
-// code page on Win10 is 437/850, which displays many of our chars as `?`.
-// Hook events (no TTY) skip this — they don't print anything user-visible.
-if (process.platform === 'win32' && process.stdout.isTTY) {
-  try { spawnSync('chcp.com', ['65001'], { stdio: 'ignore', windowsHide: true }); } catch { /* chcp absent (Wine, custom shell) — accept whatever code page is set */ }
-}
+import { basename, join, dirname } from 'node:path';
 import { DAEMON_SCRIPT, STATE_PATH, LOG_PATH, AGGREGATE_PATH, CONFIG_PATH, IS_PACKAGED, IS_NPX, EXE_PATH } from './paths.js';
-import { readActiveState } from './state.js';
-import { runHookCli } from './hook.js';
-import { parseDuration, setPause, clearPause, pauseUntil } from './pause.js';
-import { loadConfig, hasUserConfig } from './config.js';
-import { spawnDaemonDetached, daemonAlive } from './ensure-daemon.js';
+import { VERSION } from './version.js';
+import { c, fail, tailLines, heat, sparkline, fmtDelta, topPercentile, EX_USER_ERROR, EX_BAD_STATE, EX_SYS_ERROR } from './ui.js';
+import * as lb from './leaderboard.js';
 
-// ── Lazy-loaded heavy module graph ───────────────────────────────────────────
-// format→scanner→pricing→languages→git→usage (plus install/tui/insights/nudge/
-// badge/privacy/leaderboard) is ~60ms of module-load that the fast-exit commands
-// (--version, --help, start, stop, restart) never touch. We declare the bindings
-// here and fill them via loadStats() only for commands that actually fan out into
-// the stats/format/install code, so daemon-control and version stay near-instant.
-// (The repo already lazy-imports cold deps like doctor.js/card.js/mcp.js inside
-// their handlers — this just extends that to the graph the main switch needs.)
+// ── Lazy-loaded module graph ─────────────────────────────────────────────────
+// Only the static imports above (all cheap) load up front, so --version,
+// --help, hook, mcp, daemon, serve, tail and pause never pay for subsystems
+// they don't touch. Every other command awaits loadCore() once before dispatch:
+// state/config/daemon-control plus the format→scanner→pricing→usage stats
+// chain the shared helpers below draw on. Modules only one command needs
+// (install, tui, insights, nudge, badge, privacy, pause, week, hook,
+// node:crypto, node:readline, node:child_process) are imported inside that
+// command's handler, like doctor.js/card.js/mcp.js always were.
+let readActiveState, loadConfig, hasUserConfig, spawnDaemonDetached, daemonAlive;
 let buildVars, fillTemplate, humanProject, humanTool, applyIdle, framePasses, fmtNum, fmtHours;
 let scan, readAggregate, findLiveSessions, dayKey, weekKey;
-let weekGrid;
-let runInstall, runUninstall, isInstalled, migrateConfig, installHooks, ensureCanonicalExe, installMcp, uninstallMcp, setupOutro;
-let startTui;
-let generateInsights;
-let maybeNudge, pickTodayMilestone;
-let badgeSvg;
 let fmtCost;
-let addPrivateCwd, removePrivateCwd, listPrivateCwds, resolveVisibility;
 let readUsageCache, fetchUsage, writeUsageCache, fmtResetTime, fmtResetDay;
-let lb;
 
-let statsLoaded = false;
-async function loadStats() {
-  if (statsLoaded) return;
-  // Load the graph concurrently — these are all leaf-ish modules with no
-  // ordering dependency, so Promise.all beats a sequential import chain.
-  const [fmt, scn, wk, inst, tui, ins, ndg, bdg, prc, priv, usg, leaderboard] = await Promise.all([
-    import('./format.js'), import('./scanner.js'), import('./week.js'),
-    import('./install.js'), import('./tui.js'), import('./insights.js'),
-    import('./nudge.js'), import('./badge.js'), import('./pricing.js'),
-    import('./privacy.js'), import('./usage.js'), import('./leaderboard.js'),
+async function loadDaemonCtl() {
+  ({ spawnDaemonDetached, daemonAlive } = await import('./ensure-daemon.js'));
+}
+
+// Idempotent — repeat imports resolve from the module cache.
+async function loadCore() {
+  const [st, cfg, fmt, scn, prc, usg] = await Promise.all([
+    import('./state.js'), import('./config.js'), import('./format.js'),
+    import('./scanner.js'), import('./pricing.js'), import('./usage.js'), loadDaemonCtl(),
   ]);
+  ({ readActiveState } = st);
+  ({ loadConfig, hasUserConfig } = cfg);
   ({ buildVars, fillTemplate, humanProject, humanTool, applyIdle, framePasses, fmtNum, fmtHours } = fmt);
   ({ scan, readAggregate, findLiveSessions, dayKey, weekKey } = scn);
-  ({ weekGrid } = wk);
-  ({ install: runInstall, uninstall: runUninstall, isInstalled, migrateConfig, installHooks, ensureCanonicalExe, installMcp, uninstallMcp, setupOutro } = inst);
-  ({ startTui } = tui);
-  ({ generateInsights } = ins);
-  ({ maybeNudge, pickTodayMilestone } = ndg);
-  ({ badgeSvg } = bdg);
   ({ fmtCost } = prc);
-  ({ addPrivateCwd, removePrivateCwd, listPrivateCwds, resolveVisibility } = priv);
   ({ readUsageCache, fetchUsage, writeUsageCache, fmtResetTime, fmtResetDay } = usg);
-  lb = leaderboard;
-  statsLoaded = true;
 }
-import { VERSION } from './version.js';
-import { fail, tailLines, heat, sparkline, fmtDelta, topPercentile, EX_USER_ERROR, EX_BAD_STATE, EX_SYS_ERROR } from './ui.js';
-import { randomUUID } from 'node:crypto';
-import { createInterface } from 'node:readline';
-import { basename, join, dirname } from 'node:path';
 
 const cmd = process.argv[2];
+const args = process.argv.slice(3);
 
-// ── ANSI styling (degrades gracefully) ────────────────────────────────────────
-const tty = process.stdout.isTTY && !process.env.NO_COLOR;
-const c = {
-  reset: tty ? '\x1b[0m' : '',
-  dim: tty ? '\x1b[2m' : '',
-  bold: tty ? '\x1b[1m' : '',
-  cyan: tty ? '\x1b[36m' : '',
-  green: tty ? '\x1b[32m' : '',
-  yellow: tty ? '\x1b[33m' : '',
-  red: tty ? '\x1b[31m' : '',
-  magenta: tty ? '\x1b[35m' : '',
-  blue: tty ? '\x1b[34m' : '',
-  gray: tty ? '\x1b[90m' : '',
-};
 const ansiRe = /\x1b\[[0-9;]*m/g;
 const visibleLen = (s) => String(s).replace(ansiRe, '').length;
 
@@ -384,6 +345,21 @@ function lastDays(byDay, n) {
   return out;
 }
 
+// "42m" / "3.5h" / "12h" — compact active-time label for bar-chart rows.
+const hoursLabel = (ms) => {
+  const h = ms / 3_600_000;
+  return h < 1 ? `${Math.round(h * 60)}m` : (h < 10 ? `${h.toFixed(1)}h` : `${Math.round(h)}h`);
+};
+
+// ISO-week key of last week, stepped back from local noon so a DST shift
+// can't land the subtraction in the wrong week.
+function lastWeekKey() {
+  const d = new Date();
+  d.setHours(12, 0, 0, 0);
+  d.setDate(d.getDate() - 7);
+  return weekKey(d.getTime());
+}
+
 const dayTokens = (d) => d
   ? (d.inputTokens || 0) + (d.outputTokens || 0) + (d.cacheReadTokens || 0) + (d.cacheWriteTokens || 0)
   : 0;
@@ -425,7 +401,8 @@ function todayBoxLines(vars, aggregate) {
   return lines;
 }
 
-function showStatus() {
+async function showStatus() {
+  const { generateInsights } = await import('./insights.js');
   const state = readActiveState();
   const aggregate = readAggregate();
   const config = loadConfig();
@@ -541,11 +518,8 @@ function showStatus() {
       .slice(0, 6);
     if (top.length) {
       const maxMs = top[0][1].activeMs;
-      const lines = top.map(([name, p]) => {
-        const h = (p.activeMs / 3_600_000);
-        const hStr = h < 1 ? `${Math.round(h * 60)}m` : (h < 10 ? `${h.toFixed(1)}h` : `${Math.round(h)}h`);
-        return `${humanProject(name).slice(0, 20).padEnd(22)} ${bar(p.activeMs, maxMs)} ${c.cyan}${hStr.padStart(5)}${c.reset}  ${c.dim}${p.sessions} sess · ${p.userMessages} prompts${c.reset}`;
-      });
+      const lines = top.map(([name, p]) =>
+        `${humanProject(name).slice(0, 20).padEnd(22)} ${bar(p.activeMs, maxMs)} ${c.cyan}${hoursLabel(p.activeMs).padStart(5)}${c.reset}  ${c.dim}${p.sessions} sess · ${p.userMessages} prompts${c.reset}`);
       box('top projects by active time', lines, 72);
       console.log('');
     }
@@ -607,7 +581,8 @@ function showStatus() {
   }
 }
 
-function showToday() {
+async function showToday() {
+  const { maybeNudge, pickTodayMilestone } = await import('./nudge.js');
   const state = readActiveState();
   const aggregate = readAggregate();
   const config = loadConfig();
@@ -640,7 +615,8 @@ function showToday() {
   }
 }
 
-function showWeek() {
+async function showWeek() {
+  const { weekGrid } = await import('./week.js');
   const state = readActiveState();
   const aggregate = readAggregate();
   const config = loadConfig();
@@ -653,11 +629,8 @@ function showWeek() {
 
   // Week-over-week context: this week so far vs the whole of last week.
   // Early in the week "▼" is expected — the vs label keeps that honest.
-  const prevRef = new Date();
-  prevRef.setHours(12, 0, 0, 0); // noon — immune to DST midnight edges
-  prevRef.setDate(prevRef.getDate() - 7);
   const wkNow = aggregate?.byWeek?.[weekKey(Date.now())];
-  const wkPrev = aggregate?.byWeek?.[weekKey(prevRef.getTime())];
+  const wkPrev = aggregate?.byWeek?.[lastWeekKey()];
   const dWkActive  = fmtDelta(wkNow?.activeMs || 0,     wkPrev?.activeMs || 0, { vs: 'vs last week' });
   const dWkPrompts = fmtDelta(wkNow?.userMessages || 0, wkPrev?.userMessages || 0);
   const dWkTokens  = fmtDelta(dayTokens(wkNow),         dayTokens(wkPrev));
@@ -676,11 +649,9 @@ function showWeek() {
     const { days, maxMs } = weekGrid(aggregate.byDay);
     const lines = days.map(({ label, ms, isFuture, isToday }) => {
       if (isFuture) return `${c.dim}${label.padEnd(12)} ${'·'.repeat(22)}     —${c.reset}`;
-      const h = ms / 3_600_000;
-      const hStr = h < 1 ? `${Math.round(h * 60)}m` : (h < 10 ? `${h.toFixed(1)}h` : `${Math.round(h)}h`);
       const prefix = isToday ? `${c.bold}` : '';
       const peak = ms === maxMs && ms > 0 ? ` ${c.bold}${heat(1)}◆${c.reset}` : '';
-      return `${prefix}${label.padEnd(12)}${c.reset} ${bar(ms, maxMs)} ${c.cyan}${hStr.padStart(5)}${c.reset}${peak}${isToday ? ` ${c.dim}← today${c.reset}` : ''}`;
+      return `${prefix}${label.padEnd(12)}${c.reset} ${bar(ms, maxMs)} ${c.cyan}${hoursLabel(ms).padStart(5)}${c.reset}${peak}${isToday ? ` ${c.dim}← today${c.reset}` : ''}`;
     });
     box('this week · daily breakdown', lines);
     console.log('');
@@ -776,11 +747,8 @@ function showCompare() {
     console.log(`\n  No history yet — run ${c.cyan}claude-rpc scan${c.reset} first.\n`);
     return;
   }
-  const prevRef = new Date();
-  prevRef.setHours(12, 0, 0, 0);
-  prevRef.setDate(prevRef.getDate() - 7);
   const nowKey = weekKey(Date.now());
-  const prevKey = weekKey(prevRef.getTime());
+  const prevKey = lastWeekKey();
   const wk = aggregate.byWeek[nowKey] || {};
   const pw = aggregate.byWeek[prevKey] || {};
 
@@ -863,14 +831,7 @@ function statusColor(status) {
 }
 
 function showPreview() {
-  let state = readActiveState();
-  const aggregate = readAggregate();
-  const config = loadConfig();
-  const live = findLiveSessions({ thresholdMs: 90_000 });
-  state.liveSessions = live;
-  state = applyIdle(state, config);
-  state.usage = readUsageCache();
-  const vars = buildVars(state, config, aggregate);
+  const { vars, config, state } = liveVars();
   const p = config.presence || {};
   // Preview the frames the daemon ACTUALLY uses: byStatus (base frame + its
   // rotation, per status) when present — pickFrames in the daemon prefers it
@@ -935,19 +896,21 @@ function dumpVars() {
   process.stdout.write(JSON.stringify({ vars: Object.keys(live).sort(), live }));
 }
 
+// scan() onProgress callback: a `parsed n/total…` line redrawn at most every 500ms.
+function progressLine() {
+  let lastReport = 0;
+  return ({ scanned, total }) => {
+    if (Date.now() - lastReport > 500) {
+      process.stdout.write(`\r  ${c.dim}parsed ${scanned}/${total}…${c.reset}`);
+      lastReport = Date.now();
+    }
+  };
+}
+
 function doScan(force = false) {
   console.log(`  ${c.dim}scanning ~/.claude/projects ${force ? '(force re-parse)' : '(incremental)'}…${c.reset}`);
   const t0 = Date.now();
-  let lastReport = 0;
-  const result = scan({
-    force,
-    onProgress: ({ scanned, total }) => {
-      if (Date.now() - lastReport > 500) {
-        process.stdout.write(`\r  ${c.dim}parsed ${scanned}/${total}…${c.reset}`);
-        lastReport = Date.now();
-      }
-    },
-  });
+  const result = scan({ force, onProgress: progressLine() });
   process.stdout.write('\n');
   console.log(`  ${c.green}✓${c.reset}  scan complete  ${c.dim}${Date.now() - t0}ms — ${c.reset}${c.cyan}${result.scanned}${c.reset}${c.dim} parsed · ${result.skipped} cached · ${result.removed} removed (${result.total} total)${c.reset}`);
   if (result.dirs && result.dirs.length > 1) {
@@ -976,20 +939,10 @@ function doBackfill(argv) {
   }
   console.log(`  ${c.dim}backfilling from ${c.reset}${c.cyan}${path}${c.reset}${c.dim}…${c.reset}`);
   const t0 = Date.now();
-  let lastReport = 0;
   // Pass `extraDirs` rather than `projectsDirs` — this way the default
   // ~/.claude/projects (+ any auto-discovered alt paths) ALSO gets scanned
   // and the user's existing cache for those isn't pruned.
-  const result = scan({
-    force: false,
-    extraDirs: [path],
-    onProgress: ({ scanned, total }) => {
-      if (Date.now() - lastReport > 500) {
-        process.stdout.write(`\r  ${c.dim}parsed ${scanned}/${total}…${c.reset}`);
-        lastReport = Date.now();
-      }
-    },
-  });
+  const result = scan({ force: false, extraDirs: [path], onProgress: progressLine() });
   process.stdout.write('\n');
   console.log(`  ${c.green}✓${c.reset}  backfill complete  ${c.dim}${Date.now() - t0}ms — ${c.reset}${c.cyan}${result.scanned}${c.reset}${c.dim} new/changed · ${result.skipped} cached${c.reset}`);
   console.log(`     ${c.dim}roots: ${result.dirs.join(', ')}${c.reset}`);
@@ -997,7 +950,8 @@ function doBackfill(argv) {
   console.log(`     ${c.dim}aggregate now: ${result.aggregate.sessions} sessions · ${hours}h · ${result.aggregate.userMessages} prompts${c.reset}`);
 }
 
-function showInsights() {
+async function showInsights() {
+  const { generateInsights } = await import('./insights.js');
   const aggregate = readAggregate();
   const insights = generateInsights(aggregate, { limit: 6 });
   console.log('');
@@ -1035,37 +989,44 @@ async function doRecap(argv) {
   }
 }
 
-function parseBadgeArgs(argv) {
+// Parse `--flag value` / `--flag=value` / boolean `--flag` args onto a copy of
+// `defaults`. `flags` maps each option key to its spellings — the first is the
+// name takeValue's error shows; a key whose default is `false` is a boolean
+// switch. Unknown args are ignored.
+function parseFlags(argv, defaults, flags) {
   argv = splitEqArgs(argv);
-  const out = { metric: 'hours', range: '7d', out: '', gist: false };
+  const out = { ...defaults };
   for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === '--metric' || a === '-m') out.metric = takeValue(argv[++i], '--metric');
-    else if (a === '--range' || a === '-r') out.range = takeValue(argv[++i], '--range');
-    else if (a === '--out' || a === '-o') out.out = takeValue(argv[++i], '--out');
-    else if (a === '--label' || a === '-l') out.label = takeValue(argv[++i], '--label');
-    else if (a === '--gist') out.gist = true;
+    const key = Object.keys(flags).find((k) => flags[k].includes(argv[i]));
+    if (key) out[key] = defaults[key] === false ? true : takeValue(argv[++i], flags[key][0]);
   }
   return out;
 }
 
-async function doBadge(argv) {
-  const opts = parseBadgeArgs(argv);
+// The aggregate, or a wrong-state exit for the commands that render it.
+function aggregateOr(what) {
   const aggregate = readAggregate();
-  if (!aggregate) {
-    fail('no aggregate yet — nothing to render', { hint: 'run `claude-rpc scan` first', code: EX_BAD_STATE });
-  }
+  if (!aggregate) fail(`no aggregate yet — nothing to ${what}`, { hint: 'run `claude-rpc scan` first', code: EX_BAD_STATE });
+  return aggregate;
+}
+
+// Write a rendered artifact to --out with a one-line receipt (plus any
+// follow-up lines), or with no --out straight to stdout for piping.
+function emit(body, out, { note = `${body.length} bytes`, after = [] } = {}) {
+  if (!out) { process.stdout.write(body); return; }
+  writeFileSync(out, body);
+  console.log(`  ${c.green}✓${c.reset}  wrote ${c.cyan}${out}${c.reset}  ${c.dim}(${note})${c.reset}`);
+  for (const line of after) console.log(line);
+}
+
+async function doBadge(argv) {
+  const opts = parseFlags(argv, { metric: 'hours', range: '7d', out: '', gist: false },
+    { metric: ['--metric', '-m'], range: ['--range', '-r'], out: ['--out', '-o'], label: ['--label', '-l'], gist: ['--gist'] });
+  const aggregate = aggregateOr('render');
+  const { badgeSvg } = await import('./badge.js');
   const svg = badgeSvg({ aggregate, metric: opts.metric, range: opts.range, label: opts.label });
-  if (opts.gist) {
-    await publishBadgeToGist(svg, opts);
-    return;
-  }
-  if (opts.out) {
-    writeFileSync(opts.out, svg);
-    console.log(`  ${c.green}✓${c.reset}  wrote ${c.cyan}${opts.out}${c.reset}  ${c.dim}(${svg.length} bytes)${c.reset}`);
-  } else {
-    process.stdout.write(svg);
-  }
+  if (opts.gist) return publishBadgeToGist(svg, opts);
+  emit(svg, opts.out);
 }
 
 // Publish the rendered badge to a GitHub gist and emit the README-ready
@@ -1127,136 +1088,76 @@ async function publishBadgeToGist(svg, opts, kind = 'badge') {
 // Poster-style SVG card. Bigger sibling of `badge` — shareable summary
 // for a range (year / month / week / all-time). Output is SVG only;
 // screenshot or convert to PNG offline if needed.
-function parseCardArgs(argv) {
-  argv = splitEqArgs(argv);
-  const out = { range: 'year', out: '' };
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === '--range' || a === '-r') out.range = takeValue(argv[++i], '--range');
-    else if (a === '--out' || a === '-o') out.out = takeValue(argv[++i], '--out');
-  }
-  return out;
-}
-
 async function doCard(argv) {
-  const opts = parseCardArgs(argv);
-  const aggregate = readAggregate();
-  if (!aggregate) {
-    fail('no aggregate yet — nothing to render', { hint: 'run `claude-rpc scan` first', code: EX_BAD_STATE });
-  }
+  const opts = parseFlags(argv, { range: 'year', out: '' }, { range: ['--range', '-r'], out: ['--out', '-o'] });
+  const aggregate = aggregateOr('render');
   const { renderCard } = await import('./card.js');
-  const svg = renderCard(aggregate, { range: opts.range });
-  if (opts.out) {
-    writeFileSync(opts.out, svg);
-    console.log(`  ${c.green}✓${c.reset}  wrote ${c.cyan}${opts.out}${c.reset}  ${c.dim}(${svg.length} bytes)${c.reset}`);
-    console.log(`     ${c.dim}tip: open in a browser and save as PNG — or drop it straight into a Discord message; it renders inline${c.reset}`);
-  } else {
-    process.stdout.write(svg);
-  }
+  emit(renderCard(aggregate, { range: opts.range }), opts.out, {
+    after: [`     ${c.dim}tip: open in a browser and save as PNG — or drop it straight into a Discord message; it renders inline${c.reset}`],
+  });
 }
 
 // GitHub profile stat card — a compact, embeddable lifetime summary meant
 // for a profile README. `--gist` publishes it to a gist (raw URL stays stable
 // across re-runs) so the README image auto-refreshes when you re-run it.
-function parseGithubStatArgs(argv) {
-  argv = splitEqArgs(argv);
-  const out = { out: '', gist: false, handle: '' };
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === '--out' || a === '-o') out.out = takeValue(argv[++i], '--out');
-    else if (a === '--handle' || a === '-u') out.handle = takeValue(argv[++i], '--handle');
-    else if (a === '--gist') out.gist = true;
-  }
-  return out;
-}
-
 async function doGithubStat(argv) {
-  const opts = parseGithubStatArgs(argv);
-  const aggregate = readAggregate();
-  if (!aggregate) {
-    fail('no aggregate yet — nothing to render', { hint: 'run `claude-rpc scan` first', code: EX_BAD_STATE });
-  }
+  const opts = parseFlags(argv, { out: '', gist: false, handle: '' },
+    { out: ['--out', '-o'], handle: ['--handle', '-u'], gist: ['--gist'] });
+  const aggregate = aggregateOr('render');
   const { renderProfileCard } = await import('./profile.js');
   const svg = renderProfileCard(aggregate, { handle: opts.handle });
-  if (opts.gist) {
-    await publishBadgeToGist(svg, { metric: 'profile', range: 'all-time' }, 'github-stat');
-    return;
-  }
-  if (opts.out) {
-    writeFileSync(opts.out, svg);
-    console.log(`  ${c.green}✓${c.reset}  wrote ${c.cyan}${opts.out}${c.reset}  ${c.dim}(${svg.length} bytes)${c.reset}`);
-    console.log(`     ${c.dim}embed in your README:  <img src="${opts.out}" alt="Claude Code stats" width="500" />${c.reset}`);
-  } else {
-    process.stdout.write(svg);
-  }
+  if (opts.gist) return publishBadgeToGist(svg, { metric: 'profile', range: 'all-time' }, 'github-stat');
+  emit(svg, opts.out, {
+    after: [`     ${c.dim}embed in your README:  <img src="${opts.out}" alt="Claude Code stats" width="500" />${c.reset}`],
+  });
 }
 
 // Build the live template-variable table the way the daemon does — current
-// state + idle/stale resolution + aggregate. Shared by statusline/session-card.
+// state + idle/stale resolution + aggregate. Shared by preview/statusline/
+// session-card.
 function liveVars() {
-  const state = readActiveState();
-  state.liveSessions = findLiveSessions({ thresholdMs: 90_000 });
+  const raw = readActiveState();
+  raw.liveSessions = findLiveSessions({ thresholdMs: 90_000 });
   const config = loadConfig();
-  const resolved = applyIdle(state, config);
-  resolved.usage = readUsageCache();
-  return { vars: buildVars(resolved, config, readAggregate()), config };
+  const state = applyIdle(raw, config);
+  state.usage = readUsageCache();
+  return { vars: buildVars(state, config, readAggregate()), config, state };
 }
 
 // statusline — a compact one-line status for tmux / starship / shell prompts
 // and Claude Code's own statusline. `--template "..."` overrides the format.
 function doStatusline(argv) {
-  argv = splitEqArgs(argv);
-  let tpl = '{statusVerbose} · {project} · {modelPretty}{tokensLabelPad}';
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--template' || argv[i] === '-t') tpl = takeValue(argv[++i], '--template');
-  }
+  const { template } = parseFlags(argv, { template: '{statusVerbose} · {project} · {modelPretty}{tokensLabelPad}' },
+    { template: ['--template', '-t'] });
   const { vars } = liveVars();
   vars.tokensLabelPad = vars.tokensLabel ? ` · ${vars.tokensLabel}` : '';
-  process.stdout.write(fillTemplate(tpl, vars));
+  process.stdout.write(fillTemplate(template, vars));
 }
 
 // Activity calendar — GitHub-contributions-style year heatmap SVG.
 // --metric hours (default) | tokens; --card wraps it in the stats card.
 async function doCalendar(argv) {
-  argv = splitEqArgs(argv);
-  const opts = { out: '', gist: false, metric: 'hours', card: false };
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--out' || argv[i] === '-o') opts.out = takeValue(argv[++i], '--out');
-    else if (argv[i] === '--gist') opts.gist = true;
-    else if (argv[i] === '--card') opts.card = true;
-    else if (argv[i] === '--metric') opts.metric = takeValue(argv[++i], '--metric');
-  }
+  const opts = parseFlags(argv, { out: '', gist: false, metric: 'hours', card: false },
+    { out: ['--out', '-o'], gist: ['--gist'], card: ['--card'], metric: ['--metric'] });
   if (!['hours', 'tokens'].includes(opts.metric)) {
     fail(`unknown --metric \`${opts.metric}\``, { hint: 'use --metric hours or --metric tokens', code: EX_USER_ERROR });
   }
-  const aggregate = readAggregate();
-  if (!aggregate) fail('no aggregate yet — nothing to render', { hint: 'run `claude-rpc scan` first', code: EX_BAD_STATE });
+  const aggregate = aggregateOr('render');
   const { renderCalendar, renderCalendarCard } = await import('./calendar.js');
   const svg = opts.card
     ? renderCalendarCard(aggregate, { metric: opts.metric, handle: loadConfig().profile?.handle })
     : renderCalendar(aggregate, { metric: opts.metric });
   const kind = opts.card ? 'stats' : 'calendar';
   if (opts.gist) return publishBadgeToGist(svg, { metric: kind, range: 'year' }, kind);
-  if (opts.out) {
-    writeFileSync(opts.out, svg);
-    console.log(`  ${c.green}✓${c.reset}  wrote ${c.cyan}${opts.out}${c.reset}  ${c.dim}(${svg.length} bytes)${c.reset}`);
-  } else process.stdout.write(svg);
+  emit(svg, opts.out);
 }
 
 // Per-session recap card — current/most-recent session as a shareable SVG.
 async function doSessionCard(argv) {
-  argv = splitEqArgs(argv);
-  const opts = { out: '' };
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--out' || argv[i] === '-o') opts.out = takeValue(argv[++i], '--out');
-  }
+  const { out } = parseFlags(argv, { out: '' }, { out: ['--out', '-o'] });
   const { vars } = liveVars();
   const { renderSessionCard } = await import('./session-card.js');
-  const svg = renderSessionCard(vars, {});
-  if (opts.out) {
-    writeFileSync(opts.out, svg);
-    console.log(`  ${c.green}✓${c.reset}  wrote ${c.cyan}${opts.out}${c.reset}  ${c.dim}(${svg.length} bytes)${c.reset}`);
-  } else process.stdout.write(svg);
+  emit(renderSessionCard(vars, {}), out);
 }
 
 // `claude-rpc readme` — paste-ready markdown for putting your live Claude Code
@@ -1347,9 +1248,12 @@ async function doMcp() {
   runMcpServer();
 }
 
+const mcpScope = (argv) => argv.includes('--project') ? 'project' : argv.includes('--local') ? 'local' : 'user';
+
 // One-command wiring into Claude Code — runs `claude mcp add` for the user.
-function doMcpInstall(argv) {
-  const scope = argv.includes('--project') ? 'project' : argv.includes('--local') ? 'local' : 'user';
+async function doMcpInstall(argv) {
+  const { installMcp } = await import('./install.js');
+  const scope = mcpScope(argv);
   const res = installMcp({ exePath: EXE_PATH || process.execPath, scope });
   const manual = (r) => `claude mcp add claude-rpc --scope ${scope} -- ${r.command} ${r.args.join(' ')}`;
   if (res.ok) {
@@ -1367,8 +1271,9 @@ function doMcpInstall(argv) {
   }
 }
 
-function doMcpUninstall(argv) {
-  const scope = argv.includes('--project') ? 'project' : argv.includes('--local') ? 'local' : 'user';
+async function doMcpUninstall(argv) {
+  const { uninstallMcp } = await import('./install.js');
+  const scope = mcpScope(argv);
   const res = uninstallMcp({ scope });
   if (res.ok) console.log(`  ${c.green}✓${c.reset}  removed the claude-rpc MCP server ${c.dim}(scope: ${scope})${c.reset}`);
   else if (res.reason === 'no-claude') fail('the `claude` CLI was not found on your PATH', { code: EX_USER_ERROR });
@@ -1384,14 +1289,16 @@ function doMcpUninstall(argv) {
 // Per-project overrides live in <project>/.claude-rpc.json and take priority
 // over the runtime list. See src/privacy.js for the full resolution chain.
 
-function doPrivate() {
+async function doPrivate() {
+  const { addPrivateCwd } = await import('./privacy.js');
   const cwd = process.cwd();
   const list = addPrivateCwd(cwd);
   console.log(`  ${c.green}✓${c.reset}  ${c.cyan}${cwd}${c.reset} marked private`);
   console.log(`     ${c.dim}${list.length} ${list.length === 1 ? 'path' : 'paths'} in the private list — the daemon picks it up within ~5 min, or ${c.reset}${c.cyan}claude-rpc restart${c.reset}`);
 }
 
-function doPublic() {
+async function doPublic() {
+  const { listPrivateCwds, removePrivateCwd } = await import('./privacy.js');
   const cwd = process.cwd();
   const before = listPrivateCwds().length;
   const list = removePrivateCwd(cwd);
@@ -1402,7 +1309,8 @@ function doPublic() {
   }
 }
 
-function doPrivacy() {
+async function doPrivacy() {
+  const { resolveVisibility, listPrivateCwds } = await import('./privacy.js');
   const cwd = process.cwd();
   const cfg = loadConfig();
   const { visibility, projectName, reason } = resolveVisibility(cwd, cfg);
@@ -1435,7 +1343,8 @@ function fmtClock(ts) {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
-function doPause(argv) {
+async function doPause(argv) {
+  const { parseDuration, setPause, pauseUntil } = await import('./pause.js');
   const arg = (argv[0] || '').toLowerCase();
   if (arg === 'off' || arg === 'resume') return doResume();
   if (arg === 'status') {
@@ -1454,7 +1363,8 @@ function doPause(argv) {
   console.log(`     ${c.dim}the daemon clears the card within seconds — resume early with ${c.reset}${c.cyan}claude-rpc resume${c.reset}`);
 }
 
-function doResume() {
+async function doResume() {
+  const { pauseUntil, clearPause } = await import('./pause.js');
   const was = pauseUntil();
   clearPause();
   if (was) {
@@ -1472,29 +1382,12 @@ function doResume() {
 // pipes cleanly into jq / a spreadsheet import.
 
 async function doExport(argv) {
-  argv = splitEqArgs(argv);
-  const csv = argv.includes('--csv');
-  let out = '';
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--out' || argv[i] === '-o') out = takeValue(argv[++i], '--out');
-  }
-  const aggregate = readAggregate();
-  if (!aggregate) {
-    fail('no aggregate yet — nothing to export', { hint: 'run `claude-rpc scan` first', code: EX_BAD_STATE });
-  }
-  let payload;
-  if (csv) {
-    const { aggregateToCsv } = await import('./server/api.js');
-    payload = aggregateToCsv(aggregate);
-  } else {
-    payload = JSON.stringify(aggregate, null, 2) + '\n';
-  }
-  if (out) {
-    writeFileSync(out, payload);
-    console.log(`  ${c.green}✓${c.reset}  wrote ${c.cyan}${out}${c.reset}  ${c.dim}(${payload.length} bytes, ${csv ? 'CSV' : 'JSON'})${c.reset}`);
-  } else {
-    process.stdout.write(payload);
-  }
+  const { csv, out } = parseFlags(argv, { csv: false, out: '' }, { csv: ['--csv'], out: ['--out', '-o'] });
+  const aggregate = aggregateOr('export');
+  const payload = csv
+    ? (await import('./server/api.js')).aggregateToCsv(aggregate)
+    : JSON.stringify(aggregate, null, 2) + '\n';
+  emit(payload, out, { note: `${payload.length} bytes, ${csv ? 'CSV' : 'JSON'}` });
 }
 
 // ── Squads — private mini-leaderboards (terminal parity for the web UI) ───
@@ -1522,30 +1415,24 @@ function squadAuth() {
       code: EX_BAD_STATE,
     });
   }
-  const netFail = (e) => fail(`couldn't reach the squads service: ${e.message}`, {
-    hint: 'check your connection and retry — this never blocks Claude Code',
-    code: EX_SYS_ERROR,
-  });
-  const post = async (path, body) => {
+  const call = async (path, init = {}) => {
     let res;
     try {
-      res = await fetch(endpoint + path, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ instanceId, ...body }),
-        signal: AbortSignal.timeout(10_000),
+      res = await fetch(endpoint + path, { ...init, signal: AbortSignal.timeout(10_000) });
+    } catch (e) {
+      return fail(`couldn't reach the squads service: ${e.message}`, {
+        hint: 'check your connection and retry — this never blocks Claude Code',
+        code: EX_SYS_ERROR,
       });
-    } catch (e) { return netFail(e); }
+    }
     return { status: res.status, json: await res.json().catch(() => ({})) };
   };
-  const get = async (path) => {
-    let res;
-    try {
-      res = await fetch(endpoint + path, { signal: AbortSignal.timeout(10_000) });
-    } catch (e) { return netFail(e); }
-    return { status: res.status, json: await res.json().catch(() => ({})) };
-  };
-  return { cfg, endpoint, instanceId, post, get };
+  const post = (path, body) => call(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ instanceId, ...body }),
+  });
+  return { cfg, endpoint, instanceId, post, get: call };
 }
 
 function squadPageUrl(id) { return `https://claude-rpc.com/squad/${id}`; }
@@ -1735,7 +1622,8 @@ async function doLink(argv) {
 // for the receiving end. As of v0.7 this is on by default for fresh
 // installs and preserved-off for pre-v0.7 upgraders (see migrateConfig).
 
-function prompt(question) {
+async function prompt(question) {
+  const { createInterface } = await import('node:readline');
   return new Promise((resolve) => {
     const rl = createInterface({ input: process.stdin, output: process.stdout });
     rl.question(question, (answer) => { rl.close(); resolve(answer); });
@@ -1794,6 +1682,7 @@ async function communityOn() {
     return;
   }
   const userCfg = readJson(CONFIG_PATH, {});
+  const { randomUUID } = await import('node:crypto');
   const next = {
     ...(userCfg.community || {}),
     enabled: true,
@@ -1976,7 +1865,7 @@ function profileSet(argv) {
   profileNextStep();
 }
 
-function profileEnable(on) {
+async function profileEnable(on) {
   const userCfg = readJson(CONFIG_PATH, {});
   const next = { ...(userCfg.profile || {}) };
   if (on && !lb.isValidHandle(next.handle)) {
@@ -1992,7 +1881,7 @@ function profileEnable(on) {
   if (on) {
     const community = { ...(userCfg.community || {}) };
     if (!community.instanceId) {
-      community.instanceId = randomUUID();
+      community.instanceId = (await import('node:crypto')).randomUUID();
       userCfg.community = community;
     }
   }
@@ -2201,7 +2090,7 @@ async function setupGhConnect() {
 // privacy filter can't see everything the presence valve can, so the human
 // check is part of the design, not politeness).
 async function doWrappedPublish(argv) {
-  await loadStats();
+  await loadCore();
   const cfg = loadConfig();
   const aggregate = readAggregate();
   if (!aggregate) return fail('no aggregate yet', { hint: 'run `claude-rpc scan` first', code: EX_BAD_STATE });
@@ -2472,12 +2361,20 @@ process.on('unhandledRejection', (e) => {
 // ESM (dev) and CommonJS (esbuild → SEA bundle) — CJS doesn't allow
 // top-level await.
 (async () => {
-  // Fast-exit commands touch none of the lazy stats/format/install graph, so
-  // skip the module load and keep them instant. Everything else loads it once
-  // up front, which makes every binding available to the handlers below exactly
-  // as before. (daemon/serve/wrapped/hook only dynamic-import their own module.)
-  const FAST_PATHS = new Set(['--version', '-V', '-v', '--help', '-h', 'help', 'start', 'stop', 'restart', 'hook', 'daemon', 'serve', 'wrapped']);
-  if (!FAST_PATHS.has(cmd)) await loadStats();
+  // Force the console code page to UTF-8 (65001) on Windows so Unicode box
+  // drawing, block elements, and other chars render correctly. Default cmd.exe
+  // code page on Win10 is 437/850, which displays many of our chars as `?`.
+  // Hook events (no TTY) skip this — they don't print anything user-visible.
+  if (process.platform === 'win32' && process.stdout.isTTY) {
+    const { spawnSync } = await import('node:child_process');
+    try { spawnSync('chcp.com', ['65001'], { stdio: 'ignore', windowsHide: true }); } catch { /* chcp absent (Wine, custom shell) — accept whatever code page is set */ }
+  }
+  // Fast-exit commands touch none of the core graph (they import their own
+  // module, if any); daemon control needs only ensure-daemon. Everything else
+  // loads the core once up front, so its bindings are set for every handler.
+  const FAST_PATHS = new Set(['--version', '-V', '-v', '--help', '-h', 'help', 'hook', 'mcp', 'daemon', 'serve', 'wrapped', 'scan-worker', 'tail', 'logs', 'log', 'pause', 'resume', 'unpause']);
+  if (['start', 'stop', 'restart'].includes(cmd)) await loadDaemonCtl();
+  else if (!FAST_PATHS.has(cmd)) await loadCore();
   switch (cmd) {
     case '--version':
     case '-V':
@@ -2494,6 +2391,7 @@ process.on('unhandledRejection', (e) => {
       // runInstall prints the phased checklist (or a one-line "already set
       // up" on clean re-runs); the daemon row lands after it, then setupOutro
       // closes the screen — only when something actually changed.
+      const { install: runInstall, setupOutro } = await import('./install.js');
       const { target, changed } = await runInstall({ exePath: EXE_PATH || process.execPath });
       // Slimmer first run: bring the daemon up now so the card appears
       // immediately, instead of making the user run a separate `start`.
@@ -2511,6 +2409,7 @@ process.on('unhandledRejection', (e) => {
           // pops it as a visible Windows Terminal window whose closure kills
           // the daemon.
           if (!daemonAlive()) {
+            const { spawn, spawnSync } = await import('node:child_process');
             let script = null;
             try {
               const r = spawnSync('npm', ['root', '-g'], {
@@ -2547,9 +2446,8 @@ process.on('unhandledRejection', (e) => {
       // best-effort-loud: a failure explains itself but never rolls back the
       // completed install above.
       {
-        const argv = process.argv.slice(3);
-        const linkAt = argv.indexOf('--link');
-        const linkCode = linkAt !== -1 ? (argv[linkAt + 1] || '').trim() : null;
+        const linkAt = args.indexOf('--link');
+        const linkCode = linkAt !== -1 ? (args[linkAt + 1] || '').trim() : null;
         if (linkCode) {
           console.log('');
           await doLink([linkCode]);
@@ -2561,8 +2459,8 @@ process.on('unhandledRejection', (e) => {
           if (flushed.ok) {
             console.log(`  ${c.green}✓${c.reset}  profile published — ${c.cyan}${fmtNum(flushed.totals.tokens)}${c.reset} tokens on the board`);
           }
-          if (argv.includes('--wrapped')) await doWrappedPublish(['--yes']);
-        } else if (argv.includes('--wrapped')) {
+          if (args.includes('--wrapped')) await doWrappedPublish(['--yes']);
+        } else if (args.includes('--wrapped')) {
           console.log(`  ${c.yellow}!${c.reset}  --wrapped needs a profile — pair it with --link <code>, or run \`claude-rpc wrapped --publish\` after setup`);
         }
         // Optional GitHub connect — one explicit y/N, asked at most once ever.
@@ -2572,24 +2470,24 @@ process.on('unhandledRejection', (e) => {
       setupOutro(target, changed);
       break;
     }
-    case 'uninstall': await runUninstall(); break;
+    case 'uninstall': await (await import('./install.js')).uninstall(); break;
     case 'upgrade-config':
-      if (!migrateConfig()) console.log(`  ${c.green}✓${c.reset}  config already current — nothing to migrate`);
+      if (!(await import('./install.js')).migrateConfig()) console.log(`  ${c.green}✓${c.reset}  config already current — nothing to migrate`);
       break;
     case 'start':     if (startDaemon()) await confirmDaemonUp(); break;
     case 'stop':      stopDaemon(); break;
     case 'restart':   restartDaemon(); break;
     case 'status': {
-      const dumpFlag = process.argv.slice(3).some((a) => a === '--dump' || a === '-d');
-      if (dumpFlag || !process.stdout.isTTY) showStatus();
-      else startTui();
+      const dumpFlag = args.some((a) => a === '--dump' || a === '-d');
+      if (dumpFlag || !process.stdout.isTTY) await showStatus();
+      else (await import('./tui.js')).startTui();
       break;
     }
-    case 'dump':      showStatus(); break;
-    case 'today':     showToday(); break;
-    case 'week':      showWeek(); break;
-    case 'projects':  showProjects(process.argv.slice(3)); break;
-    case 'project':   showProject(process.argv[3]); break;
+    case 'dump':      await showStatus(); break;
+    case 'today':     await showToday(); break;
+    case 'week':      await showWeek(); break;
+    case 'projects':  showProjects(args); break;
+    case 'project':   showProject(args[0]); break;
     case 'compare':   showCompare(); break;
     case 'usage':     await showUsage(); break;
     case 'serve':     await import('./server/index.js'); break;
@@ -2597,37 +2495,37 @@ process.on('unhandledRejection', (e) => {
     case 'vars':      dumpVars(); break;
     case 'scan':      doScan(false); break;
     case 'rescan':    doScan(true); break;
-    case 'backfill':  doBackfill(process.argv.slice(3)); break;
-    case 'insights':  showInsights(); break;
-    case 'recap':     await doRecap(process.argv.slice(3)); break;
-    case 'badge':     await doBadge(process.argv.slice(3)); break;
-    case 'card':      await doCard(process.argv.slice(3)); break;
-    case 'github-stat': await doGithubStat(process.argv.slice(3)); break;
-    case 'statusline': doStatusline(process.argv.slice(3)); break;
-    case 'calendar':  await doCalendar(process.argv.slice(3)); break;
-    case 'session-card': await doSessionCard(process.argv.slice(3)); break;
-    case 'readme':    doReadme(process.argv.slice(3)); break;
+    case 'backfill':  doBackfill(args); break;
+    case 'insights':  await showInsights(); break;
+    case 'recap':     await doRecap(args); break;
+    case 'badge':     await doBadge(args); break;
+    case 'card':      await doCard(args); break;
+    case 'github-stat': await doGithubStat(args); break;
+    case 'statusline': doStatusline(args); break;
+    case 'calendar':  await doCalendar(args); break;
+    case 'session-card': await doSessionCard(args); break;
+    case 'readme':    doReadme(args); break;
     case 'mcp': {
-      const sub = process.argv[3];
-      if (sub === 'install')   { doMcpInstall(process.argv.slice(4)); break; }
-      if (sub === 'uninstall') { doMcpUninstall(process.argv.slice(4)); break; }
+      const sub = args[0];
+      if (sub === 'install')   { await doMcpInstall(args.slice(1)); break; }
+      if (sub === 'uninstall') { await doMcpUninstall(args.slice(1)); break; }
       await doMcp();
       break;
     }
     case 'wrapped':
-      if (process.argv.slice(3).includes('--publish')) { await doWrappedPublish(process.argv.slice(3)); break; }
+      if (args.includes('--publish')) { await doWrappedPublish(args); break; }
       process.env.CLAUDE_RPC_OPEN_PATH = '/wrapped'; await import('./server/index.js'); break;
-    case 'pause':     doPause(process.argv.slice(3)); break;
+    case 'pause':     await doPause(args); break;
     case 'resume':
-    case 'unpause':   doResume(); break;
-    case 'export':    await doExport(process.argv.slice(3)); break;
-    case 'private':   doPrivate(); break;
-    case 'public':    doPublic(); break;
-    case 'privacy':   doPrivacy(); break;
-    case 'community': await doCommunity(process.argv.slice(3)); break;
-    case 'profile':   await doProfile(process.argv.slice(3)); break;
-    case 'squad':     await doSquadCmd(process.argv.slice(3)); break;
-    case 'link':      await doLink(process.argv.slice(3)); break;
+    case 'unpause':   await doResume(); break;
+    case 'export':    await doExport(args); break;
+    case 'private':   await doPrivate(); break;
+    case 'public':    await doPublic(); break;
+    case 'privacy':   await doPrivacy(); break;
+    case 'community': await doCommunity(args); break;
+    case 'profile':   await doProfile(args); break;
+    case 'squad':     await doSquadCmd(args); break;
+    case 'link':      await doLink(args); break;
     case 'doctor': {
       const { runDoctor, fixPlan } = await import('./doctor.js');
       const fix = process.argv.includes('--fix');
@@ -2647,7 +2545,7 @@ process.on('unhandledRejection', (e) => {
       for (const kind of plan) {
         try {
           if (kind === 'setup') {
-            await runInstall({ exePath: EXE_PATH || process.execPath });
+            await (await import('./install.js')).install({ exePath: EXE_PATH || process.execPath });
             console.log(`  ${c.green}✓${c.reset}  config + hooks repaired`);
           } else if (kind === 'rescan') {
             doScan(true);
@@ -2672,11 +2570,12 @@ process.on('unhandledRejection', (e) => {
     case 'tail':
     case 'logs':
     case 'log':       tailLog(); break;
-    case 'hook':      runHookCli(process.argv[3] || 'unknown'); break;
+    case 'hook':      (await import('./hook.js')).runHookCli(args[0] || 'unknown'); break;
     case 'daemon':    await import('./daemon.js'); break;
     case 'scan-worker': (await import('./scan-worker.js')).runScanWorker(process.argv.includes('--force')); break;
     default: {
       if (packagedDefault) {
+        const { isInstalled, install: runInstall, setupOutro, ensureCanonicalExe, migrateConfig, installHooks } = await import('./install.js');
         if (!isInstalled()) {
           const { target } = await runInstall({ exePath: EXE_PATH || process.execPath });
           startDaemon();

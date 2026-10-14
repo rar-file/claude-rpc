@@ -26,7 +26,6 @@
   let heatmapByDay = null; // dedicated fixed-90d source, independent of the range pill
   let allFrames = [];
   let currentLiveIdx = 0;
-  let rotationTimer = null;
   let chartSeries = [];   // [{ d: Date, ms }]   — for the activity-chart hover tooltip
   let churnSeries = [];   // [{ d: Date, add, rem }] — for the churn-sparkline tooltip
 
@@ -626,7 +625,7 @@
   }, 1000);
 
   // Rotation cycle
-  rotationTimer = setInterval(() => { currentLiveIdx++; renderRotation(); }, 4000);
+  setInterval(() => { currentLiveIdx++; renderRotation(); }, 4000);
 
   // ── Chart hover tooltips ────────────────────────────────────────────────
   // Native SVG charts, no library. preserveAspectRatio="none" means the

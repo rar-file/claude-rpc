@@ -57,7 +57,23 @@ const TIERS = new Set(['opus', 'sonnet', 'haiku', 'fable']);
 // find the first explicit tier token, then read the version digits that
 // follow. Falls back from `tier-major-minor` → `tier-major` → tier generic
 // → sonnet, in that order.
+//
+// Memoized per id string: the scanner calls this (directly and via costFor)
+// for every assistant turn of every transcript, but a corpus only ever holds a
+// handful of distinct model ids. PRICING is never mutated, so the cache can't
+// go stale; the size cap just bounds a pathological transcript.
+const keyCache = new Map();
 export function pricingKeyFor(modelId) {
+  if (typeof modelId !== 'string') return resolvePricingKey(modelId);
+  let k = keyCache.get(modelId);
+  if (k === undefined) {
+    if (keyCache.size >= 256) keyCache.clear();
+    keyCache.set(modelId, (k = resolvePricingKey(modelId)));
+  }
+  return k;
+}
+
+function resolvePricingKey(modelId) {
   if (!modelId) return 'sonnet';
   // Drop a context-window tag like `[1m]` (claude-opus-5-5[1m]) before parsing.
   const parts = String(modelId).toLowerCase().replace(/\[[^\]]*\]/g, '').split('-');

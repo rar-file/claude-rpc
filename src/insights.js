@@ -7,7 +7,7 @@
 // mid-tier ROTATES — a fresh mix each run instead of the same five forever.
 // Pass opts.seed for a deterministic order (tests); it defaults to the clock.
 
-import { dayKey } from './scanner.js';
+import { dayKeyAt } from './scanner.js';
 import { fmtCost } from './pricing.js';
 import { fmtNum, fmtHours } from './fmt.js';
 
@@ -62,10 +62,9 @@ function rng(seed) {
 // Sum activeMs across the last `days` days (inclusive of today).
 function windowActive(byDay, days, offset = 0) {
   let total = 0;
-  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const now = new Date();
   for (let i = offset; i < offset + days; i++) {
-    const d = new Date(today); d.setDate(d.getDate() - i);
-    total += (byDay?.[dayKey(d.getTime())] || {}).activeMs || 0;
+    total += (byDay?.[dayKeyAt(now, i)] || {}).activeMs || 0;
   }
   return total;
 }

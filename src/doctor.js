@@ -6,12 +6,12 @@
 // run repeatedly. Exit code 0 when everything passes, 1 when any check fails.
 
 import { existsSync, readFileSync, statSync, readdirSync } from 'node:fs';
-import { join, basename } from 'node:path';
+import { join } from 'node:path';
 import {
-  IS_PACKAGED, IS_NPM_INSTALL, IS_INSTALLED,
+  IS_PACKAGED, IS_NPM_INSTALL,
   CONFIG_PATH, CANONICAL_EXE, USER_CONFIG_DIR, HOOK_SCRIPT,
   STATE_PATH, PID_PATH, LOG_PATH,
-  AGGREGATE_PATH, SCAN_CACHE_PATH,
+  AGGREGATE_PATH,
   CLAUDE_HOME, CLAUDE_PROJECTS, CLAUDE_SETTINGS,
 } from './paths.js';
 import { findLiveSessions } from './scanner.js';
@@ -69,18 +69,9 @@ function checkNodeVersion() {
 }
 
 function checkMode() {
-  let mode, detail;
-  if (IS_PACKAGED) {
-    mode = 'pass';
-    detail = `packaged exe at ${process.execPath}`;
-  } else if (IS_NPM_INSTALL) {
-    mode = 'pass';
-    detail = 'npm install (global or local node_modules)';
-  } else {
-    mode = 'pass';
-    detail = 'dev source (cloned repo, no node_modules wrapper)';
-  }
-  check('execution mode', mode, detail);
+  check('execution mode', 'pass', IS_PACKAGED ? `packaged exe at ${process.execPath}`
+    : IS_NPM_INSTALL ? 'npm install (global or local node_modules)'
+    : 'dev source (cloned repo, no node_modules wrapper)');
 }
 
 // Pure classifiers — extracted so doctor's decision logic is unit-testable
@@ -402,11 +393,8 @@ function checkPrivacy(cfg) {
                  : visibility === 'name-only' ? 'warn'
                  : 'pass';
     check('current directory visibility', status, detail);
-    if (listed.length) {
-      check('private-list entries', 'pass', `${listed.length} ${listed.length === 1 ? 'path' : 'paths'} marked private`);
-    } else {
-      check('private-list entries', 'pass', 'none');
-    }
+    check('private-list entries', 'pass',
+      listed.length ? `${listed.length} ${listed.length === 1 ? 'path' : 'paths'} marked private` : 'none');
     // Private-repo guard. The "View on GitHub →" button URL is read from
     // .git/config (no gh needed), but auto-hiding a PRIVATE repo needs the gh
     // CLI. On a github repo here where the button would show (public verdict,

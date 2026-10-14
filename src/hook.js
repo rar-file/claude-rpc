@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import './safe-stdio.js';
-import { readFileSync, appendFileSync, existsSync, mkdirSync, statSync, renameSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { dirname } from 'node:path';
 import { updateState, resetState, pushUnique, shortFile } from './state.js';
 import { detectLastCommitSubject, detectGitBranch } from './git.js';
@@ -12,39 +12,32 @@ import { ensureDaemonRunning } from './ensure-daemon.js';
 import { classifyShip } from './ships.js';
 export { classifyShip };
 
+// require()d, not imported: a builtin's ESM facade reads every export, and
+// fs's lazy getters then load fs/promises and the fs streams on every hook
+// event. The same goes for the rest of the hook's module graph.
+const fs = createRequire(import.meta.url)('node:fs');
+const { readFileSync, appendFileSync, existsSync, mkdirSync, statSync, renameSync } = fs;
+
 const EVENTS_LOG_ROTATE_BYTES = 5 * 1024 * 1024;
 
 function appendEvent(entry) {
   try {
     mkdirSync(dirname(EVENTS_LOG_PATH), { recursive: true });
-    if (existsSync(EVENTS_LOG_PATH)) {
-      const st = statSync(EVENTS_LOG_PATH);
-      if (st.size > EVENTS_LOG_ROTATE_BYTES) {
-        renameSync(EVENTS_LOG_PATH, EVENTS_LOG_PATH + '.1');
-      }
+    if (existsSync(EVENTS_LOG_PATH) && statSync(EVENTS_LOG_PATH).size > EVENTS_LOG_ROTATE_BYTES) {
+      renameSync(EVENTS_LOG_PATH, EVENTS_LOG_PATH + '.1');
     }
     appendFileSync(EVENTS_LOG_PATH, JSON.stringify(entry) + '\n');
   } catch { /* best-effort log: hooks must never fail because of an unwritable events.jsonl */ }
 }
 
-function readStdin() {
-  try {
-    return readFileSync(0, 'utf8');
-  } catch {
-    return '';
-  }
-}
-
+// The JSON event payload on stdin. Unreadable, empty, or malformed → {}.
 function parseInput() {
-  const raw = readStdin();
-  if (!raw.trim()) return {};
-  try { return JSON.parse(raw); } catch { return {}; }
+  try { return JSON.parse(readFileSync(0, 'utf8')); } catch { return {}; }
 }
 
 // Handle a single hook event. Exported so the bundled exe can dispatch
 // directly (avoids spawning a child process per hook).
-export function processHookEvent(event, input = {}, at = Date.now()) {
-  const now = at;
+export function processHookEvent(event, input = {}, now = Date.now()) {
   // Each session writes its OWN state file (state-<sessionId>.json) so concurrent
   // sessions stop clobbering one shared state.json — that thrash made the card
   // jump between projects, the timer reset, and counters over-count. Subagent
@@ -299,9 +292,11 @@ export function processHookEvent(event, input = {}, at = Date.now()) {
 // ack always goes out.
 export function runHookCli(event) {
   try {
-    // performance.timeOrigin = when this process was spawned, so dispatch
-    // order survives node's (variable) startup time — see `stale` above.
-    processHookEvent(event, parseInput(), Math.round(performance.timeOrigin));
+    // now − uptime = when this process was spawned, so dispatch order
+    // survives node's (variable) startup time — see `stale` above. (The same
+    // instant as performance.timeOrigin, to Date.now()'s 1ms resolution,
+    // without loading perf_hooks.)
+    processHookEvent(event, parseInput(), Math.round(Date.now() - process.uptime() * 1000));
   } catch { /* presence is best-effort; never break the user's turn */ }
   finally {
     try { process.stdout.write(JSON.stringify({ continue: true })); } catch { /* stdout closed */ }

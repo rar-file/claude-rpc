@@ -1,7 +1,7 @@
 // Shields-style SVG badge generator. Pure function: aggregate + flags → SVG string.
 // Consumed by `claude-rpc badge` and `GET /api/badge.svg`.
 
-import { dayKey } from './scanner.js';
+import { dayKeyAt } from './scanner.js';
 import { fmtCost } from './pricing.js';
 import { fmtNum, fmtHours as fmtHoursLabel } from './fmt.js';
 
@@ -35,11 +35,10 @@ function pickWindow(byDay, range) {
   if (!byDay) return [];
   const days = rangeToDays(range);
   if (days === null) return Object.entries(byDay);          // 'all'
-  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const now = new Date();
   const out = [];
   for (let i = 0; i < days; i++) {
-    const d = new Date(today); d.setDate(d.getDate() - i);
-    const k = dayKey(d.getTime());
+    const k = dayKeyAt(now, i);
     if (byDay[k]) out.push([k, byDay[k]]);
   }
   return out;

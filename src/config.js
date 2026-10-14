@@ -17,9 +17,12 @@
 // All callers (daemon, server/api, tui, cli) should go through
 // `loadConfig()` rather than reading CONFIG_PATH directly.
 
-import { readFileSync, existsSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { CONFIG_PATH } from './paths.js';
 import { DEFAULT_CONFIG } from './default-config.js';
+
+// require()d, not imported — on the hook hot path; see hook.js.
+const { readFileSync, existsSync } = createRequire(import.meta.url)('node:fs');
 
 // "Has the user run setup?" — a separate signal from `loadConfig` because
 // loadConfig now always returns merged defaults (the daemon needs them

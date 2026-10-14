@@ -1,5 +1,5 @@
 import { basename, dirname, extname } from 'node:path';
-import { dayKey, weekKey, DATE_SUFFIX_RE, cleanProjectName } from './scanner.js';
+import { dayKey, weekKey, cleanProjectName } from './scanner.js';
 import { fmtCost, ratesFor } from './pricing.js';
 import { languageOf } from './languages.js';
 import { detectGitBranch, detectGitRepo } from './git.js';
@@ -237,11 +237,9 @@ export function buildVars(state, config, aggregate) {
 
   const sessionActive = state.sessionStart && state.status !== 'stale' ? 1 : 0;
 
-  // Today's per-day bucket (from aggregate.byDay) — falls back to zeros.
-  const today = agg.byDay?.[dayKey(Date.now())] || {
-    activeMs: 0, userMessages: 0, toolCalls: 0,
-    inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, sessions: 0,
-  };
+  // Today's per-day bucket (from aggregate.byDay). Missing → an empty bucket;
+  // every field read below already defaults to 0.
+  const today = agg.byDay?.[dayKey(Date.now())] || {};
   const todayReal = (today.inputTokens || 0) + (today.outputTokens || 0);
   const todayCache = (today.cacheReadTokens || 0) + (today.cacheWriteTokens || 0);
   // {todayTokens} / {todayTokensFmt} = grand total today (in + out + cache).
@@ -249,11 +247,8 @@ export function buildVars(state, config, aggregate) {
 
   const bestDay = agg.bestDay || null;
 
-  // This week's bucket.
-  const thisWeek = agg.byWeek?.[weekKey(Date.now())] || {
-    activeMs: 0, userMessages: 0, toolCalls: 0,
-    inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, sessions: 0,
-  };
+  // This week's bucket (same empty-bucket fallback).
+  const thisWeek = agg.byWeek?.[weekKey(Date.now())] || {};
   const weekTokensSum = (thisWeek.inputTokens || 0) + (thisWeek.outputTokens || 0)
     + (thisWeek.cacheReadTokens || 0) + (thisWeek.cacheWriteTokens || 0);
 
@@ -305,7 +300,6 @@ export function buildVars(state, config, aggregate) {
     : '';
 
   // Peak weekday by active time — byWeekday holds one blankDay bucket per 0–6.
-  const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   let peakWd = null;
   for (const [wd, b] of Object.entries(agg.byWeekday || {})) {
     if ((b.activeMs || 0) > 0 && (!peakWd || b.activeMs > peakWd.activeMs)) {

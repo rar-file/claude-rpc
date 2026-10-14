@@ -6,7 +6,10 @@
 // POSIX rename() is atomic and doesn't contend like this, so this is a
 // no-op there. The lock is held single-digit milliseconds; a handful of
 // immediate retries clears it without changing behavior anywhere else.
-import { renameSync } from 'node:fs';
+import { createRequire } from 'node:module';
+
+// require()d, not imported — on the hook hot path; see hook.js.
+const { renameSync } = createRequire(import.meta.url)('node:fs');
 
 const RETRY_CODES = new Set(['EPERM', 'EBUSY', 'EACCES']);
 const MAX_ATTEMPTS = 5;
@@ -15,7 +18,8 @@ const RETRY_DELAY_MS = 20;
 // Blocks the calling thread synchronously — the standard dependency-free way
 // to sleep inside a sync call. Best-effort: if SharedArrayBuffer is ever
 // unavailable, the retry loop just spins with no delay instead of failing.
-function sleepSync(ms) {
+// Shared with state.js's lock-retry loop.
+export function sleepSync(ms) {
   try {
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
   } catch {

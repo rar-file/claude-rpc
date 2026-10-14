@@ -138,8 +138,3 @@ export function renderProfileCard(aggregate, { handle = '', generatedAt = new Da
         font-size="11" fill="${PALETTE.inkFaint}">${escapeXml(`best streak ${t.longestStreak}d · ≈${fmtCost(t.cost)} · claude-rpc.com`)}</text>
 </svg>`;
 }
-
-// Top-level convenience matching badge.js / card.js shape.
-export function profileCardSvg({ aggregate, handle = '' } = {}) {
-  return renderProfileCard(aggregate, { handle });
-}

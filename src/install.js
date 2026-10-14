@@ -247,6 +247,12 @@ function daemonLaunch(exePath) {
   return { exe: process.execPath, args: [DAEMON_SCRIPT] };
 }
 
+// `npm` with the flags every call here needs: npm is npm.cmd on Windows (so a
+// shell), and windowsHide so it doesn't flash a console window.
+function npmSync(args, opts = {}) {
+  return spawnSync('npm', args, { encoding: 'utf8', windowsHide: true, shell: process.platform === 'win32', ...opts });
+}
+
 function xmlEscape(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 function systemctlUser(args) {
   try { return spawnSync('systemctl', ['--user', ...args], { stdio: 'ignore' }); }
@@ -312,16 +318,21 @@ export function systemdUnit({ exe, args }) {
   ].join('\n');
 }
 
+// Write a login-autostart file; false (after a warning row) when it can't be.
+function writeStartupFile(path, content, what) {
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, content);
+    return true;
+  } catch (e) {
+    step(SYM_WARN, 'startup entry', `couldn't write ${what} (${e.message}) — the session self-heal still starts the daemon`, console.warn);
+    return false;
+  }
+}
+
 // ── macOS: launchd LaunchAgent (per-user, starts at login) ────────────────────
 function addStartupEntryMac(exePath) {
-  const plist = launchdPlist(daemonLaunch(exePath));
-  try {
-    mkdirSync(dirname(LAUNCHD_PLIST), { recursive: true });
-    writeFileSync(LAUNCHD_PLIST, plist);
-  } catch (e) {
-    step(SYM_WARN, 'startup entry', `couldn't write LaunchAgent (${e.message}) — the session self-heal still starts the daemon`, console.warn);
-    return;
-  }
+  if (!writeStartupFile(LAUNCHD_PLIST, launchdPlist(daemonLaunch(exePath)), 'LaunchAgent')) return;
   // Load so it's active now and at every login. `load -w` is deprecated but
   // portable across the macOS versions we target; a failure is non-fatal — the
   // plist alone starts it next login, and SessionStart self-heal covers the gap.
@@ -338,14 +349,7 @@ function removeStartupEntryMac() {
 
 // ── Linux: systemd --user service (starts at login) ───────────────────────────
 function addStartupEntryLinux(exePath) {
-  const unit = systemdUnit(daemonLaunch(exePath));
-  try {
-    mkdirSync(dirname(SYSTEMD_UNIT), { recursive: true });
-    writeFileSync(SYSTEMD_UNIT, unit);
-  } catch (e) {
-    step(SYM_WARN, 'startup entry', `couldn't write systemd unit (${e.message}) — the session self-heal still starts the daemon`, console.warn);
-    return;
-  }
+  if (!writeStartupFile(SYSTEMD_UNIT, systemdUnit(daemonLaunch(exePath)), 'systemd unit')) return;
   // Enable + start now. Non-fatal if there's no systemd --user session (some
   // containers / minimal WSL): the SessionStart self-heal still brings it up.
   systemctlUser(['daemon-reload']);
@@ -598,17 +602,15 @@ export function migrateConfig({ silent = false } = {}) {
   // "Bash · · 0 tokens" on the card. New default uses `{tokensLabel}` which is
   // empty until tokens > 0, and fillTemplate now collapses adjacent separators.
   // Migrate only the verbatim old template — leave anything the user customized.
-  const OLD_WORKING = '{currentToolPretty} · {currentFilePretty} · {tokensFmt} tokens';
-  const OLD_THINKING = '{modelPretty} · {messagesLabel} · {tokensFmt} tokens';
-  if (cfg.presence.byStatus?.working?.state === OLD_WORKING &&
-      DEFAULT_CONFIG.presence?.byStatus?.working?.state) {
-    cfg.presence.byStatus.working.state = DEFAULT_CONFIG.presence.byStatus.working.state;
-    added.push('presence.byStatus.working.state');
-  }
-  if (cfg.presence.byStatus?.thinking?.state === OLD_THINKING &&
-      DEFAULT_CONFIG.presence?.byStatus?.thinking?.state) {
-    cfg.presence.byStatus.thinking.state = DEFAULT_CONFIG.presence.byStatus.thinking.state;
-    added.push('presence.byStatus.thinking.state');
+  for (const [status, old] of [
+    ['working', '{currentToolPretty} · {currentFilePretty} · {tokensFmt} tokens'],
+    ['thinking', '{modelPretty} · {messagesLabel} · {tokensFmt} tokens'],
+  ]) {
+    const next = DEFAULT_CONFIG.presence?.byStatus?.[status]?.state;
+    if (cfg.presence.byStatus?.[status]?.state === old && next) {
+      cfg.presence.byStatus[status].state = next;
+      added.push(`presence.byStatus.${status}.state`);
+    }
   }
 
   // v1.4.3: setup's "connect GitHub?" y could die on a server error (the
@@ -751,10 +753,7 @@ function verifyHookPipe(exePath) {
 // nothing). Reading the global package.json sidesteps that PATH shadowing.
 function globalInstalledVersion() {
   try {
-    const r = spawnSync('npm', ['root', '-g'], {
-      encoding: 'utf8', timeout: 4000, windowsHide: true,
-      shell: process.platform === 'win32',   // npm is npm.cmd on Windows
-    });
+    const r = npmSync(['root', '-g'], { timeout: 4000 });
     const root = (r.stdout || '').trim();
     if (!root) return null;
     const pkg = JSON.parse(readFileSync(join(root, 'claude-rpc', 'package.json'), 'utf8'));
@@ -770,11 +769,7 @@ function promoteNpxToGlobal() {
     noop('global install current');
     return true;
   }
-  const r = spawnSync('npm', ['install', '-g', `claude-rpc@${VERSION}`], {
-    encoding: 'utf8',
-    shell: process.platform === 'win32',   // npm is npm.cmd on Windows
-    windowsHide: true,                      // don't flash a console window
-  });
+  const r = npmSync(['install', '-g', `claude-rpc@${VERSION}`]);
   if (r.error || r.status !== 0) {
     // The piped npm chatter only matters when it failed.
     if (r.stdout) process.stderr.write(r.stdout);
@@ -792,11 +787,7 @@ function promoteNpxToGlobal() {
 // clue why. Warn loudly up front; never block setup on it (offline is fine).
 function warnIfStale() {
   try {
-    const r = spawnSync('npm', ['view', 'claude-rpc', 'version'], {
-      encoding: 'utf8', timeout: 4000,
-      shell: process.platform === 'win32',   // npm is npm.cmd on Windows
-      windowsHide: true,                      // don't flash a console window
-    });
+    const r = npmSync(['view', 'claude-rpc', 'version'], { timeout: 4000 });
     const latest = (r.stdout || '').trim();
     if (!latest || latest === VERSION) return;
     const num = (v) => v.split('.').map((n) => parseInt(n, 10) || 0);

@@ -1,11 +1,12 @@
 import { readdirSync, readFileSync, statSync, existsSync, writeFileSync, mkdirSync, openSync, readSync, closeSync, realpathSync } from 'node:fs';
-import { join, dirname, basename } from 'node:path';
+import { join, basename } from 'node:path';
 import { homedir } from 'node:os';
 import { CLAUDE_PROJECTS, SCAN_CACHE_PATH, AGGREGATE_PATH, DATA_DIR, EVENTS_LOG_PATH } from './paths.js';
 import { languageOf } from './languages.js';
 import { costFor, pricingKeyFor } from './pricing.js';
 import { classifyShip } from './ships.js';
 import { renameSyncRetry } from './atomic-rename.js';
+import { localDateStamp } from './fmt.js';
 
 // Bumping this forces a full re-parse on next scan. Increment whenever the
 // per-transcript summary schema changes in a way old caches can't satisfy.
@@ -22,8 +23,17 @@ const ACTIVE_GAP_CAP_MS = 5 * 60 * 1000;
 
 // Local-time YYYY-MM-DD key for bucketing.
 function dayKey(ts) {
-  const d = new Date(ts);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return localDateStamp(new Date(ts));
+}
+
+// Day key `offsetDays` local calendar days before the day containing `now`.
+// Steps with setDate from local midnight, so a 23h/25h DST day can't skip or
+// repeat a key the way subtracting 24h spans would.
+function dayKeyAt(now, offsetDays) {
+  const d = new Date(now);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - offsetDays);
+  return dayKey(d.getTime());
 }
 
 // ISO week key like "2026-W21" using local time. Monday-start.
@@ -40,6 +50,19 @@ function weekKey(ts) {
 
 function hourKey(ts) {
   return new Date(ts).getHours();
+}
+
+// All three bucket keys for one record, from a single Date. weekKey depends
+// only on the local calendar day (it floors to midnight first), so it's
+// memoized per day key — building its three Dates for every record was the
+// costliest step of bucketing.
+const weekKeyByDay = new Map();
+function bucketKeys(ts) {
+  const d = new Date(ts);
+  const day = localDateStamp(d);
+  let week = weekKeyByDay.get(day);
+  if (week === undefined) weekKeyByDay.set(day, (week = weekKey(ts)));
+  return { ts, day, week, hour: d.getHours() };
 }
 
 // Reject malformed or implausible transcript timestamps before they poison
@@ -106,7 +129,6 @@ function countLines(text) {
   // Treat empty trailing newline as not contributing — line count is the
   // number of "\n"-separated chunks that actually have content, plus one for
   // the final segment if non-empty.
-  if (text === '') return 0;
   const lines = text.split('\n');
   // Drop a single trailing empty string from a trailing newline.
   if (lines.length && lines[lines.length - 1] === '') lines.pop();
@@ -301,13 +323,11 @@ function parseChunkInto(text, summary, pstate) {
       summary.project = cleanProjectName(basename(r.cwd));
     }
     const ts = parseTs(r.timestamp);
-    const day = ts ? dayKey(ts) : null;
-    const week = ts ? weekKey(ts) : null;
-    const hour = ts ? hourKey(ts) : null;
-    const dayBucket  = day  ? (summary.byDay[day]   ||= blankDay()) : null;
-    const weekBucket = week ? (summary.byWeek[week] ||= blankDay()) : null;
-    const hourBucket = hour !== null ? (summary.byHour[hour] ||= blankDay()) : null;
-    const allBuckets = [dayBucket, weekBucket, hourBucket].filter(Boolean);
+    const rec = ts ? bucketKeys(ts) : null; // { ts, day, week, hour }
+    const dayBucket  = rec ? (summary.byDay[rec.day]   ||= blankDay()) : null;
+    const weekBucket = rec ? (summary.byWeek[rec.week] ||= blankDay()) : null;
+    const hourBucket = rec ? (summary.byHour[rec.hour] ||= blankDay()) : null;
+    const allBuckets = rec ? [dayBucket, weekBucket, hourBucket] : [];
     // First/last activity within each bucket — blankDay declares these and
     // mergeDay merges them, but nothing assigned them, so "started 09:14"-style
     // labels never rendered.
@@ -332,6 +352,11 @@ function parseChunkInto(text, summary, pstate) {
       // Per-model split bucket, keyed by pricing key so cost/tokens/turns align.
       const mkey = turnModel ? pricingKeyFor(turnModel) : null;
       const mb = mkey ? (summary.byModel[mkey] ||= { turns: 0, tokens: 0, cost: 0 }) : null;
+      // Per-day model split (day granularity only — week/hour stay lean).
+      // Powers model-mix-over-time; the all-time byModel can't trend.
+      const dm = firstSeen && mkey && dayBucket
+        ? ((dayBucket.byModel ||= {})[mkey] ||= { turns: 0, tokens: 0, cost: 0 })
+        : null;
       if (u && firstSeen) {
         summary.inputTokens += u.input_tokens || 0;
         summary.outputTokens += u.output_tokens || 0;
@@ -343,17 +368,10 @@ function parseChunkInto(text, summary, pstate) {
           bucket.cacheReadTokens += u.cache_read_input_tokens || 0;
           bucket.cacheWriteTokens += u.cache_creation_input_tokens || 0;
         }
-        if (mb) {
-          mb.tokens += (u.input_tokens || 0) + (u.output_tokens || 0)
-                     + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
-        }
-        // Per-day model split (day granularity only — week/hour stay lean).
-        // Powers model-mix-over-time; the all-time byModel can't trend.
-        if (mkey && dayBucket) {
-          const dm = ((dayBucket.byModel ||= {})[mkey] ||= { turns: 0, tokens: 0, cost: 0 });
-          dm.tokens += (u.input_tokens || 0) + (u.output_tokens || 0)
-                     + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
-        }
+        const turnTokens = (u.input_tokens || 0) + (u.output_tokens || 0)
+                         + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
+        if (mb) mb.tokens += turnTokens;
+        if (dm) dm.tokens += turnTokens;
         // Per-turn cost — uses this turn's model id, not the session's first-seen one.
         const turnCost = costFor({ model: turnModel, usage: u });
         if (turnCost > 0) {
@@ -365,8 +383,7 @@ function parseChunkInto(text, summary, pstate) {
           summary.costByModel[ck] = (summary.costByModel[ck] || 0) + turnCost;
           if (mb) mb.cost += turnCost;
           if (dayBucket) {
-            const dm = ((dayBucket.byModel ||= {})[ck] ||= { turns: 0, tokens: 0, cost: 0 });
-            dm.cost += turnCost;
+            ((dayBucket.byModel ||= {})[ck] ||= { turns: 0, tokens: 0, cost: 0 }).cost += turnCost;
           }
           for (const bucket of allBuckets) bucket.cost += turnCost;
         }
@@ -376,10 +393,7 @@ function parseChunkInto(text, summary, pstate) {
         if (firstSeen) {
           summary.modelsUsed[turnModel] = (summary.modelsUsed[turnModel] || 0) + 1;
           if (mb) mb.turns += 1;
-          if (mkey && dayBucket) {
-            const dm = ((dayBucket.byModel ||= {})[mkey] ||= { turns: 0, tokens: 0, cost: 0 });
-            dm.turns += 1;
-          }
+          if (dm) dm.turns += 1;
         }
       }
       const blocks = r.message?.content || [];
@@ -455,7 +469,7 @@ function parseChunkInto(text, summary, pstate) {
       summary.userMessages += 1;
       for (const bucket of allBuckets) bucket.userMessages += 1;
     }
-    if (ts) records.push({ ts, day, week, hour });
+    if (rec) records.push(rec);
   }
 
   summary.files = Array.from(fileSet);
@@ -840,7 +854,7 @@ export function readAggregate() {
   catch { return null; }
 }
 
-export { dayKey, weekKey, hourKey };
+export { dayKey, dayKeyAt, weekKey, hourKey };
 
 export function aggregateFrom(cache) {
   const agg = {
@@ -1079,11 +1093,7 @@ export function aggregateFrom(cache) {
     agg.daysSinceFirst = todayNum - dayKeyNum(days[0]) + 1;
 
     // Current streak: walk back from today.
-    const has = (offset) => {
-      const d = new Date(today);
-      d.setDate(d.getDate() - offset);
-      return !!agg.byDay[dayKey(d)];
-    };
+    const has = (offset) => !!agg.byDay[dayKeyAt(today, offset)];
     let streak = 0;
     let offset = has(0) ? 0 : 1; // if no activity today, start from yesterday
     while (has(offset)) { streak += 1; offset += 1; }
@@ -1264,7 +1274,7 @@ export function scan({ projectsDir, projectsDirs, onProgress, force = false, ext
       cache.files[fp] = summary;
       scanned += 1;
       if (onProgress) onProgress({ scanned, skipped, total: transcripts.length, file: fp });
-    } catch (e) {
+    } catch {
       // skip corrupt file but keep prior cache entry
     }
   }

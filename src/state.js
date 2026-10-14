@@ -1,4 +1,11 @@
-import {
+import { createRequire } from 'node:module';
+import { basename, join } from 'node:path';
+import { STATE_PATH, STATE_DIR } from './paths.js';
+import { pickActiveSession } from './presence.js';
+import { renameSyncRetry, sleepSync } from './atomic-rename.js';
+
+// require()d, not imported — on the hook hot path; see hook.js.
+const {
   existsSync,
   mkdirSync,
   readFileSync,
@@ -9,11 +16,7 @@ import {
   statSync,
   fstatSync,
   readdirSync,
-} from 'node:fs';
-import { basename, join } from 'node:path';
-import { STATE_PATH, STATE_DIR } from './paths.js';
-import { pickActiveSession } from './presence.js';
-import { renameSyncRetry } from './atomic-rename.js';
+} = createRequire(import.meta.url)('node:fs');
 
 const DEFAULT_STATE = {
   sessionStart: null,
@@ -74,17 +77,6 @@ function ensureDir() {
 const LOCK_STALE_MS = 2000;
 const LOCK_RETRY_MS = 4;
 const LOCK_MAX_WAIT_MS = 1000;
-
-// Synchronous sleep — hooks are short-lived sync processes, so a blocking spin
-// with a real wait (no busy-loop) is the right tool. Atomics.wait on a throwaway
-// SharedArrayBuffer parks the thread without burning CPU.
-function sleepSync(ms) {
-  try {
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-  } catch {
-    /* SharedArrayBuffer unavailable — fall through, caller just retries sooner */
-  }
-}
 
 function acquireLock(lockPath) {
   const deadline = Date.now() + LOCK_MAX_WAIT_MS;
@@ -161,13 +153,10 @@ export function statePathFor(sessionId) {
 
 export function readState(sessionId) {
   ensureDir();
-  const path = statePathFor(sessionId);
-  if (!existsSync(path)) return { ...DEFAULT_STATE };
   try {
-    const raw = readFileSync(path, 'utf8');
-    return { ...DEFAULT_STATE, ...JSON.parse(raw) };
+    return { ...DEFAULT_STATE, ...JSON.parse(readFileSync(statePathFor(sessionId), 'utf8')) };
   } catch {
-    return { ...DEFAULT_STATE };
+    return { ...DEFAULT_STATE }; // missing, torn, or unparseable
   }
 }
 

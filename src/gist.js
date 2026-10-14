@@ -166,6 +166,10 @@ export async function publishGistFile({
   token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN,
 }) {
   if (!svg || typeof svg !== 'string') throw new Error('publishGistFile: svg must be a non-empty string');
+  // Same result shape from either backend: EDIT keeps the caller's gist
+  // identity, CREATE adopts the new gist's (plus its html URL).
+  const edited = () => ({ id: gistId, owner: owner || '', filename, rawUrl: rawGistUrl({ owner: owner || '', id: gistId, filename }) });
+  const created = (g) => ({ id: g.id, owner: g.owner, filename, htmlUrl: g.htmlUrl, rawUrl: rawGistUrl({ owner: g.owner, id: g.id, filename }) });
   if (hasGh()) {
     const dir = mkdtempSync(join(tmpdir(), 'claude-rpc-gist-'));
     const path = join(dir, filename);
@@ -173,16 +177,9 @@ export async function publishGistFile({
     try {
       if (gistId) {
         ghEdit(gistId, path);
-        return { id: gistId, owner: owner || '', filename, rawUrl: rawGistUrl({ owner: owner || '', id: gistId, filename }) };
+        return edited();
       }
-      const created = ghCreate(path, description, isPublic);
-      return {
-        id: created.id,
-        owner: created.owner,
-        filename,
-        htmlUrl: created.htmlUrl,
-        rawUrl: rawGistUrl({ owner: created.owner, id: created.id, filename }),
-      };
+      return created(ghCreate(path, description, isPublic));
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -192,14 +189,7 @@ export async function publishGistFile({
   }
   if (gistId) {
     await restEdit({ svg, filename, gistId, token });
-    return { id: gistId, owner: owner || '', filename, rawUrl: rawGistUrl({ owner: owner || '', id: gistId, filename }) };
+    return edited();
   }
-  const created = await restCreate({ svg, filename, description, isPublic, token });
-  return {
-    id: created.id,
-    owner: created.owner,
-    filename,
-    htmlUrl: created.htmlUrl,
-    rawUrl: rawGistUrl({ owner: created.owner, id: created.id, filename }),
-  };
+  return created(await restCreate({ svg, filename, description, isPublic, token }));
 }

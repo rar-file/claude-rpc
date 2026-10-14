@@ -71,10 +71,7 @@ const MAX_REPORT_TOKENS = 5_000_000_000;
 // here, add it there too.
 export function buildPayload(aggregate, cursor, { instanceId, now = Date.now() }) {
   const sessions = aggregate?.sessions || 0;
-  const tokens = (aggregate?.inputTokens || 0)
-    + (aggregate?.outputTokens || 0)
-    + (aggregate?.cacheReadTokens || 0)
-    + (aggregate?.cacheWriteTokens || 0);
+  const tokens = totalTokens(aggregate);
   return {
     instanceId,
     sessionsDelta: Math.min(MAX_REPORT_SESSIONS, Math.max(0, sessions - (cursor.sessions || 0))),
@@ -264,23 +261,31 @@ export function buildWrappedPayload(aggregate, config, { instanceId, year, now =
   };
 }
 
-// One-shot POST of a built wrapped payload. Mirrors flushProfile's error
-// contract: never throws, returns { ok, reason?, url? }.
-export async function publishWrapped(cfg, payload, { fetchImpl = globalThis.fetch } = {}) {
-  const community = cfg?.community || {};
-  if (!community.endpoint) return { ok: false, reason: 'no-endpoint' };
-  const url = community.endpoint.replace(/\/+$/, '') + '/wrapped';
-  let res;
+// POST a JSON payload to `<endpoint><route>`. Resolves { res }, or { fail }:
+// the { ok:false, reason:'network' } result callers return as-is. Bare fetch
+// never times out; a hung peer would wedge the 30-min flush loop.
+async function postJson(fetchImpl, endpoint, route, payload) {
+  const url = endpoint.replace(/\/+$/, '') + route;
   try {
-    res = await fetchImpl(url, {
+    const res = await fetchImpl(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(10_000),
     });
+    return { res };
   } catch (e) {
-    return { ok: false, reason: 'network', error: e.message };
+    return { fail: { ok: false, reason: 'network', error: e.message } };
   }
+}
+
+// One-shot POST of a built wrapped payload. Mirrors flushProfile's error
+// contract: never throws, returns { ok, reason?, url? }.
+export async function publishWrapped(cfg, payload, { fetchImpl = globalThis.fetch } = {}) {
+  const community = cfg?.community || {};
+  if (!community.endpoint) return { ok: false, reason: 'no-endpoint' };
+  const { res, fail } = await postJson(fetchImpl, community.endpoint, '/wrapped', payload);
+  if (fail) return fail;
   let body = null;
   try { body = await res.json(); } catch { /* non-JSON error body */ }
   if (!res.ok) {
@@ -308,18 +313,8 @@ export async function flushProfile(cfg, {
   catch { return { ok: false, reason: 'unreadable-aggregate' }; }
 
   const payload = buildProfilePayload(aggregate, profile, { instanceId });
-  const url = community.endpoint.replace(/\/+$/, '') + '/profile';
-  let res;
-  try {
-    res = await fetchImpl(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(10_000), // bare fetch never times out; a hung peer would wedge the 30-min flush loop
-    });
-  } catch (e) {
-    return { ok: false, reason: 'network', error: e.message };
-  }
+  const { res, fail } = await postJson(fetchImpl, community.endpoint, '/profile', payload);
+  if (fail) return fail;
   if (!res.ok) {
     if (res.status === 429) return { ok: false, reason: 'rate-limited' };
     return { ok: false, reason: `http-${res.status}` };
@@ -351,18 +346,8 @@ export async function flushCommunity(cfg, {
     return { ok: true, reason: 'no-delta' };
   }
 
-  const url = community.endpoint.replace(/\/+$/, '') + '/report';
-  let res;
-  try {
-    res = await fetchImpl(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(10_000), // bare fetch never times out; a hung peer would wedge the 30-min flush loop
-    });
-  } catch (e) {
-    return { ok: false, reason: 'network', error: e.message };
-  }
+  const { res, fail } = await postJson(fetchImpl, community.endpoint, '/report', payload);
+  if (fail) return fail;
   if (!res.ok) {
     // 429 is rate-limit — not actually a failure, just "come back later".
     if (res.status === 429) return { ok: false, reason: 'rate-limited' };

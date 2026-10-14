@@ -11,12 +11,15 @@
 // entry, several SessionStart hooks from concurrent sessions — exactly one
 // daemon survives.
 
-import { spawn } from 'node:child_process';
-import {
-  openSync, closeSync, writeFileSync, readFileSync, unlinkSync, existsSync, statSync, mkdirSync,
-} from 'node:fs';
+import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { PID_PATH, STATE_DIR, DAEMON_SCRIPT, CANONICAL_EXE, IS_PACKAGED } from './paths.js';
+
+// require()d, not imported — on the hook hot path; see hook.js.
+const require = createRequire(import.meta.url);
+const {
+  openSync, closeSync, writeFileSync, readFileSync, unlinkSync, existsSync, statSync, mkdirSync,
+} = require('node:fs');
 
 // mtime of this marker = last time any launcher attempted a spawn. A short
 // cooldown stops concurrent SessionStart hooks (several sessions opening at
@@ -58,6 +61,10 @@ export function spawnDaemonDetached() {
   const exe = (IS_PACKAGED && existsSync(CANONICAL_EXE)) ? CANONICAL_EXE : process.execPath;
   const args = IS_PACKAGED ? ['daemon'] : [DAEMON_SCRIPT];
   try {
+    // Required here, not imported: node:child_process (plus dgram and the
+    // spawn bindings it pulls in) costs the hook a few ms on every event,
+    // although it only spawns when the daemon is down.
+    const { spawn } = require('node:child_process');
     const child = spawn(exe, args, { detached: true, stdio: 'ignore', windowsHide: true });
     // An async spawn failure (ENOENT on the exe) emits 'error'; with no listener
     // Node rethrows it as an unhandled exception that can take down the launcher.

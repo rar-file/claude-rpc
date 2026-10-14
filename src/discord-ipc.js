@@ -355,16 +355,20 @@ export class Client extends EventEmitter {
     };
   }
 
-  _onClose(reason) {
-    const wasConnected = this._connected || !!this.socket;
-    // Fail any in-flight requests so awaiters don't hang forever.
+  // Fail every in-flight request so awaiters don't hang forever.
+  _rejectPending(message) {
     for (const { reject, timer } of this._pending.values()) {
       clearTimeout(timer);
-      const err = new Error(typeof reason === 'string' ? reason : 'Connection closed');
+      const err = new Error(message);
       err.code = 'ECONNRESET';
       reject(err);
     }
     this._pending.clear();
+  }
+
+  _onClose(reason) {
+    const wasConnected = this._connected || !!this.socket;
+    this._rejectPending(typeof reason === 'string' ? reason : 'Connection closed');
     if (this._readyReject && !this._connected) {
       const err = new Error('Connection closed before ready');
       err.code = 'ECONNRESET';
@@ -394,13 +398,7 @@ export class Client extends EventEmitter {
     // Reject in-flight requests (mirrors _onClose) — a pushPresence parked on
     // `await setActivity` when the watchdog tears the client down must settle,
     // not leak as a forever-pending promise.
-    for (const { reject, timer } of this._pending.values()) {
-      clearTimeout(timer);
-      const err = new Error('Client destroyed');
-      err.code = 'ECONNRESET';
-      reject(err);
-    }
-    this._pending.clear();
+    this._rejectPending('Client destroyed');
     this._teardownSocket();
     this._connected = false;
   }

@@ -11,7 +11,7 @@
 //                 today and says so — Monday standups cover Friday.
 //   week        — the last 7 local days, ending today
 //   YYYY-MM-DD  — one explicit local day
-import { dayKey } from './scanner.js';
+import { dayKeyAt } from './scanner.js';
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const SHIP_LABELS = [
@@ -36,13 +36,6 @@ function fmtN(n) {
   if (n < 1e9) return `${(n / 1e6).toFixed(2)}M`;
   if (n < 1e12) return `${(n / 1e9).toFixed(2)}B`;
   return `${(n / 1e12).toFixed(2)}T`;
-}
-
-function dayKeyAt(now, offsetDays) {
-  const d = new Date(now);
-  d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() - offsetDays);
-  return dayKey(d.getTime());
 }
 
 // "Tue 2026-07-01" — manual weekday names so output is locale-stable.

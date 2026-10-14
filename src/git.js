@@ -7,8 +7,11 @@
 // The detached-HEAD case (HEAD contains a raw SHA, not `ref: refs/heads/...`)
 // returns an empty branch — template `requires` will hide the branch frame.
 
-import { readFileSync, statSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { basename, join, isAbsolute } from 'node:path';
+
+// require()d, not imported — on the hook hot path; see hook.js.
+const { readFileSync, statSync } = createRequire(import.meta.url)('node:fs');
 
 const TTL_MS = 5 * 60 * 1000;
 const cache = new Map(); // cwd → { ts, github, branch, repo }

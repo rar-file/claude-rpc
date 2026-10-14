@@ -18,12 +18,20 @@ import { projectDrilldown, dayDetail } from './api.js';
 import { watchSources, addClient, removeClient } from './sse.js';
 import { buildHtml, buildWrappedHtml } from './page.js';
 
+const PORT = Number(process.env.CLAUDE_RPC_PORT) || 47474;
+
 // Pre-compose the HTML once at startup — the only dynamic bit is the port
 // (used in a breadcrumb), which is fixed for the life of the daemon.
-const HTML = buildHtml({ port: Number(process.env.CLAUDE_RPC_PORT) || 47474 });
+const HTML = buildHtml({ port: PORT });
 const WRAPPED_HTML = buildWrappedHtml();
+const PAGES = new Map([
+  ['/', HTML], ['/index.html', HTML],
+  ['/wrapped', WRAPPED_HTML], ['/wrapped.html', WRAPPED_HTML], // animated year-in-review
+]);
 
-const PORT = Number(process.env.CLAUDE_RPC_PORT) || 47474;
+// Path-prefix drilldowns — the project name / day key is in the URL path
+// itself, not in a query string.
+const DRILLDOWNS = [['/api/project/', projectDrilldown], ['/api/day/', dayDetail]];
 
 function parseUrl(rawUrl) {
   const url = new URL(rawUrl, 'http://x');
@@ -65,22 +73,11 @@ function dispatch(req, res) {
     return;
   }
 
-  // Project drilldown. Path-prefix dispatch (the project name is in the
-  // URL itself, not in a query string).
-  if (req.method === 'GET' && path.startsWith('/api/project/')) {
-    const name = safeDecode(path.slice('/api/project/'.length));
-    if (name === null) { res.writeHead(400, JSON_HEADERS).end(JSON.stringify({ error: 'bad request' })); return; }
-    const result = projectDrilldown(name);
-    res.writeHead(result ? 200 : 404, JSON_HEADERS);
-    res.end(JSON.stringify(result || { error: 'not found' }));
-    return;
-  }
-
-  // Day detail. Same pattern — day key in the URL path.
-  if (req.method === 'GET' && path.startsWith('/api/day/')) {
-    const day = safeDecode(path.slice('/api/day/'.length));
-    if (day === null) { res.writeHead(400, JSON_HEADERS).end(JSON.stringify({ error: 'bad request' })); return; }
-    const result = dayDetail(day);
+  for (const [prefix, lookup] of DRILLDOWNS) {
+    if (req.method !== 'GET' || !path.startsWith(prefix)) continue;
+    const id = safeDecode(path.slice(prefix.length));
+    if (id === null) { res.writeHead(400, JSON_HEADERS).end(JSON.stringify({ error: 'bad request' })); return; }
+    const result = lookup(id);
     res.writeHead(result ? 200 : 404, JSON_HEADERS);
     res.end(JSON.stringify(result || { error: 'not found' }));
     return;
@@ -90,17 +87,10 @@ function dispatch(req, res) {
   const handler = ROUTES.get(key);
   if (handler) return handler(req, res, { query });
 
-  // Animated year-in-review.
-  if (req.method === 'GET' && (path === '/wrapped' || path === '/wrapped.html')) {
+  const page = req.method === 'GET' && PAGES.get(path);
+  if (page) {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
-    res.end(WRAPPED_HTML);
-    return;
-  }
-
-  // Page.
-  if (req.method === 'GET' && (path === '/' || path === '/index.html')) {
-    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
-    res.end(HTML);
+    res.end(page);
     return;
   }
 

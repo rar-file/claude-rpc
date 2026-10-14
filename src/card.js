@@ -11,9 +11,8 @@
 // Output is SVG only (no PNG dep). Modern Discord / GitHub render the SVG
 // inline; for hard-copy sharing, screenshot or convert via any web tool.
 
-import { dayKey } from './scanner.js';
 import { fmtCost } from './pricing.js';
-import { rangeToDays, rangeLabel, pickWindow } from './badge.js';
+import { rangeLabel, pickWindow } from './badge.js';
 import { VERSION } from './version.js';
 import { fmtNum, fmtHours, localDateStamp } from './fmt.js';
 
@@ -202,26 +201,6 @@ function activityStrip(x, y, w, h, byDay, range) {
     bars += `<rect x="${x + i * colW}" y="${y + (h - bh)}" width="${bw}" height="${bh}" fill="${PALETTE.rust}" opacity="${0.45 + ratio * 0.45}"/>`;
   }
   return `<g>${bars}</g>`;
-}
-
-// Heatmap-like dot row of the last N days.
-function dotRow(x, y, byDay, range) {
-  const window = pickWindow(byDay, range).reverse();
-  const sz = 9;
-  const gap = 2;
-  let svg = '';
-  for (let i = 0; i < window.length; i++) {
-    const [, d] = window[i];
-    const ms = d.activeMs || 0;
-    const intensity = ms === 0 ? 0 : Math.min(1, ms / (4 * 3_600_000)); // 4h = full
-    const fill = intensity === 0
-      ? PALETTE.paper3
-      : intensity < 0.34 ? '#f6dccb'
-      : intensity < 0.67 ? PALETTE.rust3
-      : PALETTE.rust;
-    svg += `<rect x="${x + i * (sz + gap)}" y="${y}" width="${sz}" height="${sz}" fill="${fill}" stroke="${PALETTE.ink}" stroke-width="0.5"/>`;
-  }
-  return svg;
 }
 
 // ── public entry point ─────────────────────────────────────────────────
