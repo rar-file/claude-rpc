@@ -16,21 +16,14 @@
   
   --shadow: 3px 3px 0 var(--ink);
   --shadow-hover: 5px 5px 0 var(--ink);
-  --radius: 0;
-  
-  /* Fallbacks for existing variables used by page.js */
-  --bg: var(--paper);
+
+  /* Older names still referenced by this sheet, dashboard.html inline
+     styles and dashboard.client.js markup strings. */
   --text: var(--ink);
-  --text-2: var(--ink-soft);
   --text-3: var(--ink-mute);
   --text-4: var(--ink-faint);
   --border: var(--ink);
-  --surface: #fff;
-  --surface-hover: var(--paper);
-  --green: var(--grass);
-  --red: #c54a3a;
   --purple: #5865f2; /* using blurple */
-  --amber: var(--tape);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -71,8 +64,6 @@ h1, h2, h3 { font-family: var(--font-disp); }
   box-shadow: 2px 2px 0 var(--rust);
   transform: rotate(-3deg);
 }
-.brand .sep { display: none; }
-.brand .meta { display: none; }
 .top-right { margin-left: auto; display: flex; align-items: center; gap: 16px; }
 
 .range-pills {
@@ -100,8 +91,6 @@ h1, h2, h3 { font-family: var(--font-disp); }
   padding: 6px 12px; border: 2px solid var(--ink); box-shadow: 2px 2px 0 var(--ink);
   transform: rotate(-2deg);
 }
-.status .dot { display: none; }
-.theme-btn { display: none; } /* Hide theme toggle, we only use paper now */
 .model { font-family: var(--font-mono); font-size: 12px; font-weight: 700; background: #fff; padding: 4px 8px; border: 2px solid var(--ink); box-shadow: 2px 2px 0 var(--ink); }
 
 /* ── Live rail ───────────────────────────────────────── */
@@ -123,7 +112,6 @@ h1, h2, h3 { font-family: var(--font-disp); }
   border: 2px solid var(--ink); box-shadow: 2px 2px 0 var(--ink) inset; overflow: hidden;
 }
 .live-rail .avatar img { width: 100%; height: 100%; object-fit: cover; }
-.live-rail .frame-app { display: none; }
 .live-rail .frame-details { font-family: var(--font-disp); font-size: 22px; font-weight: 700; margin-bottom: 4px; }
 .live-rail .frame-state { font-family: var(--font-mono); font-size: 13px; color: var(--ink-mute); }
 .live-rail .right { text-align: right; border-left: 2px dashed var(--ink); padding-left: 24px; }
@@ -154,7 +142,6 @@ svg.chart .grid { stroke: var(--ink-faint); stroke-width: 1; stroke-dasharray: 2
 svg.chart .area { fill: url(#whiteGrad); }
 svg.chart .line { fill: none; stroke: var(--rust); stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
 svg.chart .dot  { fill: var(--rust); stroke: #fff; stroke-width: 2px; }
-svg.chart .ax   { fill: var(--ink-mute); font-size: 10px; font-family: var(--font-mono); font-weight: 700; }
 .chart-wrap, .churn-spark { cursor: crosshair; }
 
 /* Cursor-following hover tooltip shared by the activity chart + churn spark. */
@@ -201,6 +188,7 @@ svg.chart .ax   { fill: var(--ink-mute); font-size: 10px; font-family: var(--fon
 .cost-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 24px; align-items: center; }
 .cost-figure { font-family: var(--font-disp); font-size: 48px; font-weight: 700; line-height: 1; }
 .cost-sub { font-family: var(--font-mono); color: var(--ink-mute); font-size: 12px; margin-top: 8px; font-weight: 700; }
+.cost-bars-cap { font-family: var(--font-mono); font-size: 11px; font-weight: 700; color: var(--ink-mute); margin-bottom: 10px; }
 .cost-bars { display: grid; gap: 12px; font-family: var(--font-mono); font-size: 12px; font-weight: 700; }
 .cost-bar { display: grid; grid-template-columns: 60px 1fr auto; gap: 8px; align-items: center; }
 .cost-bar .name { color: var(--ink-soft); }
@@ -247,7 +235,7 @@ section { margin-bottom: 48px; }
 .lb tr:hover td { background: var(--paper); }
 .lb td.name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 1px; color: var(--ink); }
 .lb td.val  { color: var(--ink-soft); text-align: right; white-space: nowrap; }
-.lb td.name .ico { width: 12px; height: 12px; border: 1.5px solid var(--ink); margin-right: 8px; vertical-align: -2px; }
+.lb tr.clickable { cursor: pointer; }
 
 /* ── Discord card ────────────────────────────────────── */
 .discord { background: #fff; border: 2px solid var(--ink); padding: 32px; box-shadow: var(--shadow); position: relative; }
@@ -255,7 +243,6 @@ section { margin-bottom: 48px; }
 .discord-h .t { font-size: 14px; text-transform: uppercase; border-bottom: 2px solid var(--rust); padding-bottom: 4px; }
 .live-frame { padding: 24px 0; border-top: 2px solid var(--ink); border-bottom: 2px dashed var(--ink); }
 .live-frame .label-tag { font-family: var(--font-mono); font-size: 11px; font-weight: 700; background: var(--grass); color: #fff; padding: 4px 8px; border: 1.5px solid var(--ink); box-shadow: 2px 2px 0 var(--ink); display: inline-block; margin-bottom: 12px; transform: rotate(-2deg); }
-.live-frame .label-tag::before { display: none; }
 .live-frame .details { font-family: var(--font-disp); font-size: 24px; font-weight: 700; margin-bottom: 4px; }
 .live-frame .state { font-family: var(--font-mono); font-size: 13px; color: var(--ink-soft); font-weight: 600; }
 .rotation-list { list-style: none; margin-top: 24px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px 24px; font-family: var(--font-mono); font-size: 12px; font-weight: 700; }
@@ -287,6 +274,19 @@ section { margin-bottom: 48px; }
 .modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%) scale(0.96); background: var(--paper); border: 2px solid var(--ink); padding: 40px; box-shadow: 10px 10px 0 var(--ink); z-index: 60; opacity: 0; pointer-events: none; transition: all 0.2s; }
 .modal.open { opacity: 1; transform: translate(-50%, -50%) scale(1); pointer-events: auto; }
 .modal h4 { font-family: var(--font-disp); font-size: 24px; margin-bottom: 8px; }
+.modal .sub { font-family: var(--font-mono); color: var(--ink-mute); font-weight: 700; margin-bottom: 16px; }
+
+/* Label/value rows in the project drawer + day modal (kvRows in the client). */
+.kv { display: flex; justify-content: space-between; gap: 24px; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.kv .k { color: var(--text-3); }
+.kv .v { font-weight: 500; font-variant-numeric: tabular-nums; }
+.drawer .close, .modal .close {
+  position: absolute; top: 14px; right: 14px; width: 32px; height: 32px;
+  display: grid; place-items: center;
+  font-family: var(--font-mono); font-size: 18px; font-weight: 700; line-height: 1;
+  background: #fff; border: 2px solid var(--ink); box-shadow: 2px 2px 0 var(--ink);
+}
+.drawer .close:hover, .modal .close:hover { background: var(--tape); }
 
 footer { margin-top: 60px; padding-top: 32px; border-top: 2px dashed var(--ink); display: flex; justify-content: space-between; align-items: center; font-family: var(--font-mono); font-weight: 700; font-size: 12px; color: var(--ink-mute); }
 footer .pulse-dot { background: var(--grass); border: 1.5px solid var(--ink); }

@@ -4,17 +4,12 @@
 
 import { basename } from 'node:path';
 import { readActiveState } from '../state.js';
-import { buildVars, fillTemplate, applyIdle, framePasses, humanModel } from '../format.js';
+import { buildVars, fillTemplate, applyIdle, applyShipped, applyTrigger, framePasses, humanModel } from '../format.js';
+import { pickFrames, resolveLargeImageKey } from '../presence.js';
 import { readAggregate, findLiveSessions, dayKey } from '../scanner.js';
-import { loadConfig as loadSharedConfig } from '../config.js';
-
-// Re-export under the historical name so any external callers (e.g. tests
-// that did `import { loadConfig } from '../api.js'`) still resolve.
-// Internally everything uses the shared loader so a bad config doesn't
-// blank out the dashboard with `{}` — it falls back to defaults.
-export function loadConfig() {
-  return loadSharedConfig();
-}
+// The shared loader: a bad config falls back to defaults instead of blanking
+// the dashboard with `{}`.
+import { loadConfig } from '../config.js';
 
 export function rangeToDays(range) {
   if (range === 'all') return Infinity;
@@ -26,12 +21,21 @@ export function rangeToDays(range) {
   return Number.isFinite(n) && n > 0 ? Math.min(n, 366) : 90;
 }
 
-// Filter byDay to a windowed slice; also recompute roll-ups (top files etc.)
-// scoped to that window. Returns a shape similar to the aggregate but trimmed.
+const grandTokensOf = (o) =>
+  (o.inputTokens || 0) + (o.outputTokens || 0) + (o.cacheReadTokens || 0) + (o.cacheWriteTokens || 0);
+
+// Slice the aggregate to the last `range` days. Only what byDay can answer is
+// recomputed for the window: active time, prompts, tool calls, lines, cost,
+// sessions, tokens (+ grandTokens) and the prior window's active time. Every
+// other roll-up (projects, tools, files, languages, bash, domains, subagents,
+// cost by model, hour/weekday histograms, streaks) passes through as the
+// LIFETIME value, since the aggregate doesn't keep those per day; the dashboard
+// labels those panels "all time". range=all returns the lifetime aggregate
+// itself plus grandTokens, which the range and cost cards read.
 export function windowedAggregate(agg, range) {
   if (!agg) return null;
   const days = rangeToDays(range);
-  if (!Number.isFinite(days)) return agg; // 'all' → pass through
+  if (!Number.isFinite(days)) return { ...agg, range, grandTokens: grandTokensOf(agg) };
 
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const keepKeys = new Set();
@@ -83,7 +87,7 @@ export function windowedAggregate(agg, range) {
     sessions,
     inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens,
     grandTokens: inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens,
-    // Pass-through global keys for context.
+    // Lifetime pass-through (see the comment above).
     streak: agg.streak,
     longestStreak: agg.longestStreak,
     daysSinceFirst: agg.daysSinceFirst,
@@ -106,23 +110,48 @@ export function windowedAggregate(agg, range) {
   };
 }
 
-// Live snapshot: current state + lifetime aggregate + rendered rotation frames.
-// Used by GET /api/state — the SSE 'state' event tells the client to refetch.
+// The Discord preview for the current status: the frame set the daemon renders
+// (daemon.js buildActivity → presence.js pickFrames, i.e. the presence.byStatus
+// entry, or a legacy top-level presence.rotation only when byStatus has none),
+// templated and truncated the same way. `passes` mirrors selectFrame's
+// `requires` filter, including its fallback to the base frame when nothing
+// passes.
+export function presenceFrames(p, state, vars) {
+  const raw = state.status === 'trigger' && state._triggerFrame
+    ? [state._triggerFrame]
+    : pickFrames(p, state.status).frames;
+  const frames = raw.map((f) => ({
+    details: f.details ? fillTemplate(f.details, vars).slice(0, 128) : '',
+    state: f.state ? fillTemplate(f.state, vars).slice(0, 128) : '',
+    passes: framePasses(f, vars),
+    requires: f.requires || null,
+  }));
+  if (frames.length && !frames.some((f) => f.passes)) frames[0].passes = true;
+  return frames;
+}
+
+// Live snapshot: current state + lifetime aggregate + the Discord preview
+// (frames + large image). Used by GET /api/state; the SSE 'state' event tells
+// the client to refetch.
 export function snapshot() {
   const config = loadConfig();
   const live = findLiveSessions({ thresholdMs: 90_000 });
   let state = readActiveState();
   state.liveSessions = live;
+  // Same overlay chain as daemon.js resolvePresence (idle/stale, then the
+  // shipped and custom-trigger frames), so the status shown here is the one
+  // the card is rendering.
   state = applyIdle(state, config);
+  state = applyShipped(state, config);
+  state = applyTrigger(state, config);
   const aggregate = readAggregate() || {};
   const vars = buildVars(state, config, aggregate);
   const p = config.presence || {};
-  const frames = (p.rotation || []).map((f) => ({
-    details: fillTemplate(f.details || '', vars),
-    state: fillTemplate(f.state || '', vars),
-    passes: framePasses(f, vars),
-    requires: f.requires || null,
-  }));
+  const frames = presenceFrames(p, state, vars);
+  // The card's large image, same precedence as the daemon (statusAssets[status]
+  // > modelAssets[tier] > presence.largeImageKey), filled the same way.
+  const largeKeyTpl = resolveLargeImageKey(config, p, state.status, state.model);
+  const largeImage = largeKeyTpl ? fillTemplate(largeKeyTpl, vars) : null;
   return {
     now: Date.now(),
     state,
@@ -165,6 +194,7 @@ export function snapshot() {
     },
     vars,
     frames,
+    largeImage,
   };
 }
 
@@ -209,24 +239,22 @@ export function wrappedData() {
   };
 }
 
+// GET /api/project/:name: one project's lifetime roll-up. The aggregate keeps
+// only scalar totals per project (sessions, active time, tokens, prompts, tool
+// calls, lines, cost). Edited files and the tool breakdown are tracked
+// globally, not per project, so they are deliberately not included here.
+// Own-property lookups so names like `constructor` aren't "found".
 export function projectDrilldown(name) {
-  const agg = readAggregate() || {};
-  const projects = agg.projects || {};
-  const project = projects[name];
-  if (!project) return null;
-  return {
-    name,
-    ...project,
-    files: (agg.topEditedFiles || []).slice(0, 25),
-    tools: agg.toolBreakdown || {},
-  };
+  const projects = (readAggregate() || {}).projects || {};
+  if (!Object.hasOwn(projects, name) || !projects[name]) return null;
+  return { name, ...projects[name] };
 }
 
+// GET /api/day/:day: one byDay bucket, for the dashboard's day modal.
 export function dayDetail(dayKeyStr) {
-  const agg = readAggregate() || {};
-  const day = (agg.byDay || {})[dayKeyStr];
-  if (!day) return null;
-  return { day: dayKeyStr, ...day };
+  const byDay = (readAggregate() || {}).byDay || {};
+  if (!Object.hasOwn(byDay, dayKeyStr) || !byDay[dayKeyStr]) return null;
+  return { day: dayKeyStr, ...byDay[dayKeyStr] };
 }
 
 // Flatten the aggregate's byDay map into a daily-rows CSV for spreadsheet /

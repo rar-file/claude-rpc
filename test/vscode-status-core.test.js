@@ -4,9 +4,16 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
-const { resolveStatus, buildView, humanModel, projectName } =
-  await import('../vscode-extension/status-core.js');
+import { pickActiveSession as daemonPick } from '../src/presence.js';
+
+const {
+  resolveStatus, buildView, humanModel, projectName,
+  STATE_FILE_RE, hasStateFiles, listSessionStates, pickActiveSession, readActiveState,
+} = await import('../vscode-extension/status-core.js');
 
 const NOW = 1_750_000_000_000;
 
@@ -123,4 +130,83 @@ test('buildView: setupNeeded renders the onboarding prompt regardless of state',
   assert.ok(v.tooltipLines.some((l) => /npx claude-rpc@latest setup/.test(l)));
   // hideWhenStale also hides the setup prompt (the "leave me alone" setting).
   assert.equal(buildView(null, null, 0, { now: NOW, setupNeeded: true, hideWhenStale: true }).hidden, true);
+});
+
+// ── Session state files ────────────────────────────────────────────────────
+// Hooks write one state-<sid>.json per session; the extension used to read
+// only the legacy state.json, so a real session showed "Away".
+
+function stateDir(t, files) {
+  const dir = mkdtempSync(join(tmpdir(), 'vscode-state-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  for (const [name, body] of Object.entries(files)) {
+    writeFileSync(join(dir, name), typeof body === 'string' ? body : JSON.stringify(body));
+  }
+  return dir;
+}
+
+test('pickActiveSession mirrors src/presence.js exactly', () => {
+  const s = (id, ago, extra = {}) => ({ sessionId: id, lastActivity: NOW - ago, ...extra });
+  const cases = [
+    [[], null],
+    [[s('a', 5_000), s('b', 1_000)], null],
+    [[s('a', 5_000), s('b', 1_000)], 'a'],
+    [[s('a', 90_000), s('b', 1_000)], 'a'],
+    [[s('a', 1_000, { claudeClosed: true }), s('b', 30_000)], 'a'],
+    [[s('a', 1_000, { claudeClosed: true }), s('b', 300_000)], null],
+    [[s('a', 400_000, { claudeClosed: true }), s('b', 300_000, { claudeClosed: true })], 'b'],
+    [[{ lastActivity: NOW }, s('b', 2_000)], null],
+  ];
+  for (const [states, displayed] of cases) {
+    assert.deepEqual(pickActiveSession(states, displayed, NOW, 60_000), daemonPick(states, displayed, NOW, 60_000));
+  }
+});
+
+test('STATE_FILE_RE: the state family, not tmp/lock siblings', () => {
+  assert.ok(STATE_FILE_RE.test('state.json') && STATE_FILE_RE.test('state-abc.json'));
+  assert.ok(!STATE_FILE_RE.test('state-abc.json.123.tmp') && !STATE_FILE_RE.test('state-abc.json.lock'));
+  assert.ok(!STATE_FILE_RE.test('pause.json'));
+});
+
+test('listSessionStates tags per-session files with their id and skips the rest', (t) => {
+  const dir = stateDir(t, {
+    'state-a1.json': { status: 'working' },
+    'state-b2.json': '{"status": "idl', // torn mid-write
+    'state.json': { status: 'idle' },
+    'state-c3.json.99.tmp': { status: 'working' },
+    'pause.json': { until: 1 },
+  });
+  assert.deepEqual(listSessionStates(dir), [{ status: 'working', sessionId: 'a1' }]);
+  assert.deepEqual(listSessionStates(join(dir, 'missing')), []);
+});
+
+test('readActiveState: a real per-session state renders as working, not Away', (t) => {
+  const dir = stateDir(t, {
+    'state-s1.json': liveState({ lastActivity: NOW - 30_000, cwd: '/w/old-proj' }),
+    'state-s2.json': liveState({ lastActivity: NOW - 2_000 }),
+  });
+  const { state, sessionId } = readActiveState(dir, { now: NOW });
+  assert.equal(sessionId, 's2', 'most recently active session');
+  const v = buildView(state, null, 0, { now: NOW });
+  assert.equal(v.status, 'working');
+  assert.match(v.label, /^Working · my-app/);
+  // Stickiness: the displayed session holds while it's still live.
+  assert.equal(readActiveState(dir, { now: NOW, displayedId: 's1' }).sessionId, 's1');
+});
+
+test('readActiveState falls back to the legacy state.json, then to nothing', (t) => {
+  const legacy = stateDir(t, { 'state.json': liveState({ status: 'thinking' }) });
+  const r = readActiveState(legacy, { now: NOW });
+  assert.equal(r.sessionId, null);
+  assert.equal(resolveStatus(r.state, { now: NOW }), 'thinking');
+  const empty = stateDir(t, {});
+  assert.deepEqual(readActiveState(empty, { now: NOW }), { state: null, sessionId: null });
+  assert.equal(buildView(null, null, 0, { now: NOW }).label, 'Away');
+});
+
+test('hasStateFiles: any state file counts (setup detection)', (t) => {
+  assert.equal(hasStateFiles(stateDir(t, { 'state-x.json': {} })), true);
+  assert.equal(hasStateFiles(stateDir(t, { 'state.json': {} })), true);
+  assert.equal(hasStateFiles(stateDir(t, { 'pause.json': {} })), false);
+  assert.equal(hasStateFiles('/nonexistent-dir-abc123'), false);
 });

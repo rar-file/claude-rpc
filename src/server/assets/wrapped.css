@@ -1,8 +1,8 @@
 /* Claude Wrapped — full-screen, animated, Spotify-Wrapped-style story. */
 * { margin: 0; padding: 0; box-sizing: border-box; }
 :root {
-  --ink: #1a1611; --paper: #f4ede0; --rust: #c2491e; --rust3: #f08a4a;
-  --tape: #f2d76e; --grass: #4a9462; --blurple: #5865f2; --plum: #7b3f6b;
+  --ink: #1a1611; --paper: #f4ede0; --rust: #c2491e;
+  --tape: #f2d76e; --grass: #4a9462;
 }
 html, body { height: 100%; overflow: hidden; background: var(--ink); }
 body {

@@ -3,20 +3,30 @@
   const app = document.getElementById('app');
 
   // ── format helpers ───────────────────────────────────────────
+  // fmtNum is an inline copy of src/fmt.js fmtNum (this is a browser asset, it
+  // can't import it) — the same formatter the site's web Wrapped uses, so both
+  // pages print 1500000 as "1.50M". The unit is picked from the ROUNDED value
+  // (999999 → "1.00M"). Keep the copies in sync.
   const fmtNum = (n) => {
-    n = +n || 0;
-    if (n < 1000) return String(Math.round(n));
-    if (n < 1e6) return (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'k';
-    if (n < 1e9) return (n / 1e6).toFixed(2).replace(/\.?0+$/, '') + 'M';
-    if (n < 1e12) return (n / 1e9).toFixed(2).replace(/\.?0+$/, '') + 'B';
-    return (n / 1e12).toFixed(2).replace(/\.?0+$/, '') + 'T';
+    if (!n) return '0';
+    const neg = n < 0 ? '-' : '';
+    const v = Math.abs(n);
+    if (v < 1000) return neg + Math.round(v);
+    for (const [suf, div, prec] of [['k', 1e3, 1], ['M', 1e6, 2], ['B', 1e9, 2], ['T', 1e12, 2]]) {
+      const s = (v / div).toFixed(prec);
+      if (Number(s) < 1000) return neg + s + suf;
+    }
+    return neg + (v / 1e12).toFixed(2) + 'T';
   };
   const fmtHours = (ms) => { const h = (ms || 0) / 3.6e6; return h < 1 ? Math.round(h * 60) + 'm' : h < 10 ? h.toFixed(1) + 'h' : Math.round(h) + 'h'; };
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
   const GIF = 'https://cdn.qualit.ly/';
 
-  // anim-stagger style helper
-  let _i = 0; const A = () => `style="--i:${_i++}"`;
+  // anim-stagger style helper. Extra declarations go INTO this one attribute:
+  // a second style="" on the same tag is dropped by the HTML parser (the first
+  // duplicate attribute wins). Don't put `opacity` here — the rise animation
+  // runs with fill-mode forwards and owns opacity on .anim elements.
+  let _i = 0; const A = (extra) => `style="--i:${_i++}${extra ? ';' + extra : ''}"`;
 
   // Landing-page CTA used by the finale share. The dashboard is served on
   // localhost, so sharing `location.href` hands the recipient a dead link —
@@ -80,7 +90,7 @@
       const age = d.hotspot.daysSinceLastEdit == null ? '' : d.hotspot.daysSinceLastEdit === 0 ? ' · still warm today' : ` · last touched ${d.hotspot.daysSinceLastEdit}d ago`;
       S('ink', `
         <div class="kicker anim" ${A()}>you kept coming back to</div>
-        <div class="big anim" ${A()} style="font-family:'JetBrains Mono',monospace;font-size:clamp(30px,9vw,68px);--i:1">${esc(d.hotspot.name)}</div>
+        <div class="big anim" ${A("font-family:'JetBrains Mono',monospace;font-size:clamp(30px,9vw,68px)")}>${esc(d.hotspot.name)}</div>
         <div class="sub anim" ${A()}>${fmtNum(d.hotspot.count)} edits${age}</div>`);
     }
 
@@ -93,14 +103,19 @@
 
     // 9. model split
     if (d.modelSplit && d.modelSplit.length) {
+      // The rows are built before the slide markup, so stagger slot 0 is
+      // reserved for the kicker that sits above them.
+      const kicker = A();
       const rows = d.modelSplit.filter((m) => m.costPct > 0).map((m) => {
         const pct = Math.round(m.costPct * 100);
         return `<div class="msrow anim" ${A()}><span class="lbl">${esc(m.model)}</span><span class="mstrack"><span class="msfill" style="--w:${pct}%"></span></span><span class="pct">${pct}%</span></div>`;
       }).join('');
+      // The dimming sits on an inner span: on the .anim element itself the
+      // rise animation (fill-mode forwards) would override it.
       S('paper', `
-        <div class="kicker anim" ${A()} style="--i:0">your models, by spend</div>
+        <div class="kicker anim" ${kicker}>your models, by spend</div>
         <div class="msplit">${rows}</div>
-        <div class="sub anim" ${A()} style="opacity:.7">${esc((d.modelSplit[0] || {}).model || '')} did most of the heavy lifting</div>`);
+        <div class="sub anim" ${A()}><span style="opacity:.7">${esc((d.modelSplit[0] || {}).model || '')} did most of the heavy lifting</span></div>`);
     }
 
     // 10. lines

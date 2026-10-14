@@ -26,6 +26,9 @@
   let heatmapByDay = null; // dedicated fixed-90d source, independent of the range pill
   let allFrames = [];
   let currentLiveIdx = 0;
+  let framesStatus = null; // status the frames belong to — a change restarts on the base frame
+  let avatarSrc = null;    // currently shown large image (re-set only on change, so GIFs don't restart)
+  let daySeq = 0;          // latest openDay request; older responses are dropped
   let chartSeries = [];   // [{ d: Date, ms }]   — for the activity-chart hover tooltip
   let churnSeries = [];   // [{ d: Date, add, rem }] — for the churn-sparkline tooltip
 
@@ -82,18 +85,6 @@
     if (h) return h + 'h ' + m + 'm';
     return m + 'm ' + (s % 60) + 's';
   };
-
-  // ── Theme ───────────────────────────────────────────────
-  function applyTheme() {
-    const saved = localStorage.getItem('theme') || 'dark';
-    document.documentElement.classList.toggle('light', saved === 'light');
-  }
-  $('theme-btn').addEventListener('click', () => {
-    const cur = localStorage.getItem('theme') || 'dark';
-    localStorage.setItem('theme', cur === 'dark' ? 'light' : 'dark');
-    applyTheme();
-  });
-  applyTheme();
 
   // ── Range pills ─────────────────────────────────────────
   document.querySelectorAll('#range-pills button').forEach((b) => {
@@ -242,10 +233,9 @@
     rows.forEach((r) => {
       const tr = document.createElement('tr');
       if (r.onClick) tr.classList.add('clickable');
-      const ico = r.color ? '<span class="ico" style="background:' + r.color + '"></span>' : '';
       const nameHtml = opts.mono
-        ? '<code style="font-family: JetBrains Mono, monospace; font-size: 12px;">' + ico + esc(r.name) + '</code>'
-        : ico + esc(r.name);
+        ? '<code style="font-family: JetBrains Mono, monospace; font-size: 12px;">' + esc(r.name) + '</code>'
+        : esc(r.name);
       tr.innerHTML = '<td class="name">' + nameHtml + '</td>' +
                      '<td class="val">' + esc(r.val) + (r.unit ? '<span class="u">' + esc(r.unit) + '</span>' : '') + '</td>';
       if (r.onClick) tr.addEventListener('click', r.onClick);
@@ -293,7 +283,8 @@
         '<span class="val">' + fmtCost(cost) + '</span>';
       bars.appendChild(row);
     }
-    if (!entries.length) bars.innerHTML = '<div style="color: var(--text-3); font-size: 12px;">No data in range</div>';
+    // costByModel is a lifetime roll-up (the bars are captioned "all time").
+    if (!entries.length) bars.innerHTML = '<div style="color: var(--text-3); font-size: 12px;">No model data yet</div>';
   }
 
   // ── Languages panel ─────────────────────────────────────
@@ -354,14 +345,18 @@
     });
   }
 
+  // Label/value rows shared by the project drawer and the day modal.
+  const kvRows = (rows) => rows.map(([k, v]) =>
+    '<div class="kv"><span class="k">' + k + '</span><span class="v">' + v + '</span></div>').join('');
+
   // ── Drawer (project) ────────────────────────────────────
-  async function openProject(name) {
+  function openProject(name) {
     location.hash = '#projects/' + encodeURIComponent(name);
     const p = (aggData?.projects || {})[name];
     if (!p) return;
     $('drawer-title').textContent = name;
     $('drawer-sub').textContent = p.sessions + ' sessions · ' + fmtH(p.activeMs) + ' active';
-    $('drawer-body').innerHTML = [
+    $('drawer-body').innerHTML = kvRows([
       ['Active time', fmtH(p.activeMs)],
       ['Prompts', fmtN(p.userMessages)],
       ['Tool calls', fmtN(p.toolCalls)],
@@ -370,7 +365,7 @@
       ['Estimated cost', fmtCost(p.cost || 0)],
       ['Tokens in', fmtN(p.inputTokens)],
       ['Tokens out', fmtN(p.outputTokens)],
-    ].map(([k, v]) => '<div class="kv"><span class="k">' + k + '</span><span class="v">' + v + '</span></div>').join('');
+    ]);
     $('scrim').classList.add('open');
     $('drawer').classList.add('open');
   }
@@ -383,9 +378,22 @@
   $('drawer-close').addEventListener('click', closeDrawer);
 
   // ── Modal (day) ─────────────────────────────────────────
+  // Fetches the day from /api/day/:day rather than reading aggData.byDay:
+  // aggData is trimmed to the range pill, but the heatmap is a fixed ~90-day
+  // window and #days/ deep links can name any date, so a lit cell outside
+  // the selected range used to open as "No activity".
   async function openDay(k) {
     location.hash = '#days/' + k;
-    const day = (aggData?.byDay || {})[k];
+    const seq = ++daySeq;
+    let day;
+    try {
+      const r = await fetch('/api/day/' + encodeURIComponent(k), { cache: 'no-store' });
+      day = r.ok ? await r.json() : null; // 404 = no activity that day
+    } catch {
+      // Server unreachable — fall back to what this page already holds.
+      day = (heatmapByDay || {})[k] || (aggData?.byDay || {})[k] || null;
+    }
+    if (seq !== daySeq) return; // a newer click already owns the modal
     if (!day) {
       $('modal-title').textContent = k;
       $('modal-sub').textContent = 'No activity';
@@ -393,7 +401,7 @@
     } else {
       $('modal-title').textContent = new Date(k + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
       $('modal-sub').textContent = fmtH(day.activeMs) + ' active · ' + (day.sessions || 0) + ' sessions';
-      $('modal-body').innerHTML = [
+      $('modal-body').innerHTML = kvRows([
         ['Prompts', fmtN(day.userMessages)],
         ['Tool calls', fmtN(day.toolCalls)],
         ['Lines added', fmtN(day.linesAdded || 0)],
@@ -401,12 +409,13 @@
         ['Cost', fmtCost(day.cost || 0)],
         ['Tokens', fmtN((day.inputTokens || 0) + (day.outputTokens || 0) + (day.cacheReadTokens || 0) + (day.cacheWriteTokens || 0))],
         ['Notifications', day.notifications || 0],
-      ].map(([k, v]) => '<div class="kv" style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px;"><span style="color:var(--text-3);">' + k + '</span><span style="font-weight:500;">' + v + '</span></div>').join('');
+      ]);
     }
     $('modal').classList.add('open');
     $('scrim').classList.add('open');
   }
   function closeModal() {
+    daySeq++; // a still-pending openDay must not reopen the modal
     $('modal').classList.remove('open');
     $('scrim').classList.remove('open');
     if (location.hash.startsWith('#days/')) location.hash = '';
@@ -420,10 +429,6 @@
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
     if (e.key === '?') { e.preventDefault(); $('help').classList.toggle('open'); }
     if (e.key === 'Escape') { closeDrawer(); closeModal(); $('help').classList.remove('open'); }
-    if (e.key === 't') {
-      const cur = localStorage.getItem('theme') || 'dark';
-      localStorage.setItem('theme', cur === 'dark' ? 'light' : 'dark'); applyTheme();
-    }
     if (e.key >= '1' && e.key <= '5') {
       const pills = ['7d', '30d', '90d', '1y', 'all'];
       const target = document.querySelector('[data-range="' + pills[parseInt(e.key, 10) - 1] + '"]');
@@ -466,15 +471,25 @@
     } catch (e) { console.error(e); }
   }
 
+  // 'All time' charts every day since the first recorded one (byDay is
+  // complete), not a fixed 365-day window.
+  function daysSinceFirstDay(byDay) {
+    let first = null;
+    for (const k of Object.keys(byDay)) if (first === null || k < first) first = k;
+    if (!first) return 1;
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    return Math.max(1, Math.round((today - new Date(first + 'T00:00:00')) / 86_400_000) + 1);
+  }
+
   function drawAggregate() {
     if (!aggData) return;
-    const days = range === '7d' ? 7 : range === '30d' ? 30 : range === '1y' ? 365 : range === 'all' ? 365 : 90;
+    const days = range === '7d' ? 7 : range === '30d' ? 30 : range === '1y' ? 365
+      : range === 'all' ? daysSinceFirstDay(aggData.byDay || {}) : 90;
     renderChart(aggData.byDay || {}, days);
     renderHeatmap(heatmapByDay || aggData.byDay || {});
     renderChurn(aggData.byDay || {}, Math.min(days, 90));
     renderCost(aggData);
     renderLanguages(aggData.languages);
-    renderAchievements(aggData);
 
     // Range stat card
     const [rn, ru] = splitTime(fmtH(aggData.activeMs || 0));
@@ -495,7 +510,7 @@
     $('cost-num').textContent = fmtCost(aggData.estimatedCost || 0);
     $('cost-sub').textContent = fmtN(aggData.grandTokens || 0) + ' tokens';
 
-    // Lifetime tokens card
+    // Tokens section: range-scoped, summed from byDay by windowedAggregate.
     const grand = (aggData.inputTokens || 0) + (aggData.outputTokens || 0) + (aggData.cacheReadTokens || 0) + (aggData.cacheWriteTokens || 0);
     $('tok-grand').textContent = fmtN(grand);
     $('tok-out').textContent = fmtN(aggData.outputTokens || 0);
@@ -511,7 +526,9 @@
     const net = (aggData.linesAdded || 0) - (aggData.linesRemoved || 0);
     $('churn-net').textContent = (net >= 0 ? '+' : '−') + fmtN(Math.abs(net));
 
-    // Leaderboards
+    // Leaderboards + shell/web/subagents: lifetime roll-ups the aggregate
+    // doesn't keep per day, so these ignore the range pill (labelled
+    // "all time" in the page).
     const projs = Object.entries(aggData.projects || {}).sort((x, y) => y[1].activeMs - x[1].activeMs).slice(0, 8);
     renderTable('projects-tbl', projs.map(([name, p]) => {
       const h = p.activeMs / 3_600_000;
@@ -521,7 +538,8 @@
     const tools = Object.entries(aggData.toolBreakdown || {}).sort((x, y) => y[1] - x[1]).slice(0, 8);
     renderTable('tools-tbl', tools.map(([name, count]) => ({ name, val: fmtN(count), unit: '' })), { mono: true });
     const files = (aggData.topEditedFiles || []).slice(0, 8);
-    renderTable('files-tbl', files.map((f) => ({ name: f.file || (f.path || '').split('/').pop(), val: fmtN(f.count), unit: '' })), { mono: true });
+    // Either separator: Windows paths arrive with backslashes.
+    renderTable('files-tbl', files.map((f) => ({ name: f.file || (f.path || '').split(/[\\/]/).pop(), val: fmtN(f.count), unit: '' })), { mono: true });
 
     // Bash / domains / subagents
     const bash = Object.entries(aggData.bashCommands || {}).sort((x, y) => y[1] - x[1]).slice(0, 8);
@@ -533,8 +551,6 @@
 
     const tot = (aggData.mcpToolCalls || 0) + (aggData.builtinToolCalls || 0);
     $('mcp-label').textContent = tot ? Math.round(((aggData.mcpToolCalls || 0) / tot) * 100) + '% MCP · ' + Math.round(((aggData.builtinToolCalls || 0) / tot) * 100) + '% built-in' : '—';
-
-    $('lb-sessions').textContent = fmtN(aggData.sessions || 0);
   }
 
   function drawState() {
@@ -544,17 +560,25 @@
     const s = liveData.state;
 
     // Top bar
-    const now = new Date();
-    $('meta').textContent = 'No. ' + (v.daysSinceFirst || '—') + ' · ' + now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
     $('model').textContent = v.modelPretty;
     $('statustext').textContent = v.statusVerbose;
-    $('dot').className = 'dot ' + (s.status === 'working' || s.status === 'thinking' ? '' : s.status === 'idle' ? 'idle' : 'stale');
 
-    // Live avatar
-    const cfgAvatar = (s.status && liveData.config?.statusAssets?.[s.status]) || '';
-    $('live-avatar').innerHTML = cfgAvatar
-      ? '<img src="' + cfgAvatar.replace(/"/g, '&quot;') + '" alt="" />'
-      : '';
+    // Live avatar: the card's large image as the server resolved it. Only
+    // http(s) URLs render here; a Discord art-asset key isn't loadable from a
+    // browser. Re-set only on change so an animated GIF doesn't restart on
+    // every refresh.
+    const src = /^https?:\/\//i.test(liveData.largeImage || '') ? liveData.largeImage : '';
+    if (src !== avatarSrc) {
+      avatarSrc = src;
+      const box = $('live-avatar');
+      box.textContent = '';
+      if (src) {
+        const img = document.createElement('img');
+        img.src = src;
+        img.alt = '';
+        box.appendChild(img);
+      }
+    }
     $('elapsed').textContent = elapsedStr(s.sessionStart);
 
     // Hero
@@ -581,7 +605,15 @@
     $('streak-num').textContent = v.streak;
     $('streak-sub').textContent = 'Longest ' + v.longestStreak + ' · best ' + (v.bestDayHours || '—');
 
-    // Discord
+    // Lifetime milestones and the leaderboards' session count come from the
+    // lifetime aggregate, not the range-trimmed one (a 7d range used to
+    // re-lock "100 sessions").
+    renderAchievements(a);
+    $('lb-sessions').textContent = fmtN(a.sessions || 0);
+
+    // Discord: frames for the current status. A status change restarts on
+    // the base frame, like the daemon's rotation cursor.
+    if (s.status !== framesStatus) { framesStatus = s.status; currentLiveIdx = 0; }
     allFrames = liveData.frames || [];
     renderRotation();
   }

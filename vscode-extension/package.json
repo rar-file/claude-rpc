@@ -78,7 +78,7 @@
     }
   },
   "scripts": {
-    "package": "npx --yes @vscode/vsce package"
+    "package": "npx --yes @vscode/vsce@3.9.2 package"
   },
   "icon": "icon.png",
   "galleryBanner": {

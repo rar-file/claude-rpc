@@ -1,12 +1,12 @@
 // Claude RPC — Claude Code status in the VS Code status bar.
 //
 // A VIEWER over claude-rpc's state files, not a second presence pipeline:
-// Claude Code's hooks write state.json (tmpdir), the scanner writes
-// aggregate.json (~/.claude-rpc), and the daemon owns Discord. This extension
-// reads those same files, renders a status bar item, and offers pause/resume
-// by writing the same pause.json marker the CLI does. It never reports
-// editor activity anywhere — it has no network surface at all beyond the
-// optional localhost dashboard probe.
+// Claude Code's hooks write one state-<sessionId>.json per session (tmpdir),
+// the scanner writes aggregate.json (~/.claude-rpc), and the daemon owns
+// Discord. This extension reads those same files, renders a status bar item,
+// and offers pause/resume by writing the same pause.json marker the CLI
+// does. It never reports editor activity anywhere — it has no network
+// surface at all beyond the optional localhost dashboard probe.
 'use strict';
 
 const vscode = require('vscode');
@@ -17,7 +17,6 @@ const cp = require('node:child_process');
 const core = require('./status-core.js');
 
 const STATE_DIR = path.join(os.tmpdir(), 'claude-rpc');
-const STATE_PATH = path.join(STATE_DIR, 'state.json');
 const PAUSE_PATH = path.join(STATE_DIR, 'pause.json');
 const PID_PATH = path.join(STATE_DIR, 'daemon.pid');
 const AGG_DIR = path.join(os.homedir(), '.claude-rpc');
@@ -69,7 +68,7 @@ function cliCmd(args) {
 // no lifetime aggregate, and no CLI on PATH. Any one of those existing means
 // the pairing works (e.g. CLI uninstalled but old stats remain → show them).
 function setupNeeded() {
-  return !fs.existsSync(STATE_PATH) && !fs.existsSync(AGG_PATH) && !cliAvailable();
+  return !core.hasStateFiles(STATE_DIR) && !fs.existsSync(AGG_PATH) && !cliAvailable();
 }
 
 // aggregate.json can be MBs — only re-read when its mtime moves.
@@ -101,10 +100,17 @@ function activate(context) {
   ensureItem();
   context.subscriptions.push({ dispose: () => item?.dispose() });
 
+  // Which session the item shows — kept across renders so, like the daemon's
+  // card, it sticks to the current session while it's active instead of
+  // flipping between concurrent ones.
+  let displayedSessionId = null;
+
   function render() {
     const cfg = vscode.workspace.getConfiguration('claudeRpc');
     const needsSetup = setupNeeded();
-    const view = core.buildView(readJson(STATE_PATH), readAggregate(), pausedUntil(), {
+    const active = core.readActiveState(STATE_DIR, { displayedId: displayedSessionId });
+    displayedSessionId = active.sessionId;
+    const view = core.buildView(active.state, readAggregate(), pausedUntil(), {
       showTokens: cfg.get('showTokens', true),
       hideWhenStale: cfg.get('hideWhenStale', false),
       setupNeeded: needsSetup,
@@ -128,11 +134,11 @@ function activate(context) {
   // refreshes elapsed-time text). Both state dirs may not exist yet on a
   // machine that hasn't run claude-rpc — retry attachment from the poll.
   const watchers = new Map(); // dir → fs.FSWatcher
-  function attachWatch(dir, names) {
+  function attachWatch(dir, matches) {
     if (watchers.has(dir) || !fs.existsSync(dir)) return;
     try {
       const w = fs.watch(dir, (event, filename) => {
-        if (filename && !names.has(filename)) return;
+        if (filename && !matches(String(filename))) return;
         render();
       });
       w.on('error', () => { try { w.close(); } catch { /* already closed */ } watchers.delete(dir); });
@@ -140,8 +146,11 @@ function activate(context) {
     } catch { /* dir vanished between existsSync and watch — poll retries */ }
   }
   function attachAll() {
-    attachWatch(STATE_DIR, new Set([path.basename(STATE_PATH), path.basename(PAUSE_PATH)]));
-    attachWatch(AGG_DIR, new Set([path.basename(AGG_PATH)]));
+    // Every session's state-<sid>.json (plus legacy state.json) and pause.json.
+    const pauseName = path.basename(PAUSE_PATH);
+    attachWatch(STATE_DIR, (f) => core.STATE_FILE_RE.test(f) || f === pauseName);
+    const aggName = path.basename(AGG_PATH);
+    attachWatch(AGG_DIR, (f) => f === aggName);
   }
 
   let timer = null;

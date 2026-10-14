@@ -6,7 +6,8 @@
 //   server/api.js     — data helpers (snapshot, windowedAggregate, drilldowns)
 //   server/routes.js  — declarative /api/* route table
 //   server/sse.js     — SSE broadcast + file watchers
-//   server/page.js    — all browser-side assets (HTML/CSS/JS strings)
+//   server/page.js    — composes the dashboard + /wrapped pages from the
+//                       on-disk files in server/assets/ (via assets.js)
 //
 // Zero deps, vanilla browser JS, SVG charts. Designed to run alongside the
 // daemon on localhost:47474 so the user can poke at their own data.
@@ -21,7 +22,7 @@ import { buildHtml, buildWrappedHtml } from './page.js';
 const PORT = Number(process.env.CLAUDE_RPC_PORT) || 47474;
 
 // Pre-compose the HTML once at startup — the only dynamic bit is the port
-// (used in a breadcrumb), which is fixed for the life of the daemon.
+// (shown in the footer), which is fixed for the life of the process.
 const HTML = buildHtml({ port: PORT });
 const WRAPPED_HTML = buildWrappedHtml();
 const PAGES = new Map([
@@ -83,7 +84,8 @@ function dispatch(req, res) {
     return;
   }
 
-  // Static /api/* endpoints (state, aggregate, insights, badge.svg, card.svg).
+  // Static /api/* endpoints (state, wrapped, aggregate, insights, badge.svg,
+  // card.svg, export.json, export.csv) — see routes.js.
   const handler = ROUTES.get(key);
   if (handler) return handler(req, res, { query });
 
@@ -109,9 +111,28 @@ const server = createServer((req, res) => {
   }
 });
 
-watchSources();
+// Listen failures arrive as an 'error' event. Without a handler the
+// uncaughtException floor below swallowed EADDRINUSE and the process then sat
+// forever on the poll interval + fs watchers, serving nothing — e.g. a second
+// `claude-rpc serve`, or the tray and the Stats tab each spawning one. Say why
+// in one line and exit non-zero instead. Once listening, an 'error' is logged
+// and the dashboard keeps running (same policy as the floor).
+server.on('error', (e) => {
+  if (server.listening) {
+    try { console.error('dashboard error:', e?.message || e); } catch { /* ignore */ }
+    return;
+  }
+  const base = `http://127.0.0.1:${PORT}`;
+  console.error(e?.code === 'EADDRINUSE'
+    ? `✗ Port ${PORT} is already in use — a dashboard may already be running at ${base} (set CLAUDE_RPC_PORT to use another port).`
+    : `✗ Dashboard could not listen on 127.0.0.1:${PORT}: ${e?.message || e}`);
+  process.exit(1);
+});
 
 server.listen(PORT, '127.0.0.1', () => {
+  // Start watching only once the port is ours, so a failed listen exits
+  // without leaving watchers behind.
+  watchSources();
   const base = `http://127.0.0.1:${PORT}`;
   // `claude-rpc wrapped` sets CLAUDE_RPC_OPEN_PATH=/wrapped to land on the
   // animated year-in-review instead of the dashboard.

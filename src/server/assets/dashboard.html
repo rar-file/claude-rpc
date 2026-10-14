@@ -18,8 +18,6 @@
     <div class="brand">
       <span class="mark">◆</span>
       <span>Claude</span>
-      <span class="sep">·</span>
-      <span class="meta" id="meta">—</span>
     </div>
     <div class="top-right">
       <div class="range-pills" id="range-pills">
@@ -30,17 +28,15 @@
         <button data-range="all">All</button>
       </div>
       <a class="wrapped-link" href="/wrapped" title="Your animated year-in-review">✦ Wrapped</a>
-      <button class="theme-btn" id="theme-btn" title="Toggle theme">◐</button>
       <span class="model" id="model">—</span>
-      <span class="status"><span class="dot" id="dot"></span><span id="statustext">—</span></span>
+      <span class="status"><span id="statustext">—</span></span>
     </div>
   </header>
 
   <!-- ── Live rail ───────────────────────────────────── -->
-  <section class="live-rail" id="live-rail">
+  <section class="live-rail">
     <div class="avatar" id="live-avatar"></div>
     <div>
-      <div class="frame-app">Claude Code</div>
       <div class="frame-details" id="frame-details">—</div>
       <div class="frame-state" id="frame-state">—</div>
     </div>
@@ -109,7 +105,7 @@
   <section>
     <div class="section-head">
       <h2>Activity</h2>
-      <div class="right" id="heatmap-meta">click a day for details</div>
+      <div class="right">click a day for details</div>
     </div>
     <div class="card heatmap-card">
       <div class="heatmap">
@@ -122,17 +118,20 @@
   <!-- ── Split: cost + languages ─────────────────────── -->
   <section class="split-row">
     <div class="card">
-      <div class="card-h"><h3>Cost</h3><div class="meta" id="cost-card-meta">approximate · range</div></div>
+      <div class="card-h"><h3>Cost</h3><div class="meta">approximate · range</div></div>
       <div class="cost-grid">
         <div>
           <div class="cost-figure" id="cost-figure">—</div>
           <div class="cost-sub" id="cost-figure-sub">—</div>
         </div>
-        <div class="cost-bars" id="cost-bars"></div>
+        <div>
+          <div class="cost-bars-cap">by model · all time</div>
+          <div class="cost-bars" id="cost-bars"></div>
+        </div>
       </div>
     </div>
     <div class="card">
-      <div class="card-h"><h3>Languages</h3><div class="meta" id="lang-meta">by edits</div></div>
+      <div class="card-h"><h3>Languages</h3><div class="meta">by edits · all time</div></div>
       <div class="lang-stack" id="lang-stack"></div>
       <div class="lang-list" id="lang-list"></div>
     </div>
@@ -140,7 +139,7 @@
 
   <!-- ── Code churn ──────────────────────────────────── -->
   <section class="card" style="margin-bottom: 28px;">
-    <div class="card-h"><h3>Code churn</h3><div class="meta" id="churn-meta">lines added / removed · range</div></div>
+    <div class="card-h"><h3>Code churn</h3><div class="meta">lines added / removed · range</div></div>
     <div class="churn-row">
       <div class="churn-spark">
         <svg id="churn-svg" viewBox="0 0 800 60" preserveAspectRatio="none"></svg>
@@ -160,7 +159,7 @@
       <div class="right"><span id="tok-cache-pct">—</span> from cache</div>
     </div>
     <div class="stat-row" style="margin-bottom: 0; grid-template-columns: repeat(3, 1fr);">
-      <div class="stat-card"><div class="label">Grand total</div><div class="value"><span id="tok-grand">—</span></div><div class="meta"><span class="num" id="tok-grand-sub">in + out + cache</span></div></div>
+      <div class="stat-card"><div class="label">Grand total</div><div class="value"><span id="tok-grand">—</span></div><div class="meta"><span class="num">in + out + cache</span></div></div>
       <div class="stat-card"><div class="label">Output</div><div class="value"><span id="tok-out">—</span></div><div class="meta"><span class="num" id="tok-in-sub">input —</span></div></div>
       <div class="stat-card"><div class="label">Cache</div><div class="value"><span id="tok-cache">—</span></div><div class="meta"><span class="num" id="tok-cache-sub">read — · write —</span></div></div>
     </div>
@@ -170,7 +169,7 @@
   <section>
     <div class="section-head">
       <h2>Projects · tools · files</h2>
-      <div class="right" id="lb-meta">across <span id="lb-sessions">—</span> sessions</div>
+      <div class="right">all time · across <span id="lb-sessions">—</span> sessions</div>
     </div>
     <div class="lb-grid">
       <div class="lb">
@@ -192,7 +191,7 @@
   <section>
     <div class="section-head">
       <h2>Shell · web · subagents</h2>
-      <div class="right"><span id="mcp-label">—</span></div>
+      <div class="right">all time · <span id="mcp-label">—</span></div>
     </div>
     <div class="lb-grid">
       <div class="lb">
@@ -265,7 +264,6 @@
   <div class="help-card">
     <h4>Keyboard shortcuts</h4>
     <div class="row"><span class="keys"><span class="kbd">1</span><span class="kbd">5</span></span><span>switch range</span></div>
-    <div class="row"><span class="keys"><span class="kbd">t</span></span><span>toggle theme</span></div>
     <div class="row"><span class="keys"><span class="kbd">esc</span></span><span>close drawer / modal</span></div>
     <div class="row"><span class="keys"><span class="kbd">?</span></span><span>this help</span></div>
   </div>

@@ -16,7 +16,7 @@ Live [Claude Code](https://claude.com/claude-code) status in your status bar, dr
 
 [claude-rpc](https://github.com/rar-file/claude-rpc) set up (`npx claude-rpc setup`) so Claude Code's hooks write the state files this extension reads:
 
-- `<tmpdir>/claude-rpc/state.json` — live session state (written by the hooks; works even with the Discord daemon stopped)
+- `<tmpdir>/claude-rpc/state-<session-id>.json` — live state, one file per Claude Code session (written by the hooks; works even with the Discord daemon stopped). With several sessions open, the item follows the most recently active one, like the Discord card.
 - `~/.claude-rpc/aggregate.json` — lifetime stats (written by the scanner)
 
 In remote / WSL setups the extension runs where Claude Code runs (`extensionKind: workspace`), so the files are always local to it.
@@ -34,7 +34,7 @@ In remote / WSL setups the extension runs where Claude Code runs (`extensionKind
 
 ```sh
 cd vscode-extension
-npm run package        # → claude-rpc-vscode-<version>.vsix
+npm run package        # → claude-rpc-presence-<version>.vsix
 code --install-extension claude-rpc-presence-*.vsix
 ```
 

@@ -1,15 +1,19 @@
-// Pure view logic for the VS Code extension — no `vscode` import, so the
-// root test suite can exercise it with plain node:test.
+// View logic for the VS Code extension — no `vscode` import, so the root test
+// suite can exercise it with plain node:test.
 //
-// This is a deliberately small mirror of the daemon's presentation layer
-// (src/format.js). The two read the same state.json but serve different
-// surfaces, and the extension must work standalone from a .vsix with zero
-// dependencies — so the handful of formatters it needs are duplicated here
-// rather than imported across package boundaries. The daemon remains the
-// source of truth for Discord; divergence here only affects the status bar.
+// This is a deliberately small mirror of the daemon's state selection
+// (src/state.js + src/presence.js) and presentation layer (src/format.js).
+// The two read the same state files but serve different surfaces, and the
+// extension must work standalone from a .vsix with zero dependencies — so the
+// handful of helpers it needs are duplicated here rather than imported across
+// package boundaries. The daemon remains the source of truth for Discord;
+// divergence here only affects the status bar.
 // Known simplification: no transcript-mtime liveness probe (findLiveSessions),
 // so "is Claude still open?" leans on hook recency + the claudeClosed flag.
 'use strict';
+
+const fs = require('node:fs');
+const path = require('node:path');
 
 const STALE_MIN_DEFAULT = 5;     // mirrors config.staleSessionMin
 const IDLE_SEC_DEFAULT = 60;     // mirrors config.idleThresholdSec
@@ -69,6 +73,71 @@ function projectName(cwd) {
 function dayKey(ts) {
   const d = new Date(ts);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// ── Session state files ─────────────────────────────────────────────────
+// Claude Code's hooks write one state-<sessionId>.json per session into the
+// state dir (src/state.js statePathFor); the legacy global state.json is only
+// written for hook payloads without a session id. Write-tmp
+// (`*.json.<pid>.tmp`) and lock (`*.json.lock`) siblings don't end in `.json`.
+const STATE_FILE_RE = /^state(-.+)?\.json$/;     // the whole family (watch filter)
+const SESSION_FILE_RE = /^state-(.+)\.json$/;    // per-session files only
+
+function readJson(p) {
+  try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; }
+}
+
+// Any state file at all? (setup detection: hooks have run on this machine)
+function hasStateFiles(dir) {
+  try { return fs.readdirSync(dir).some((n) => STATE_FILE_RE.test(n)); } catch { return false; }
+}
+
+// Mirror of src/state.js listSessionStates: every per-session state on disk,
+// tagged with the sessionId recovered from its filename. Torn/unparseable
+// files (mid-write) are skipped for this read.
+function listSessionStates(dir) {
+  let names;
+  try { names = fs.readdirSync(dir); } catch { return []; }
+  const out = [];
+  for (const name of names) {
+    const m = SESSION_FILE_RE.exec(name);
+    if (!m) continue;
+    const parsed = readJson(path.join(dir, name));
+    if (parsed && typeof parsed === 'object') out.push({ ...parsed, sessionId: m[1] });
+  }
+  return out;
+}
+
+// Mirror of src/presence.js pickActiveSession: stick to the displayed session
+// while it's live (lastActivity within idleMs, not closed); otherwise the
+// most-recently-active live session, then the most recent not-closed one,
+// then the most recent overall. Returns { state, sessionId, liveCount }.
+function pickActiveSession(states, displayedId, now, idleMs) {
+  const list = (states || []).filter((s) => s && s.sessionId);
+  if (!list.length) return { state: null, sessionId: null, liveCount: 0 };
+  const isLive = (s) => !s.claudeClosed && now - (s.lastActivity || 0) <= idleMs;
+  const liveCount = list.filter(isLive).length;
+  const byRecent = [...list].sort((a, b) => (b.lastActivity || 0) - (a.lastActivity || 0));
+  const current = list.find((s) => s.sessionId === displayedId);
+  if (current && isLive(current)) {
+    return { state: current, sessionId: current.sessionId, liveCount };
+  }
+  const chosen = byRecent.find(isLive) || byRecent.find((s) => !s.claudeClosed) || byRecent[0];
+  return { state: chosen, sessionId: chosen.sessionId, liveCount };
+}
+
+// The state to display, like src/state.js readActiveState — plus the
+// daemon's stickiness when the caller passes the session it showed last, so
+// the status bar follows the same session as the Discord card. Falls back to
+// the legacy state.json when no per-session files exist.
+// Returns { state, sessionId } (state null when nothing is on disk).
+function readActiveState(dir, { displayedId = null, now = Date.now(), idleMs = IDLE_SEC_DEFAULT * 1000 } = {}) {
+  const sessions = listSessionStates(dir);
+  if (sessions.length) {
+    const picked = pickActiveSession(sessions, displayedId, now, idleMs);
+    if (picked.state) return { state: picked.state, sessionId: picked.sessionId };
+  }
+  return { state: readJson(path.join(dir, 'state.json')), sessionId: null };
 }
 
 // Light mirror of format.applyIdle + applyShipped: raw hook state → display
@@ -195,12 +264,13 @@ function buildView(state, aggregate, pausedUntil, opts = {}) {
 }
 
 module.exports = {
+  STATE_FILE_RE,
+  hasStateFiles,
+  listSessionStates,
+  pickActiveSession,
+  readActiveState,
   resolveStatus,
   buildView,
-  fmtNum,
-  fmtDuration,
-  fmtHours,
   humanModel,
   projectName,
-  dayKey,
 };

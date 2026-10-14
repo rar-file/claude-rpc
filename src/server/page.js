@@ -1,15 +1,18 @@
-// Composes the local web dashboard's HTML from three on-disk assets:
+// Composes the local web dashboard's two pages from six on-disk assets:
 //   assets/dashboard.html       — scaffold with {{STYLES}} {{SCRIPT}} {{PORT}}
 //   assets/dashboard.css        — stylesheet
 //   assets/dashboard.client.js  — vanilla browser runtime (one IIFE)
+//   assets/wrapped.html         — /wrapped scaffold with {{STYLES}} {{SCRIPT}}
+//   assets/wrapped.css          — /wrapped stylesheet
+//   assets/wrapped.client.js    — /wrapped story runtime (one IIFE)
 //
 // These are real files you edit with full CSS/HTML/JS tooling — the reason
 // this module shrank from a 1,200-line string monolith. loadAsset() reads
 // them from disk in dev/npm and from the SEA blob in the packaged exe
 // (see src/server/assets.js + sea-config.json).
 //
-// Single export: buildHtml({ port }). The server composes it once at
-// startup and reuses the string for every request.
+// Two exports: buildHtml({ port }) and buildWrappedHtml(). The server
+// composes each once at startup and reuses the string for every request.
 
 import { loadAsset } from './assets.js';
 
