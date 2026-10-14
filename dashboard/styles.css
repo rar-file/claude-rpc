@@ -28,17 +28,9 @@
 
   /* derived */
   --bg:           var(--paper);
-  --surface:      var(--paper);
-  --surface-2:    var(--paper-2);
-  --surface-3:    var(--paper-3);
-  --border:       var(--ink);
   --border-soft:  var(--ink-faint);
   --text:         var(--ink);
-  --text-2:       var(--ink-soft);
-  --text-3:       var(--ink-mute);
-  --accent:       var(--rust);
   --accent-soft:  rgba(194, 73, 30, 0.12);
-  --accent-strong:var(--rust-2);
   --green:        var(--grass);
   --amber:        var(--tape-2);
 
@@ -118,6 +110,7 @@ h1::before {
   border: 1.5px solid var(--ink);
   box-shadow: 1.5px 1.5px 0 var(--rust);
 }
+.vstamp:empty { display: none; } /* until renderer.js fills in the app version */
 .header-sub {
   font-size: 11px;
   color: var(--ink-mute);
@@ -267,9 +260,9 @@ main {
 }
 .panel[hidden] { display: none; }
 
-/* sticker kicker rendered at the top of each panel via JS-less ::before
-   so it stays visually associated with the active tab content. We instead
-   give each panel a heading and decorate via attribute. */
+/* sticker kicker at the top of each panel: a CSS-only ::before that prints
+   the panel's data-panel name, so the active tab's content carries its own
+   label without extra markup. Per-panel colours are set just below. */
 .panel::before {
   content: attr(data-panel);
   display: inline-block;
@@ -434,7 +427,6 @@ main {
   background: var(--red);
 }
 
-.frame.drag-handle { cursor: grab; }
 .frame.drag-over { border-color: var(--rust); }
 .frame.dragging { opacity: 0.5; }
 

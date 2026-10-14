@@ -19,3 +19,13 @@ test('dashboard: every local require() is packaged in build.files', () => {
   }
   assert.deepEqual(missing, [], 'add these to dashboard/package.json build.files');
 });
+
+// The settings GUI shows defaults merged with the user's file. The packaged
+// app reads DEFAULT_CONFIG from resources/default-config.mjs, so the build
+// must copy src/default-config.js there.
+test('dashboard: the DEFAULT_CONFIG main.js loads from resources is shipped by extraResources', () => {
+  const main = readFileSync(new URL('main.js', dir), 'utf8');
+  assert.match(main, /resourcesPath, 'default-config\.mjs'/);
+  const entry = (build.extraResources || []).find((r) => r.to === 'default-config.mjs');
+  assert.equal(entry?.from, '../src/default-config.js');
+});

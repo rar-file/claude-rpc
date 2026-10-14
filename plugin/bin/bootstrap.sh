@@ -1,20 +1,32 @@
 #!/bin/sh
 # claude-rpc plugin bootstrap
 # -----------------------------------------------------------------------------
-# Fired by this plugin's SessionStart hook. Runs the project's own documented
-# installer -- `npx claude-rpc@latest setup` -- exactly once, in the background,
-# then gets out of the way.
+# Fired by this plugin's SessionStart hook. Makes sure claude-rpc is set up,
+# once, in the background, then gets out of the way.
 #
 # `setup` is the whole install: it installs claude-rpc globally, wires its hooks
 # into ~/.claude/settings.json, starts the daemon, and registers login
-# autostart. After this runs once, claude-rpc's OWN hooks take over the
-# self-heal; this script just no-ops on every later session.
+# autostart. After it has run once, claude-rpc's OWN hooks take over the
+# self-heal, and this script no-ops on every later session.
+#
+#   - claude-rpc's hooks already in settings.json: nothing to do.
+#   - claude-rpc on PATH but never set up (`npm i -g` or Homebrew alone):
+#     run that install's `claude-rpc setup`.
+#   - claude-rpc not installed: run the project's documented installer,
+#     `npx claude-rpc@latest setup`.
 #
 # Scope: macOS / Linux / WSL -- the platforms where `npx ... setup` is the
-# documented install. On native Windows install the portable .exe instead
-# (see the project README); there this script is a graceful no-op.
+# documented install. On native Windows (Git Bash, MSYS2, Cygwin) the script
+# exits straight away: install the Windows app (.exe) instead (see the README).
 # -----------------------------------------------------------------------------
 set -u
+
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*|Windows_NT)
+    echo "claude-rpc plugin: skipped on native Windows. Install the Windows app instead: https://github.com/rar-file/claude-rpc/releases/latest" >&2
+    exit 0
+    ;;
+esac
 
 # Per-plugin persistent dir (survives plugin updates; created + exported to hook
 # processes by Claude Code). Fall back to ~/.claude if it is somehow unset.
@@ -23,14 +35,31 @@ mkdir -p "$DATA" 2>/dev/null || true
 SENTINEL="$DATA/bootstrapped"
 LOG="$DATA/bootstrap.log"
 LOCK="$DATA/.lock"
+SETTINGS="$HOME/.claude/settings.json"
 
-# Fast skip: already bootstrapped, or the package is already on PATH (covers
-# users who installed claude-rpc before adding this plugin).
-[ -f "$SENTINEL" ] && exit 0
-if command -v claude-rpc >/dev/null 2>&1; then
-  : > "$SENTINEL" 2>/dev/null || true
-  exit 0
+# setup tags every hook it writes with "_claudeRpc": true (src/install.js).
+# Untagged hooks from old versions count as missing; setup re-tags them.
+hooks_wired() { grep -q '"_claudeRpc"' "$SETTINGS" 2>/dev/null; }
+mark_done() { echo ok > "$SENTINEL" 2>/dev/null || true; }
+
+# Fast skip: setup already ran from here. The sentinel is kept even if the
+# hooks are removed later (e.g. `claude-rpc uninstall`), so an uninstall sticks.
+[ -s "$SENTINEL" ] && exit 0
+
+# Already set up some other way (by hand, or by the desktop app).
+if hooks_wired; then mark_done; exit 0; fi
+
+# An EMPTY sentinel comes from an older version of this script. That version
+# also wrote one, without wiring anything, whenever claude-rpc was already on
+# PATH. Keep it only if its log shows a setup that succeeded. Otherwise set up now.
+if [ -f "$SENTINEL" ]; then
+  if grep -q '^bootstrap: ok' "$LOG" 2>/dev/null; then mark_done; exit 0; fi
+  rm -f "$SENTINEL" 2>/dev/null || true
 fi
+
+# Installed but never set up: use that install rather than fetching another.
+HAVE_CLI=0
+command -v claude-rpc >/dev/null 2>&1 && HAVE_CLI=1
 
 # Single-flight across concurrently-opening sessions. Steal a lock left behind
 # by a crashed run (older than 10 min) so we can never deadlock permanently.
@@ -69,15 +98,24 @@ find_npx() {
   command -v npx >/dev/null 2>&1
 }
 
+run_setup() {
+  if [ "$HAVE_CLI" = 1 ]; then
+    echo "claude-rpc is installed but its hooks aren't wired: running claude-rpc setup"
+    claude-rpc setup
+  else
+    npx -y claude-rpc@latest setup
+  fi
+}
+
 # Do the real work detached so SessionStart returns immediately -- the first run
 # can take a while as npx fetches the package. The sentinel is written only on
 # success, so a failed attempt (e.g. offline) is retried next session.
 {
-  if find_npx; then
+  if [ "$HAVE_CLI" = 1 ] || find_npx; then
     {
       echo "--- $(date 2>/dev/null) claude-rpc plugin bootstrap ---"
-      if npx -y claude-rpc@latest setup; then
-        : > "$SENTINEL"
+      if run_setup; then
+        mark_done
         echo "bootstrap: ok"
       else
         echo "bootstrap: setup failed (will retry next session)"

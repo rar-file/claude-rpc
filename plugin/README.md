@@ -32,6 +32,10 @@ anything looks off.
 - The script runs `npx claude-rpc@latest setup` **once**, in the background, and
   records a sentinel in the plugin's persistent data dir so later sessions
   no-op instantly.
+- If claude-rpc is already set up (its hooks are in `~/.claude/settings.json`),
+  there is nothing to do. If `claude-rpc` is installed but was never set up
+  (for example `npm i -g claude-rpc` or Homebrew on their own), the script runs
+  that install's `claude-rpc setup` instead of fetching another copy.
 - It locates `node`/`npx` even under nvm/fnm/volta/asdf, where the hook shell's
   PATH can be minimal.
 
@@ -40,7 +44,8 @@ anything looks off.
 - **Platforms:** macOS / Linux / WSL (where `npx … setup` is the documented
   install). On native Windows, install the portable `.exe` from the
   [releases page](https://github.com/rar-file/claude-rpc/releases/latest)
-  instead — there this plugin is a graceful no-op.
+  instead. There the script exits straight away with a one-line note
+  (it detects Git Bash, MSYS2 and Cygwin with `uname -s`).
 - **Removing it:** disabling/uninstalling the plugin stops the bootstrapper but
   does **not** remove claude-rpc itself (it's a real global install by then).
   To fully remove claude-rpc, run `claude-rpc uninstall`.

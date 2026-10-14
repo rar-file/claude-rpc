@@ -2,8 +2,11 @@ const { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu, nativeImage } = 
 const path = require('node:path');
 const fs = require('node:fs');
 const { spawn, spawnSync } = require('node:child_process');
+const net = require('node:net');
 const os = require('node:os');
+const { pathToFileURL } = require('node:url');
 const resolveRpcPort = require('./port.js');
+const { mergeConfig, applyEdits } = require('./config-edit.js');
 
 // Lazy-require electron-updater so dev mode (where the dep may not be
 // installed yet) doesn't crash on import. It's only meaningful in a
@@ -21,6 +24,13 @@ let tray = null;
 // Distinguishes a real quit (tray → Quit, or before-quit) from a window
 // close, which we intercept to hide-to-tray instead of exiting.
 app.isQuitting = false;
+
+// One app per user. A second launch would otherwise add a second tray icon,
+// re-run first-run setup and spawn a second `serve`. Instead it quits, and the
+// running instance brings its window forward.
+const isPrimaryInstance = app.requestSingleInstanceLock();
+if (!isPrimaryInstance) app.quit();
+app.on('second-instance', () => { if (app.isReady()) showWindow(); });
 
 // ── CLI resolver ─────────────────────────────────────────────────────────────
 // Three runtime modes the dashboard can land in:
@@ -166,7 +176,7 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1040,
     height: 860,
-    backgroundColor: '#0a0a0a',
+    backgroundColor: '#f4ede0', // styles.css --paper, so the window doesn't flash dark before the page paints
     title: 'Claude RPC',
     autoHideMenuBar: true,
     show: false,
@@ -180,8 +190,11 @@ function createWindow() {
   });
   mainWindow.once('ready-to-show', () => mainWindow.show());
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
+  // target=_blank links (the Discord tab's Developer Portal link, links inside
+  // the Stats iframe) go to the OS browser, through the same http(s) check as
+  // the 'open-external' IPC.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    openExternalSafe(url);
     return { action: 'deny' };
   });
   // Close-to-tray: a window close hides instead of quitting, so the daemon
@@ -196,8 +209,20 @@ function createWindow() {
 
 function showWindow() {
   if (!mainWindow || mainWindow.isDestroyed()) { createWindow(); return; }
+  if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
   mainWindow.focus();
+}
+
+// Only ever hand web URLs to the OS. A compromised renderer, or a page loaded
+// in the Stats iframe, must not be able to launch file:// or app-protocol
+// handlers. Returns whether the URL was opened.
+function openExternalSafe(url) {
+  let parsed;
+  try { parsed = new URL(String(url)); } catch { return false; }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return false;
+  shell.openExternal(parsed.href);
+  return true;
 }
 
 // Tray icon + right-click menu. The daemon actions reuse the same runCli
@@ -219,8 +244,10 @@ async function rebuildTrayMenu() {
     { type: 'separator' },
     { label: 'Open settings', click: () => showWindow() },
     { label: 'Open web dashboard', click: async () => {
-      await runCli(['serve'], { detached: true });
-      shell.openExternal(`http://127.0.0.1:${resolveRpcPort()}`);
+      // Same server the Stats tab uses. It starts with CLAUDE_RPC_NO_OPEN, so
+      // this is the only place that opens a browser tab.
+      await ensureServe();
+      openExternalSafe(`http://127.0.0.1:${resolveRpcPort()}`);
     } },
     { type: 'separator' },
     { label: 'Start daemon',   enabled: !running, click: async () => { await runCli(['start'], { detached: true }); setTimeout(rebuildTrayMenu, 800); } },
@@ -249,9 +276,13 @@ function createTray() {
 }
 
 app.whenReady().then(() => {
+  if (!isPrimaryInstance) return; // quitting; the first instance has been focused
   configPath = findConfigPath() || seedUserConfigIfMissing();
   createWindow();
   createTray();
+  // macOS: clicking the Dock icon after the window was closed to the tray
+  // brings it back (and re-creates it if it was destroyed).
+  app.on('activate', () => showWindow());
   initAutoUpdater();
   // First-run setup — THE reason the installer exists. Until this ran, the
   // wizard-installed app was just a settings GUI: hooks never got wired, the
@@ -327,21 +358,15 @@ function initAutoUpdater() {
   autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.logger = { info: console.log, warn: console.warn, error: console.error, debug: () => {} };
 
+  // The update UI is this process's own dialog below; the renderer has none.
   autoUpdater.on('checking-for-update', () => console.log('[updater] checking'));
-  autoUpdater.on('update-available', (info) => {
-    console.log('[updater] update available:', info.version);
-    sendToRenderer('update-available', { version: info.version });
-  });
+  autoUpdater.on('update-available', (info) => console.log('[updater] update available:', info.version));
   autoUpdater.on('update-not-available', () => console.log('[updater] up to date'));
   autoUpdater.on('error', (e) => console.error('[updater] error:', e?.message || e));
-  autoUpdater.on('download-progress', (p) => {
-    sendToRenderer('update-progress', { percent: Math.round(p.percent || 0) });
-  });
   autoUpdater.on('update-downloaded', async (info) => {
     if (updateDownloaded) return;  // guard against duplicate fires
     updateDownloaded = true;
     console.log('[updater] downloaded:', info.version);
-    sendToRenderer('update-downloaded', { version: info.version });
     const choice = await dialog.showMessageBox(mainWindow, {
       type: 'info',
       buttons: ['Restart now', 'Later'],
@@ -372,27 +397,62 @@ function sendToRenderer(channel, payload) {
 }
 
 // ── Config ───────────────────────────────────────────────────────────────────
+// DEFAULT_CONFIG lives in src/default-config.js (ESM, plain data). The packaged
+// app ships a copy as resources/default-config.mjs (see extraResources in
+// package.json), built from the same tree as the bundled CLI. Dev trees import
+// it from the repo. If neither loads, the GUI shows the raw file and saving
+// still writes only what was edited.
+let defaultConfig; // undefined until the first load attempt; null if none loaded
+async function loadDefaultConfig() {
+  if (defaultConfig !== undefined) return defaultConfig;
+  defaultConfig = null;
+  const candidates = [];
+  if (process.resourcesPath) candidates.push(path.join(process.resourcesPath, 'default-config.mjs'));
+  for (const root of devRepoCandidates()) candidates.push(path.join(root, 'src', 'default-config.js'));
+  for (const file of candidates) {
+    if (!fs.existsSync(file)) continue;
+    try {
+      const mod = await import(pathToFileURL(file).href);
+      if (mod && mod.DEFAULT_CONFIG) { defaultConfig = mod.DEFAULT_CONFIG; break; }
+    } catch { /* try the next candidate */ }
+  }
+  return defaultConfig;
+}
+
 ipcMain.handle('load-config', async () => {
   if (!configPath) configPath = await pickConfigPath();
   if (!configPath) return { error: 'No config path selected' };
+  let raw;
   try {
-    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-    return { configPath, config };
+    raw = JSON.parse(fs.readFileSync(configPath, 'utf8'));
   } catch (e) {
     return { error: `Failed to read ${configPath}: ${e.message}` };
   }
+  // Show the effective settings (defaults + the user's overrides), the way the
+  // daemon sees them. A fresh two-line config would otherwise show no buttons.
+  const defaults = await loadDefaultConfig();
+  return { configPath, config: defaults ? mergeConfig(defaults, raw) : raw };
 });
 
-ipcMain.handle('pick-config', async () => {
-  const picked = await pickConfigPath();
-  if (picked) { configPath = picked; }
-  return { configPath };
-});
-
-ipcMain.handle('save-config', async (_, newConfig) => {
+// payload: { base, edited }. base is the settings as the GUI showed them before
+// any edits, and edited is the same settings after them. Only what differs
+// between the two is written, onto the file as it is on disk NOW. Untouched
+// keys stay as they are in the file, defaults are never frozen in, and keys the
+// CLI wrote while the window was open survive. See config-edit.js.
+ipcMain.handle('save-config', async (_, payload) => {
   if (!configPath) return { error: 'No config path' };
+  const { base, edited } = payload || {};
+  if (!edited || typeof edited !== 'object') return { error: 'Nothing to save' };
+  let raw = {};
   try {
-    fs.writeFileSync(configPath, JSON.stringify(newConfig, null, 2));
+    raw = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  } catch (e) {
+    // A missing file is fine (the edits become its content). An unreadable or
+    // half-written one is not: overwriting it would lose what's in it.
+    if (e.code !== 'ENOENT') return { error: `Not saved: couldn't read ${configPath} (${e.message})` };
+  }
+  try {
+    fs.writeFileSync(configPath, JSON.stringify(applyEdits(raw, base, edited), null, 2));
     return { ok: true };
   } catch (e) {
     return { error: e.message };
@@ -415,7 +475,9 @@ ipcMain.handle('daemon-status', async () => {
 });
 
 // Spawn the resolved CLI with the given subcommand args. Returns combined
-// stdout/stderr for short-lived commands; for detached spawns just acks.
+// stdout/stderr for short-lived commands. A detached spawn just acks, and its
+// output is discarded (stdio 'ignore'), so nothing buffers it for as long as
+// the child lives.
 function runCli(args, opts = {}) {
   const cli = resolveCli();
   if (cli.kind === 'missing') {
@@ -427,7 +489,7 @@ function runCli(args, opts = {}) {
 
   return new Promise((resolve) => {
     const child = spawn(cmd, fullArgs, {
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: opts.detached ? 'ignore' : ['ignore', 'pipe', 'pipe'],
       cwd: cli.cwd || process.cwd(),
       windowsHide: true,
       detached: opts.detached || false,
@@ -629,47 +691,71 @@ ipcMain.handle('list-vars', async () => {
 });
 
 // ── Local server ─────────────────────────────────────────────────────────────
-ipcMain.handle('start-serve', async () => {
-  if (serveChild) return { ok: true };
-  const cli = resolveCli();
-  if (cli.kind === 'missing') return { ok: false };
-  serveChild = spawn(cli.path, (cli.args || []).concat(['serve']), {
-    cwd: cli.cwd || process.cwd(),
-    stdio: 'ignore',
-    detached: true,
-    windowsHide: true,
-    env: { ...process.env, CLAUDE_RPC_NO_OPEN: '1' },
+// One `claude-rpc serve` for the Stats tab and the tray's "Open web dashboard".
+// It runs with CLAUDE_RPC_NO_OPEN so the server never opens a browser itself.
+// Callers decide what to show. stdio is 'ignore' because nothing reads it.
+function portIsOpen(port) {
+  return new Promise((resolve) => {
+    const sock = net.connect({ host: '127.0.0.1', port });
+    const done = (open) => { sock.destroy(); resolve(open); };
+    sock.setTimeout(500, () => done(false));
+    sock.once('connect', () => done(true));
+    sock.once('error', () => done(false));
   });
-  serveChild.unref();
-  return { ok: true };
+}
+
+// Resolves true once the server accepts connections (or within ~5s, false).
+async function ensureServe() {
+  const port = resolveRpcPort();
+  if (await portIsOpen(port)) return true; // ours, or one the user started
+  if (!serveChild) {
+    const cli = resolveCli();
+    if (cli.kind === 'missing') return false;
+    const child = spawn(cli.path, (cli.args || []).concat(['serve']), {
+      cwd: cli.cwd || process.cwd(),
+      stdio: 'ignore',
+      detached: true,
+      windowsHide: true,
+      env: { ...process.env, CLAUDE_RPC_NO_OPEN: '1' },
+    });
+    child.on('error', () => {});
+    child.on('exit', () => { if (serveChild === child) serveChild = null; });
+    child.unref();
+    serveChild = child;
+  }
+  for (let i = 0; i < 25; i++) {
+    await new Promise((r) => setTimeout(r, 200));
+    if (await portIsOpen(port)) return true;
+    if (!serveChild) return false; // it exited without ever listening
+  }
+  return false;
+}
+
+ipcMain.handle('start-serve', async () => {
+  const ready = await ensureServe();
+  return { ok: ready };
 });
 
 ipcMain.handle('get-rpc-port', () => resolveRpcPort());
 
-ipcMain.handle('open-external', async (_, url) => {
-  // Only ever hand web URLs to the OS — a compromised renderer must not be
-  // able to launch file:// / app-protocol handlers through this channel.
-  let parsed;
-  try { parsed = new URL(String(url)); } catch { return { ok: false }; }
-  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return { ok: false };
-  shell.openExternal(parsed.href);
-  return { ok: true };
-});
+ipcMain.handle('get-app-version', () => app.getVersion());
 
-ipcMain.handle('check-for-updates', async () => {
-  if (!app.isPackaged) return { ok: false, output: 'dev mode — auto-update disabled' };
-  const autoUpdater = loadAutoUpdater();
-  if (!autoUpdater) return { ok: false, output: 'electron-updater unavailable' };
+ipcMain.handle('open-external', async (_, url) => ({ ok: openExternalSafe(url) }));
+
+function stopServe() {
+  if (!serveChild) return;
   try {
-    const result = await autoUpdater.checkForUpdates();
-    return { ok: true, version: result?.updateInfo?.version || null };
-  } catch (e) {
-    return { ok: false, output: e?.message || String(e) };
-  }
-});
+    // POSIX: the detached child leads its own process group, so kill the
+    // group. Windows has no process groups to signal (process.kill(-pid)
+    // throws), and the child is the serve process itself, so kill it directly.
+    if (process.platform === 'win32') serveChild.kill();
+    else process.kill(-serveChild.pid);
+  } catch { /* already gone */ }
+  serveChild = null;
+}
 
 function cleanup() {
-  try { if (serveChild) process.kill(-serveChild.pid); } catch {}
+  stopServe();
   if (updateCheckTimer) clearInterval(updateCheckTimer);
 }
 

@@ -2,8 +2,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
   loadConfig:    () => ipcRenderer.invoke('load-config'),
-  saveConfig:    (cfg) => ipcRenderer.invoke('save-config', cfg),
-  pickConfig:    () => ipcRenderer.invoke('pick-config'),
+  // base = settings as shown before any edits, edited = after; main writes only the difference.
+  saveConfig:    (base, edited) => ipcRenderer.invoke('save-config', { base, edited }),
   daemonStatus:  () => ipcRenderer.invoke('daemon-status'),
   runSetup:      () => ipcRenderer.invoke('run-setup'),
   onSetupResult: (handler) => ipcRenderer.on('setup-result', (_, payload) => handler(payload)),
@@ -17,12 +17,6 @@ contextBridge.exposeInMainWorld('api', {
   listWorkspaces: () => ipcRenderer.invoke('list-workspaces'),
   setWorkspaceVisibility: (cwd, level) => ipcRenderer.invoke('set-workspace-visibility', { cwd, level }),
   getRpcPort:    () => ipcRenderer.invoke('get-rpc-port'),
+  getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   openExternal:  (url) => ipcRenderer.invoke('open-external', url),
-  checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
-  onUpdateEvent:   (handler) => {
-    const wrap = (channel) => (_, payload) => handler({ channel, ...payload });
-    ipcRenderer.on('update-available',  wrap('available'));
-    ipcRenderer.on('update-progress',   wrap('progress'));
-    ipcRenderer.on('update-downloaded', wrap('downloaded'));
-  },
 });

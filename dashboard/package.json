@@ -38,6 +38,7 @@
     "files": [
       "main.js",
       "port.js",
+      "config-edit.js",
       "preload.js",
       "index.html",
       "styles.css",
@@ -55,6 +56,10 @@
       {
         "from": "../config.example.json",
         "to": "config.example.json"
+      },
+      {
+        "from": "../src/default-config.js",
+        "to": "default-config.mjs"
       }
     ],
     "asar": true,

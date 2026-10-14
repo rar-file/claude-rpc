@@ -1,13 +1,13 @@
 // dashboard/renderer.js — single-file, vanilla, no bundler.
-// Tabs: Presence / Discord / Assets / Timing / Daemon / Stats.
+// Tabs: Presence / Discord / Assets / Timing / Daemon / Privacy / Stats.
 
 const $ = (id) => document.getElementById(id);
 let currentConfig = null;
+// What collect() returned before any edits: the baseline a save diffs against,
+// so only fields the user changed are written (see dashboard/config-edit.js).
+let pristineConfig = null;
 let liveVars = null;
-let logTailUnsub = null;
-let serveProc = null;
 let rotationCursor = 0;
-let rotationTimer = null;
 
 // Sample values used as a fallback when no live state exists yet.
 const SAMPLES = {
@@ -371,7 +371,13 @@ function collectDiscord() {
 }
 
 // ── Assets tab ───────────────────────────────────────────────────────────────
-const STATUSES = ['working', 'thinking', 'idle', 'stale', 'notification'];
+// Every status the daemon renders (statusAssets / statusIcons / presence.byStatus
+// in src/default-config.js).
+const STATUSES = ['working', 'thinking', 'compacting', 'shipped', 'idle', 'stale', 'notification'];
+
+// An empty icon mapping doesn't hide the badge: src/format.js falls back to the
+// status name as the image key, and the daemon drops the badge only for 'stale'.
+const iconPlaceholder = (status) => (status === 'stale' ? 'empty: no badge' : `empty: uses "${status}"`);
 
 function renderAssetsTab(cfg) {
   const assets = cfg.statusAssets || {};
@@ -402,7 +408,7 @@ function renderAssetsTab(cfg) {
     row.className = 'icon-row';
     row.innerHTML = `
       <span class="status-name">${status}</span>
-      <input type="text" class="icon-key" data-status="${status}" placeholder="leave empty to hide" value="${escapeAttr(icons[status] || '')}" />
+      <input type="text" class="icon-key" data-status="${status}" placeholder="${escapeAttr(iconPlaceholder(status))}" value="${escapeAttr(icons[status] || '')}" />
       <span></span>
     `;
     iRoot.appendChild(row);
@@ -487,7 +493,7 @@ function showSetupResult(p) {
   el.textContent = p.ok
     ? `setup complete${p.auto ? ' (ran automatically)' : ''} — hooks wired, daemon up. Open Claude Code and your card goes live.`
     : `setup failed — ${String(p.output || '').split('\n').filter(Boolean).slice(-2).join(' · ') || 'run "Run setup" to retry'}`;
-  el.style.color = p.ok ? 'var(--ok, #7a9a5e)' : 'var(--danger, #c0533f)';
+  el.style.color = p.ok ? 'var(--grass)' : 'var(--red)';
   setTimeout(updateDaemonStatus, 500);
   setTimeout(refreshLog, 1200);
 }
@@ -515,13 +521,10 @@ async function ensureServeRunning() {
   const port = await window.api.getRpcPort();
   const url = `http://127.0.0.1:${port}`;
   $('statsUrl').textContent = url;
-  if (serveProc) {
-    $('statsIframe').src = url;
-    return;
-  }
+  // Starts `serve` if nothing is listening yet (or it has since exited), and
+  // resolves once the server accepts connections.
   await window.api.startServe();
-  serveProc = true;
-  setTimeout(() => { $('statsIframe').src = url; }, 600);
+  $('statsIframe').src = url;
 }
 $('statsOpenExternal').addEventListener('click', async () => {
   const port = await window.api.getRpcPort();
@@ -620,9 +623,10 @@ async function save() {
   if (!currentConfig) { setStatus('No config loaded', 'error'); return; }
   setStatus('Saving…');
   const cfg = collect();
-  const result = await window.api.saveConfig(cfg);
+  const result = await window.api.saveConfig(pristineConfig, cfg);
   if (result.ok) {
     currentConfig = cfg;
+    pristineConfig = cfg;
     setStatus('Saved', 'success');
     refreshLiveRail();
   } else {
@@ -637,6 +641,8 @@ document.addEventListener('keydown', (e) => {
 
 // ── Init ─────────────────────────────────────────────────────────────────────
 async function init() {
+  window.api.getAppVersion().then((v) => { if (v) $('appVersion').textContent = 'v' + v; }).catch(() => {});
+
   const result = await window.api.loadConfig();
   if (result.error) {
     setStatus(result.error, 'error');
@@ -651,14 +657,17 @@ async function init() {
   renderDiscordTab(currentConfig);
   renderAssetsTab(currentConfig);
   renderTimingTab(currentConfig);
+  // Read the form back before the user touches it. A save diffs against this,
+  // so a field that's only displayed (a default, or a value the form tidies,
+  // like an empty button list) is never written into config.json.
+  pristineConfig = collect();
 
   updateDaemonStatus();
   setInterval(updateDaemonStatus, 3000);
-  setInterval(refreshLiveRail, 4000);
   refreshLiveRail();
 
-  // Cycle rail every 4s.
-  rotationTimer = setInterval(() => { rotationCursor++; refreshLiveRail(); }, 4000);
+  // Cycle the rail to the next frame every 4s.
+  setInterval(() => { rotationCursor++; refreshLiveRail(); }, 4000);
 }
 
 init();
