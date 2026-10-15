@@ -113,12 +113,14 @@ test('pathExportHint names the right shell file', () => {
 });
 
 test('ensureCliOnPath: an existing claude-rpc on PATH is left alone', () => {
+  // Real host semantics: Windows finds claude-rpc.exe via PATHEXT, and its
+  // drive-letter paths can't go through a ':'-separated POSIX PATH.
   const dir = mkdtempSync(join(HOME, 'onpath-'));
-  writeFileSync(join(dir, 'claude-rpc'), 'x');
+  writeFileSync(join(dir, process.platform === 'win32' ? 'claude-rpc.exe' : 'claude-rpc'), 'x');
   const r = ensureCliOnPath({
     exe: fakeExe(),
-    env: { PATH: dir },
-    platform: process.platform === 'win32' ? 'linux' : process.platform,
+    env: { PATH: dir, PATHEXT: '.EXE' },
+    platform: process.platform,
   });
   assert.equal(r.status, 'already');
   assert.equal(r.cmd, 'claude-rpc');
@@ -199,23 +201,27 @@ test('removeCliFromPath (POSIX): removes only our own link', { skip: !posix }, (
   clearLink();
 });
 
-test('pickLinkDir: ~/.local/bin when on PATH; macOS falls back to a writable /usr/local/bin', () => {
-  const yes = () => true,
-    no = () => false;
-  assert.equal(
-    pickLinkDir({ PATH: `/usr/local/bin:${POSIX_LINK_DIR}` }, 'darwin', yes),
-    POSIX_LINK_DIR,
-  );
-  assert.equal(pickLinkDir({ PATH: '/usr/local/bin:/usr/bin' }, 'darwin', yes), '/usr/local/bin');
-  assert.equal(
-    pickLinkDir({ PATH: '/usr/local/bin:/usr/bin' }, 'darwin', no),
-    POSIX_LINK_DIR,
-    'not writable',
-  );
-  assert.equal(pickLinkDir({ PATH: '/usr/bin' }, 'darwin', yes), POSIX_LINK_DIR, 'not on PATH');
-  assert.equal(
-    pickLinkDir({ PATH: '/usr/local/bin:/usr/bin' }, 'linux', yes),
-    POSIX_LINK_DIR,
-    'Linux keeps ~/.local/bin',
-  );
-});
+test(
+  'pickLinkDir: ~/.local/bin when on PATH; macOS falls back to a writable /usr/local/bin',
+  { skip: !posix },
+  () => {
+    const yes = () => true,
+      no = () => false;
+    assert.equal(
+      pickLinkDir({ PATH: `/usr/local/bin:${POSIX_LINK_DIR}` }, 'darwin', yes),
+      POSIX_LINK_DIR,
+    );
+    assert.equal(pickLinkDir({ PATH: '/usr/local/bin:/usr/bin' }, 'darwin', yes), '/usr/local/bin');
+    assert.equal(
+      pickLinkDir({ PATH: '/usr/local/bin:/usr/bin' }, 'darwin', no),
+      POSIX_LINK_DIR,
+      'not writable',
+    );
+    assert.equal(pickLinkDir({ PATH: '/usr/bin' }, 'darwin', yes), POSIX_LINK_DIR, 'not on PATH');
+    assert.equal(
+      pickLinkDir({ PATH: '/usr/local/bin:/usr/bin' }, 'linux', yes),
+      POSIX_LINK_DIR,
+      'Linux keeps ~/.local/bin',
+    );
+  },
+);
