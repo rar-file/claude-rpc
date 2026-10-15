@@ -70,7 +70,7 @@ brew install rar-file/claude-rpc/claude-rpc && claude-rpc setup
 .\claude-rpc.exe setup
 ```
 
-`setup` copies the exe to a fixed per-user location, so the download can go afterwards. Prefer a GUI? The release's `claude-rpc-<version>-x64-setup.exe` (installer, auto-updates) and `claude-rpc-<version>-x64-portable.exe` (no install) are the desktop dashboard app, which runs the same `setup` for you on first launch.
+`setup` copies the exe to a fixed per-user location (so the download can go afterwards) and adds that folder to your user PATH, so `claude-rpc <command>` works in any new terminal. Prefer a GUI? The release's `claude-rpc-<version>-x64-setup.exe` (installer, auto-updates) and `claude-rpc-<version>-x64-portable.exe` (no install) are the desktop dashboard app, which runs the same `setup` for you on first launch.
 
 That's the whole pitch.
 

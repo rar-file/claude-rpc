@@ -2412,7 +2412,7 @@ process.on('unhandledRejection', (e) => {
       // up" on clean re-runs); the daemon row lands after it, then setupOutro
       // closes the screen — only when something actually changed.
       const { install: runInstall, setupOutro } = await import('./install.js');
-      const { target, changed } = await runInstall({ exePath: EXE_PATH || process.execPath });
+      const { target, changed, cli } = await runInstall({ exePath: EXE_PATH || process.execPath });
       // Slimmer first run: bring the daemon up now so the card appears
       // immediately, instead of making the user run a separate `start`.
       // Best-effort — a start hiccup must never make `setup` look failed.
@@ -2486,7 +2486,7 @@ process.on('unhandledRejection', (e) => {
         // The --link path above IS a connect, so it never double-asks.
         if (!linkCode) await setupGhConnect();
       }
-      setupOutro(target, changed);
+      setupOutro(target, changed, cli);
       break;
     }
     case 'uninstall': await (await import('./install.js')).uninstall(); break;
@@ -2596,9 +2596,9 @@ process.on('unhandledRejection', (e) => {
       if (packagedDefault) {
         const { isInstalled, install: runInstall, setupOutro, ensureCanonicalExe, migrateConfig, installHooks } = await import('./install.js');
         if (!isInstalled()) {
-          const { target } = await runInstall({ exePath: EXE_PATH || process.execPath });
+          const { target, cli } = await runInstall({ exePath: EXE_PATH || process.execPath });
           startDaemon();
-          setupOutro(target);
+          setupOutro(target, true, cli);
         } else {
           // Self-heal an existing install. Two real failure modes this fixes:
           //
@@ -2643,10 +2643,15 @@ process.on('unhandledRejection', (e) => {
         // Version in the hint is deliberate: the #1 cause of "unknown
         // command" in the wild is a stale global install resolving instead of
         // the version the user read the docs for. Make the skew visible.
+        // The update command depends on how this copy was installed.
+        const update = IS_PACKAGED ? 'download the latest release from https://github.com/rar-file/claude-rpc/releases/latest'
+          : IS_NPX ? `npx claude-rpc@latest ${cmd}`
+          : /[\\/]Cellar[\\/]/.test(DAEMON_SCRIPT) ? 'brew upgrade claude-rpc'
+          : 'npm install -g claude-rpc@latest';
         fail(`unknown command: ${cmd}`, {
           hint: [
             'run `claude-rpc --help` for the full command list',
-            `this install is v${VERSION} — if the docs mention \`${cmd}\`, update first: npm install -g claude-rpc@latest`,
+            `this install is v${VERSION} — if the docs mention \`${cmd}\`, update first: ${update}`,
           ],
           code: EX_USER_ERROR,
         });

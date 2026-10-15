@@ -22,6 +22,7 @@ import { resolveVisibility, listPrivateCwds, detectGithubPrivate } from './priva
 import { readClaudeCredentials, readUsageCache } from './usage.js';
 import { EVENTS as HOOK_EVENTS, isOurHook } from './install.js';
 import { c, check as uiCheck } from './ui.js';
+import { findOnPath, pathExportHint } from './cli-path.js';
 
 const counters = { pass: 0, fail: 0, warn: 0 };
 
@@ -276,6 +277,20 @@ function checkCanonicalExe() {
   }
 }
 
+// Every command setup, doctor and the docs print is `claude-rpc …`, which only
+// works when the shell can find it. Packaged installs live in <config dir>/bin,
+// off PATH; setup puts them on it (see cli-path.js).
+function checkCliOnPath() {
+  if (!IS_PACKAGED) return;
+  const found = findOnPath('claude-rpc');
+  if (found) { check('claude-rpc on PATH', 'pass', found); return; }
+  check('claude-rpc on PATH', 'warn', `not found — this terminal can run it as "${CANONICAL_EXE}"`,
+    process.platform === 'win32'
+      ? 'run `setup` again to add it to your user PATH (or `doctor --fix`), then open a new terminal'
+      : `run \`setup\` again (or \`doctor --fix\`) to link ~/.local/bin/claude-rpc; if ~/.local/bin isn't on PATH: ${pathExportHint()}`,
+    'setup');
+}
+
 function checkDaemon() {
   if (!existsSync(PID_PATH)) {
     check('daemon running', 'warn', 'no pid file',
@@ -499,6 +514,7 @@ export function runDoctor() {
   checkNodeVersion();
   checkMode();
   checkCanonicalExe();
+  checkCliOnPath();
 
   section('Config');
   checkDataDir();

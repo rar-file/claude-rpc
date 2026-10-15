@@ -17,6 +17,7 @@ fetch-and-execute anywhere in `src/`.
 | Behavior | Where | Scope | Reversible? |
 | --- | --- | --- | --- |
 | Startup persistence | `src/install.js` → `addStartupEntry` (Windows Run key, macOS LaunchAgent, Linux `systemd --user`) + `selfHealOnUpdate` (installs it on update); `src/hook.js` → `ensureDaemonRunning` (SessionStart self-heal) | Per-user login autostart (no admin/root/system service) + a detached daemon (re)launched when you start a Claude Code session | Yes — `claude-rpc uninstall` / `removeStartupEntry`; disable every auto-start path with `autostart:false` (or `CLAUDE_RPC_NO_AUTOSTART=1` in the environment for the SessionStart self-heal) |
+| PATH entry (packaged installs only) | `src/cli-path.js` → `ensureCliOnPath` | Windows: appends `<config dir>\bin` to the **user** PATH (HKCU\Environment, original value kind kept). macOS/Linux: one symlink, `~/.local/bin/claude-rpc` (or `/usr/local/bin/claude-rpc` on macOS when only that is on PATH and writable). npm/Homebrew installs are already on PATH and get nothing. | Yes — `claude-rpc uninstall` removes only its own entry/link; `CLAUDE_RPC_NO_PATH=1` skips it |
 | Hook injection | `src/install.js` → `installHooks` | Only into Claude Code's own `settings.json`, only our own commands | Yes — `uninstallHooks` removes exactly what it added |
 | Outbound network | `src/community.js`, `src/gist.js`, `src/usage.js`, `src/notify.js`, `default-config.js` | Anonymous counters + (opt-in) profile/gist/webhook + own read-only OAuth-usage poll + GIF assets | Telemetry: `community off`. Profile: `profile off`. Gist/webhook: opt-in only. Usage: `usage.enabled:false`. |
 | Local subprocess | `reg.exe`, `wscript`, the daemon itself (`node`/packaged exe — via the Run key and the SessionStart self-heal) and its short-lived scan worker, `git`, `gh`, `npm`, `claude`, `security`, notifiers | Static or escaped args, no shell interpolation of untrusted input | n/a |
@@ -357,6 +358,9 @@ untrusted or remote input into a shell:
 
 - `reg.exe add/delete` — the Windows Run key (`src/install.js`).
 - `wscript.exe` — runs the generated windowless startup shim (`src/install.js`).
+- `powershell.exe -NoProfile -NonInteractive -EncodedCommand …` — packaged
+  Windows installs only: adds/removes `<config dir>\bin` in the user PATH
+  (`src/cli-path.js`); the script is generated from that fixed path.
 - `launchctl load/unload` — the macOS LaunchAgent (`src/install.js`); args are
   the fixed plist path.
 - `systemctl --user enable/disable/daemon-reload` — the Linux user service

@@ -904,27 +904,49 @@ export async function install({ exePath } = {}) {
   // as the (already reliable) fallback, so setup never fails on this.
   try { await addStartupEntry(target); }
   catch (e) { step(SYM_WARN, 'startup entry', `failed: ${e.message} — session self-heal still covers it`, console.warn); }
+  const cli = IS_PACKAGED ? await putCliOnPath(target) : { cmd: 'claude-rpc', newTerminal: false };
   // Nothing changed: the checklist above stayed silent, so say so in one line.
   if (!runDirty && probe.ok) {
     console.log(`  ${SYM_OK}  ${c.bold}already set up${c.reset}  ${c.dim}${noopFacts.join(' · ')}${c.reset}`);
   }
-  return { target, changed: runDirty };
+  return { target, changed: runDirty, cli };
+}
+
+// A packaged exe lives in <config dir>/bin, which no shell searches, so the
+// `claude-rpc …` commands setup prints came back "command not found". npm and
+// Homebrew installs are on PATH already. Best-effort: never fails setup, and
+// the returned `cmd` is what actually works in this terminal.
+async function putCliOnPath(target) {
+  const { ensureCliOnPath, pathExportHint } = await import('./cli-path.js');
+  const cli = ensureCliOnPath({ exe: target });
+  if (cli.status === 'added') dirtyStep(SYM_OK, 'on PATH', `${cli.detail} added to your user PATH — open a new terminal to use it`);
+  else if (cli.status === 'linked') dirtyStep(SYM_OK, 'on PATH', cli.detail);
+  else if (cli.status === 'needs-path') {
+    dirtyStep(SYM_WARN, 'on PATH', `${cli.detail}, but ~/.local/bin isn't on your PATH`);
+    hintLine(`add it for new terminals: ${pathExportHint()}`);
+  } else if (cli.status === 'failed') {
+    step(SYM_WARN, 'on PATH', `${cli.detail} — run it as ${cli.cmd}`, console.warn);
+  } else noop('on PATH');
+  return cli;
 }
 
 // The single closing block of `claude-rpc setup` — what to do now, where the
 // levers are. Printed by the CLI after the daemon launch so it always lands
 // last; doctor --fix re-runs install() without it.
-export function setupOutro(target, changed = true) {
+// `cli` is install()'s report of how `claude-rpc` resolves; the commands shown
+// use whatever actually works in this terminal.
+export function setupOutro(target, changed = true, cli = { cmd: 'claude-rpc', newTerminal: false }) {
   if (!changed) return;
   const point = (label, value, note = '') =>
     console.log(`     ${c.dim}→${c.reset}  ${c.dim}${label.padEnd(14)}${c.reset} ${c.cyan}${value}${c.reset}${note ? `  ${c.dim}${note}${c.reset}` : ''}`);
+  const run = cli.cmd || 'claude-rpc';
   console.log('');
   console.log(`  ${SYM_OK}  ${c.bold}setup complete${c.reset} — open Claude Code and send a prompt; your card goes live in Discord.`);
-  point('verify wiring', 'claude-rpc doctor');
+  point('verify wiring', `${run} doctor`, cli.newTerminal ? 'in a new terminal' : '');
   if (IS_PACKAGED) point('start daemon', `"${target}" daemon`, 'also runs automatically at login');
-  else point('manage daemon', 'claude-rpc start · stop · status');
+  else point('manage daemon', `${run} start · stop · status`);
   point('config', CONFIG_PATH, 'a working Discord app is bundled — set clientId only to use your own');
-  point('other machine?', 'claude-rpc link', 'run it there, claim the code here — one leaderboard profile');
+  point('other machine?', `${run} link`, 'run it there, claim the code here — one leaderboard profile');
   console.log('');
 }
 
@@ -934,6 +956,8 @@ export async function uninstall() {
   console.log('');
   uninstallHooks();
   await removeStartupEntry();
+  const { removeCliFromPath } = await import('./cli-path.js');
+  if (removeCliFromPath()) step(SYM_OK, 'PATH entry', 'removed');
   console.log('');
   console.log(`  ${SYM_OK}  ${c.bold}uninstalled${c.reset} — config at ${c.cyan}${USER_CONFIG_DIR}${c.reset} ${c.dim}left intact; delete it manually if you want.${c.reset}`);
   console.log('');
