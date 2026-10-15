@@ -12,6 +12,7 @@ const {
   parseTranscript, readSessionTokens, readSessionModel, cleanProjectName,
   discoverAltProjectDirs, findLiveSessions, aggregateFrom,
 } = await import('../src/scanner.js');
+const { costFor } = await import('../src/pricing.js');
 
 function makeTranscript(records) {
   const dir = mkdtempSync(join(tmpdir(), 'rpc-scan-'));
@@ -196,6 +197,26 @@ test('readSessionTokens: id dedup survives incremental appends', () => {
   rmSync(dir, { recursive: true });
 });
 
+test('readSessionTokens: a split message counts at its final usage, across appends', () => {
+  // output_tokens is a running count while a message streams: a later block
+  // line of the same message.id can carry more than the first did.
+  const { dir, path } = makeTranscript([
+    { type: 'assistant', message: { id: 'msg_s', usage: { input_tokens: 10, output_tokens: 8, cache_read_input_tokens: 500 } } },
+    { type: 'assistant', message: { id: 'msg_s', usage: { input_tokens: 10, output_tokens: 300, cache_read_input_tokens: 500 } } },
+  ]);
+  const t1 = readSessionTokens(path);
+  assert.deepEqual([t1.input, t1.output, t1.cacheRead], [10, 300, 500]);
+  // Its last block lands after the read; an older, smaller snapshot never
+  // takes anything back.
+  appendFileSync(path, JSON.stringify({ type: 'assistant', message: { id: 'msg_s', usage: { input_tokens: 10, output_tokens: 420, cache_read_input_tokens: 500 } } }) + '\n');
+  appendFileSync(path, JSON.stringify({ type: 'assistant', message: { id: 'msg_s', usage: { input_tokens: 10, output_tokens: 8, cache_read_input_tokens: 500 } } }) + '\n');
+  const future = new Date(Date.now() + 5000);
+  utimesSync(path, future, future);
+  const t2 = readSessionTokens(path);
+  assert.deepEqual([t2.input, t2.output, t2.cacheRead], [10, 420, 500]);
+  rmSync(dir, { recursive: true });
+});
+
 test('readSessionModel: reports the newest turn model, tracking /model switches', () => {
   const { dir, path } = makeTranscript([
     { type: 'assistant', message: { id: 'm1', model: 'claude-sonnet-5', usage: { input_tokens: 1 } } },
@@ -319,7 +340,60 @@ test('parseTranscript: usage counted once per message.id across split lines', ()
   rmSync(dir, { recursive: true });
 });
 
+test('parseTranscript: a split message counts at its final usage, not its first line', () => {
+  // Real Claude Code 2.1 transcripts: the thinking block's line carries an
+  // early output_tokens snapshot; the tool_use line after it carries the final
+  // count. Input/cache repeat unchanged. Counting the first line only
+  // under-counted output (and so cost).
+  const first = { input_tokens: 6, output_tokens: 9, cache_read_input_tokens: 40_000, cache_creation_input_tokens: 1_200 };
+  const last = { ...first, output_tokens: 640 };
+  const { dir, path } = makeTranscript([
+    { type: 'user', sessionId: 's1', cwd: '/tmp/proj', timestamp: '2026-05-22T10:00:00Z', message: { content: 'go' } },
+    { type: 'assistant', timestamp: '2026-05-22T10:00:10Z',
+      message: { id: 'msg_G', model: 'claude-opus-4-7', usage: first, content: [{ type: 'thinking', text: '...' }] } },
+    { type: 'assistant', timestamp: '2026-05-22T10:00:11Z',
+      message: { id: 'msg_G', model: 'claude-opus-4-7', usage: last, content: [{ type: 'tool_use', name: 'Bash', input: { command: 'ls' } }] } },
+  ]);
+  const s = parseTranscript(path);
+  assert.equal(s.outputTokens, 640, 'final output count, once');
+  assert.equal(s.inputTokens, 6);
+  assert.equal(s.cacheReadTokens, 40_000, 'unchanged fields once');
+  assert.equal(s.cacheWriteTokens, 1_200);
+  const want = costFor({ model: 'claude-opus-4-7', usage: last });
+  assert.ok(Math.abs(s.cost - want) < 1e-12, 'cost of the final usage');
+  const mk = Object.values(s.byModel)[0];
+  assert.equal(mk.turns, 1, 'still one turn');
+  assert.equal(mk.tokens, 6 + 640 + 40_000 + 1_200);
+  assert.equal(Object.values(s.byDay)[0].outputTokens, 640);
+  rmSync(dir, { recursive: true });
+});
+
 // ── Incremental (append-only) re-parse ───────────────────────────────────
+
+test('parseTranscript: append-parse counts a message that grows across the boundary at its final usage', () => {
+  const u = (out) => ({ input_tokens: 5, output_tokens: out, cache_read_input_tokens: 900 });
+  const line = (out, ts, block) => ({ type: 'assistant', timestamp: ts,
+    message: { id: 'msg_X', model: 'claude-opus-4-7', usage: u(out), content: [block] } });
+  const { dir, path } = makeTranscript([
+    { type: 'user', sessionId: 's1', cwd: '/tmp/proj', timestamp: '2026-05-22T10:00:00Z', message: { content: 'go' } },
+    line(12, '2026-05-22T10:00:10Z', { type: 'thinking', text: '...' }),
+  ]);
+  const prev = parseTranscript(path);
+  const prevIds = JSON.stringify(prev._parse.recentIds);
+  appendFileSync(path, [
+    line(300, '2026-05-22T10:00:11Z', { type: 'text', text: 'hi' }),
+    line(450, '2026-05-22T10:00:12Z', { type: 'tool_use', name: 'Bash', input: { command: 'ls' } }),
+  ].map((r) => JSON.stringify(r) + '\n').join(''));
+  const incremental = parseTranscript(path, prev);
+  const full = parseTranscript(path);
+  assert.equal(incremental.outputTokens, 450);
+  assert.equal(incremental.cacheReadTokens, 900);
+  for (const k of ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cost', 'byModel', 'byDay', 'costByModel', 'modelsUsed']) {
+    assert.deepEqual(incremental[k], full[k], `${k} matches full re-parse`);
+  }
+  assert.equal(JSON.stringify(prev._parse.recentIds), prevIds, 'the cached entry it appended onto is left as it was');
+  rmSync(dir, { recursive: true });
+});
 
 test('parseTranscript: append-parse from a prior entry matches a full re-parse', () => {
   const first = [

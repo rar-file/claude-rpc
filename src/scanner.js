@@ -15,7 +15,9 @@ import { localDateStamp } from './fmt.js';
 //     never assigned, leaving {startTimeLabel} permanently blank).
 // v7: per-day byModel buckets in transcript summaries — bump forces the one
 // full rescan that backfills model-mix history for already-scanned files.
-const CACHE_VERSION = 7;
+// v8: usage counted at each message's final values (usageDelta), not its first
+//     line's — re-parse to correct output tokens/cost in existing history.
+const CACHE_VERSION = 8;
 
 // Cap counted gap between consecutive timestamps. Anything larger is treated
 // as the user walking away — we count only what's plausibly active time.
@@ -296,16 +298,43 @@ function blankTranscriptSummary() {
 // split while staying cheap to persist in the scan cache.
 const RECENT_IDS_MAX = 200;
 
+// How much of this line's usage hasn't been counted yet for its message.id.
+// Claude Code writes one line per content block of an assistant message, each
+// repeating that message's usage. Input and cache counts repeat unchanged, but
+// output_tokens is a running count while the message streams, so a later line
+// can carry a larger value than the first (seen on Claude Code 2.1: counting
+// only the first line under-counted output by ~8%). Each message.id is
+// therefore counted once at its largest, final usage: the first line adds its
+// whole usage, later lines only what grew. `recent` holds
+// [id, input, output, cacheRead, cacheWrite] entries. Returns { first, delta }
+// with delta in API usage shape, or null when nothing new is left to count.
+function usageDelta(recent, msgId, u) {
+  const cur = [u?.input_tokens || 0, u?.output_tokens || 0, u?.cache_read_input_tokens || 0, u?.cache_creation_input_tokens || 0];
+  const shape = (v) => ({ input_tokens: v[0], output_tokens: v[1], cache_read_input_tokens: v[2], cache_creation_input_tokens: v[3] });
+  if (!msgId) return { first: true, delta: shape(cur) };
+  const hit = recent.find((e) => e[0] === msgId);
+  if (!hit) {
+    recent.push([msgId, ...cur]);
+    if (recent.length > RECENT_IDS_MAX) recent.shift();
+    return { first: true, delta: shape(cur) };
+  }
+  const grew = cur.map((v, i) => Math.max(0, v - hit[i + 1]));
+  if (!grew.some(Boolean)) return null;
+  for (let i = 0; i < 4; i++) hit[i + 1] = Math.max(hit[i + 1], cur[i]);
+  return { first: false, delta: shape(grew) };
+}
+
 // Parse complete JSONL lines into `summary`, mutating it in place. `pstate`
 // carries the cross-chunk bookkeeping that incremental (append-only) parsing
 // needs to behave exactly like a full parse:
-//   recentIds — recently counted assistant message.ids. Claude Code splits
-//               one assistant message (a single message.id) across several
-//               JSONL lines — one per content block — repeating the SAME
-//               `usage` object on every line. Token/cost/turn counting must
-//               happen once per message.id, or a 3-block turn counts 3×.
-//               Content blocks themselves are distinct per line, so those
-//               stay counted per line.
+//   recentIds — recently counted assistant messages, [id, ...usage counted]
+//               (see usageDelta). Claude Code splits one assistant message (a
+//               single message.id) across several JSONL lines — one per
+//               content block — repeating its `usage` on every line. Tokens
+//               and cost count once per message.id at its final usage, turns
+//               once per message.id, or a 3-block turn counts 3×. Content
+//               blocks themselves are distinct per line, so those stay
+//               counted per line.
 //   lastRec   — the previous chunk's final timestamped record, so the
 //               active-time gap across a chunk boundary still accrues.
 function parseChunkInto(text, summary, pstate) {
@@ -340,24 +369,21 @@ function parseChunkInto(text, summary, pstate) {
 
     if (r.type === 'assistant') {
       const turnModel = r.message?.model || summary.model;
-      const u = r.message?.usage;
-      // Count usage/cost/turn only the first time we see this message.id (see
-      // the pstate.recentIds note above). No id (rare/legacy) → count it.
-      const msgId = r.message?.id;
-      const firstSeen = !msgId || !pstate.recentIds.includes(msgId);
-      if (msgId && firstSeen) {
-        pstate.recentIds.push(msgId);
-        if (pstate.recentIds.length > RECENT_IDS_MAX) pstate.recentIds.shift();
-      }
+      // Count the turn once per message.id and its usage once, at the
+      // message's final values (see usageDelta). No id (rare/legacy) → count
+      // every line.
+      const counted = usageDelta(pstate.recentIds, r.message?.id, r.message?.usage);
+      const firstSeen = !!counted?.first;
+      const u = r.message?.usage ? counted?.delta : null;
       // Per-model split bucket, keyed by pricing key so cost/tokens/turns align.
       const mkey = turnModel ? pricingKeyFor(turnModel) : null;
       const mb = mkey ? (summary.byModel[mkey] ||= { turns: 0, tokens: 0, cost: 0 }) : null;
       // Per-day model split (day granularity only — week/hour stay lean).
       // Powers model-mix-over-time; the all-time byModel can't trend.
-      const dm = firstSeen && mkey && dayBucket
+      const dm = (firstSeen || u) && mkey && dayBucket
         ? ((dayBucket.byModel ||= {})[mkey] ||= { turns: 0, tokens: 0, cost: 0 })
         : null;
-      if (u && firstSeen) {
+      if (u) {
         summary.inputTokens += u.input_tokens || 0;
         summary.outputTokens += u.output_tokens || 0;
         summary.cacheReadTokens += u.cache_read_input_tokens || 0;
@@ -523,7 +549,7 @@ export function parseTranscript(filePath, prev = null, { chunkBytes = TRANSCRIPT
     && typeof prev._size === 'number' && st.size >= prev._size);
   const summary = canAppend ? structuredClone(prev) : blankTranscriptSummary();
   const pstate = canAppend
-    ? { recentIds: (prev._parse.recentIds || []).slice(), lastRec: prev._parse.lastRec || null }
+    ? { recentIds: (prev._parse.recentIds || []).map((e) => e.slice()), lastRec: prev._parse.lastRec || null }
     : { recentIds: [], lastRec: null };
   const startOffset = canAppend ? prev._offset : 0;
 
@@ -647,10 +673,10 @@ function readTranscriptCwd(path, mtimeMs) {
 const sessionTokenCache = new Map();  // path → { mtime, size, offset, tokens, seenIds, model }
 
 // Accumulate assistant-usage tokens from a chunk of complete JSONL lines.
-// Claude Code repeats the same `usage` object on every content-block line of
-// one assistant message, so count each message.id once (`seenIds`, the same
-// bounded-ring dedup parseChunkInto uses) — otherwise the live count drifts
-// above the lifetime aggregate on multi-block turns. Lines with no id
+// Claude Code repeats a message's `usage` on every content-block line of that
+// assistant message, so count each message.id once at its final usage
+// (`seenIds`, the same usageDelta window parseChunkInto uses) — otherwise the
+// live count drifts away from the lifetime aggregate. Lines with no id
 // (rare/legacy) are counted every time, matching the full scanner. Also
 // captures the newest turn's model so a mid-session /model switch is visible.
 function sumUsageLines(text, tokens, seenIds, meta) {
@@ -659,14 +685,10 @@ function sumUsageLines(text, tokens, seenIds, meta) {
     const r = safeJson(line);
     if (!r || r.type !== 'assistant') continue;
     if (meta && r.message?.model) meta.model = r.message.model;
-    const u = r.message?.usage;
-    if (!u) continue;
-    const msgId = r.message?.id;
-    if (msgId && seenIds) {
-      if (seenIds.includes(msgId)) continue;
-      seenIds.push(msgId);
-      if (seenIds.length > RECENT_IDS_MAX) seenIds.shift();
-    }
+    if (!r.message?.usage) continue;
+    const counted = usageDelta(seenIds || [], r.message?.id, r.message.usage);
+    if (!counted) continue;
+    const u = counted.delta;
     tokens.input      += u.input_tokens || 0;
     tokens.output     += u.output_tokens || 0;
     tokens.cacheRead  += u.cache_read_input_tokens || 0;
