@@ -95,3 +95,13 @@ test('costFor: fable bills above opus, opus 4.6+ at current list rates', () => {
   assert.equal(costFor({ model: 'claude-opus-4-6', usage }), 5);
   assert.equal(costFor({ model: 'claude-opus-4-20250514', usage }), 15, '4.0/4.1-era keeps launch pricing');
 });
+
+test('5.x list prices: Sonnet 5.5 cache reads $0.20; Mythos priced like Fable; future Haiku 5.x', () => {
+  const M = 1_000_000;
+  assert.equal(costFor({ model: 'claude-sonnet-5-5', usage: { cache_read_input_tokens: M } }), 0.20);
+  assert.equal(pricingKeyFor('claude-mythos-5-1'), 'mythos-5-1');
+  assert.equal(pricingKeyFor('claude-mythos-5'), 'mythos-5');
+  assert.equal(pricingKeyFor('claude-mythos-6'), 'mythos', 'unknown Mythos falls back to its own tier, not sonnet');
+  assert.equal(costFor({ model: 'claude-mythos-5-1', usage: { input_tokens: M, output_tokens: M, cache_read_input_tokens: M } }), 10 + 50 + 0.25);
+  assert.equal(pricingKeyFor('claude-haiku-5-6'), 'haiku-5', 'a newer Haiku 5.x is not priced at the 4.x generic');
+});

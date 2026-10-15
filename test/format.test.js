@@ -547,6 +547,8 @@ const { humanModel, humanTool, humanProject, fmtNum, fmtDuration, fmtHours, plur
 
 test('humanModel maps version-tagged ids to friendly names', () => {
   assert.equal(humanModel('claude-opus-4-7'), 'Opus 4.7');
+  assert.equal(humanModel('claude-mythos-5-1'), 'Mythos 5.1');
+  assert.equal(humanModel('claude-mythos'), 'Mythos');
   assert.equal(humanModel('claude-sonnet-4-6-20250514'), 'Sonnet 4.6');
   assert.equal(humanModel('claude-haiku-4-5'), 'Haiku 4.5');
 });

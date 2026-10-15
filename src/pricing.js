@@ -10,13 +10,18 @@ const PRICING = {
   'fable-5':   { input: 10.00, output: 50.00, cacheRead: 1.00, cacheWrite: 12.50 },
   'fable-5-1': { input: 10.00, output: 50.00, cacheRead: 0.25, cacheWrite: 12.50 },
 
+  // Mythos (Project Glasswing only): Fable-tier capabilities and prices.
+  'mythos-5':   { input: 10.00, output: 50.00, cacheRead: 1.00, cacheWrite: 12.50 },
+  'mythos-5-1': { input: 10.00, output: 50.00, cacheRead: 0.25, cacheWrite: 12.50 },
+
   // 5.x generation (list prices checked 2026-10-14). Haiku 5.5 uses its
   // <=100K-token-prompt rates; past 100K it's 5x, which a per-token table
   // can't express — Claude Code prompts are usually under that.
   'opus-5':     { input: 5.00, output: 25.00, cacheRead: 0.50, cacheWrite: 6.25 },
   'opus-5-5':   { input: 4.00, output: 20.00, cacheRead: 0.20, cacheWrite: 5.00 },
   'sonnet-5':   { input: 2.00, output: 10.00, cacheRead: 0.20, cacheWrite: 2.50 },
-  'sonnet-5-5': { input: 2.00, output: 10.00, cacheRead: 0.10, cacheWrite: 2.50 },
+  'sonnet-5-5': { input: 2.00, output: 10.00, cacheRead: 0.20, cacheWrite: 2.50 },
+  'haiku-5':    { input: 0.10, output: 0.50,  cacheRead: 0.01, cacheWrite: 0.125 },
   'haiku-5-5':  { input: 0.10, output: 0.50,  cacheRead: 0.01, cacheWrite: 0.125 },
 
   // Opus 4.x family. 4.0/4.1 launched at $15/$75; the list price dropped to
@@ -39,6 +44,7 @@ const PRICING = {
   // Generic fallbacks by tier. Opus uses the current-generation rates —
   // unknown/future opus ids are far more likely to be 4.5+ than 4.1-era.
   'fable':  { input: 10.00, output: 50.00, cacheRead: 1.00, cacheWrite: 12.50 },
+  'mythos': { input: 10.00, output: 50.00, cacheRead: 1.00, cacheWrite: 12.50 },
   'opus':   { input: 5.00,  output: 25.00, cacheRead: 0.50, cacheWrite: 6.25 },
   'sonnet': { input: 3.00,  output: 15.00, cacheRead: 0.30, cacheWrite: 3.75 },
   'haiku':  { input: 1.00,  output: 5.00,  cacheRead: 0.10, cacheWrite: 1.25 },
@@ -46,7 +52,7 @@ const PRICING = {
 
 const DEFAULT = PRICING.sonnet;
 
-const TIERS = new Set(['opus', 'sonnet', 'haiku', 'fable']);
+const TIERS = new Set(['opus', 'sonnet', 'haiku', 'fable', 'mythos']);
 
 // Map a model id like "claude-opus-4-7-20251101" to a pricing key.
 //

@@ -72,12 +72,13 @@ function plural(n, sing, plur) {
 // two so a trailing date stamp ("…-5-20260301") can't be read as a minor.
 function humanModel(id) {
   if (!id || typeof id !== 'string') return 'Claude';
-  const m = id.match(/(opus|sonnet|haiku|fable)[^\d]*(\d{1,2})(?!\d)(?:[-.](\d{1,2})(?!\d))?/i);
+  const m = id.match(/(opus|sonnet|haiku|fable|mythos)[^\d]*(\d{1,2})(?!\d)(?:[-.](\d{1,2})(?!\d))?/i);
   if (m) {
     const name = `${m[1][0].toUpperCase()}${m[1].slice(1).toLowerCase()}`;
     return m[3] ? `${name} ${m[2]}.${m[3]}` : `${name} ${m[2]}`;
   }
   if (/fable/i.test(id)) return 'Fable';
+  if (/mythos/i.test(id)) return 'Mythos';
   if (/opus/i.test(id)) return 'Opus';
   if (/sonnet/i.test(id)) return 'Sonnet';
   if (/haiku/i.test(id)) return 'Haiku';
