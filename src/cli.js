@@ -120,7 +120,7 @@ async function confirmDaemonUp({ timeoutMs = 3000, intervalMs = 100 } = {}) {
   for (;;) {
     await new Promise((r) => setTimeout(r, intervalMs));
     if (daemonAlive()) {
-      console.log(`  ${c.green}✓${c.reset}  ${'daemon confirmed'.padEnd(16)}${c.dim}up — connecting to Discord${c.reset}`);
+      console.log(`  ${c.green}✓${c.reset}  ${'daemon is up'.padEnd(16)}${c.dim}connecting to Discord${c.reset}`);
       return true;
     }
     if (Date.now() >= deadline) {
@@ -143,24 +143,28 @@ function stopDaemon({ quiet = false } = {}) {
   }
 }
 
+// Resolves once the replacement daemon has been spawned (true) or couldn't be
+// (false), so callers can confirm it and a following `stop` finds its pid.
 function restartDaemon() {
-  if (!stopDaemon({ quiet: true })) { startDaemon(); return; }
-  // Poll for the old daemon to release the PID file rather than guessing with a
-  // fixed sleep — under load 600ms wasn't always enough, and startDaemon would
-  // then see it "still up" and no-op, leaving NO daemon running once the old
-  // one exited. Give up after ~3s, force-kill the wedged pid, and start anyway.
-  const deadline = Date.now() + 3000;
-  const tick = () => {
-    if (!daemonAlive()) { startDaemon(); return; }
-    if (Date.now() >= deadline) {
-      const pid = daemonAlive();
-      if (pid) { try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ } }
-      startDaemon();
-      return;
-    }
+  return new Promise((resolve) => {
+    if (!stopDaemon({ quiet: true })) { resolve(startDaemon()); return; }
+    // Poll for the old daemon to release the PID file rather than guessing with a
+    // fixed sleep — under load 600ms wasn't always enough, and startDaemon would
+    // then see it "still up" and no-op, leaving NO daemon running once the old
+    // one exited. Give up after ~3s, force-kill the wedged pid, and start anyway.
+    const deadline = Date.now() + 3000;
+    const tick = () => {
+      if (!daemonAlive()) { resolve(startDaemon()); return; }
+      if (Date.now() >= deadline) {
+        const pid = daemonAlive();
+        if (pid) { try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ } }
+        resolve(startDaemon());
+        return;
+      }
+      setTimeout(tick, 50);
+    };
     setTimeout(tick, 50);
-  };
-  setTimeout(tick, 50);
+  });
 }
 
 // ── Box drawing — auto-widens to fit longest line ────────────────────────────
@@ -2495,7 +2499,7 @@ process.on('unhandledRejection', (e) => {
       break;
     case 'start':     if (startDaemon()) await confirmDaemonUp(); break;
     case 'stop':      stopDaemon(); break;
-    case 'restart':   restartDaemon(); break;
+    case 'restart':   if (await restartDaemon()) await confirmDaemonUp(); break;
     case 'status': {
       const dumpFlag = args.some((a) => a === '--dump' || a === '-d');
       if (dumpFlag || !process.stdout.isTTY) await showStatus();
@@ -2570,7 +2574,7 @@ process.on('unhandledRejection', (e) => {
             doScan(true);
             console.log(`  ${c.green}✓${c.reset}  aggregate rebuilt from transcripts`);
           } else if (kind === 'daemon') {
-            restartDaemon();
+            await restartDaemon();
             restarted = true;
             console.log(`  ${c.green}✓${c.reset}  daemon (re)starting`);
           } else if (kind === 'discord') {
@@ -2582,9 +2586,9 @@ process.on('unhandledRejection', (e) => {
       }
       // A 'setup' rewire only takes effect once the daemon reloads, so ensure a
       // restart even if the daemon wasn't itself flagged.
-      if (plan.includes('setup') && !restarted) restartDaemon();
+      if (plan.includes('setup') && !restarted) await restartDaemon();
       console.log(`  ${c.dim}run ${c.cyan}claude-rpc doctor${c.reset}${c.dim} again in a few seconds to confirm.${c.reset}`);
-      break; // let the restart timer fire before the process drains
+      break;
     }
     case 'tail':
     case 'logs':
