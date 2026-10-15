@@ -4,6 +4,8 @@ All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachang
 
 ## [Unreleased]
 
+## [1.5.3] - 2026-10-15
+
 **Changed — faster**
 
 - **Every hook is ~10ms faster** (9–17%, about 60–67ms wall per event including Node start-up). The hook no longer loads `fs/promises`, the fs streams, `child_process` or `perf_hooks` it never uses.
@@ -844,7 +846,8 @@ Polish pass. Install once, never think about it again.
 
 - 81 → 134 tests. New coverage for `format.humanModel / humanTool / humanProject / fmtNum / fmtDuration / fmtHours / plural`, `languages.languageOf`, `insights.generateInsights`, `scanner.dayKey / weekKey / hourKey`, `state.readState / writeState / updateState / resetState`, `server/api.windowedAggregate / rangeToDays`, `server/page.buildHtml`, and a live route-walker over the dashboard. Every public `src/*.js` export is exercised at least once.
 
-[Unreleased]: https://github.com/rar-file/claude-rpc/compare/v1.5.2...HEAD
+[Unreleased]: https://github.com/rar-file/claude-rpc/compare/v1.5.3...HEAD
+[1.5.3]: https://github.com/rar-file/claude-rpc/compare/v1.5.2...v1.5.3
 [1.5.2]: https://github.com/rar-file/claude-rpc/compare/v1.5.1...v1.5.2
 [1.5.1]: https://github.com/rar-file/claude-rpc/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/rar-file/claude-rpc/compare/v1.4.3...v1.5.0
