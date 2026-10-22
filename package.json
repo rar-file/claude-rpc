@@ -41,7 +41,7 @@
   "dependencies": {},
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "esbuild": "^0.24.0",
+    "esbuild": "^0.28.2",
     "eslint": "^10.4.1",
     "globals": "^17.6.0",
     "postject": "^1.0.0-alpha.6",
