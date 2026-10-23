@@ -13,6 +13,6 @@
     "kv:create:preview": "wrangler kv namespace create TOTALS --preview"
   },
   "devDependencies": {
-    "wrangler": "^4.94.0"
+    "wrangler": "^4.151.2"
   }
 }
