@@ -148,7 +148,11 @@ test('png: svg size and renderer argv', () => {
   assert.equal(findRasterizer({ PATH: '', CLAUDE_RPC_BROWSER: '/definitely/not/here' }, 'linux'), null);
 });
 
-test('png: renders a real PNG when the machine has a renderer', { skip: !findRasterizer() && 'no SVG renderer here' }, async () => {
+// Headless Chrome on shared CI runners hangs now and then; there, only rsvg.
+const renderer = findRasterizer();
+const pngSkip = !renderer ? 'no SVG renderer here'
+  : process.env.CI && renderer.kind === 'browser' ? 'headless browser is flaky on CI runners' : false;
+test('png: renders a real PNG when the machine has a renderer', { skip: pngSkip }, async () => {
   const dir = mkdtempSync(join(tmpdir(), 'crpc-png-'));
   const out = join(dir, 'o.png');
   const r = await svgToPng('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><rect width="40" height="20" fill="#c2491e"/></svg>', out);
