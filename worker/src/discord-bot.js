@@ -81,9 +81,11 @@ export async function syncInvites(env) {
   for (const src of INVITE_SOURCES) {
     let code = await env.TOTALS.get(`dcinv:${src}`);
     if (!code && welcome) {
-      const inv = await dapi(env, 'POST', `/channels/${welcome}/invites`, { max_age: 0, max_uses: 0, unique: true });
-      code = inv.code;
-      await env.TOTALS.put(`dcinv:${src}`, code);
+      try {
+        const inv = await dapi(env, 'POST', `/channels/${welcome}/invites`, { max_age: 0, max_uses: 0, unique: true });
+        code = inv.code;
+        await env.TOTALS.put(`dcinv:${src}`, code);
+      } catch (e) { console.error('invite create failed for', src, e.message); }   // retried next tick; don't block join counting
     }
     if (code) byCode[code] = src;
   }

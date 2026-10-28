@@ -2128,7 +2128,7 @@ import { handleInteractions, handleDiscordJson, scheduledBot } from './discord-b
 
 export default {
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(scheduledBot(env, getBoardIndex).catch(() => {}));
+    ctx.waitUntil(scheduledBot(env, getBoardIndex).catch((e) => console.error('discord bot cron failed:', e?.message || e)));
   },
   async fetch(request, env) {
     const url = new URL(request.url);
