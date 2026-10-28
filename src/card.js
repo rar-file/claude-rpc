@@ -51,8 +51,9 @@ function rangeTitle(range) {
   return `${rl} on claude`;
 }
 
-// Roll up a windowed metric across the active range.
-function rollup(aggregate, range) {
+// Roll up a windowed metric across the active range. Exported for share.js's
+// caption, so the text and the poster count the same window.
+export function rollup(aggregate, range) {
   const window = pickWindow(aggregate?.byDay, range);
   const out = {
     activeMs: 0,

@@ -145,6 +145,7 @@ The web dashboard pushes updates via SSE; the TUI refreshes on a 3-second tick.
 Stat cards and badges for a README, a site or a Discord message, all from one command. Run it bare for a menu: pick a card, then a **live link** (paste once, it refreshes itself), a **PNG** or an **SVG**:
 
 ```sh
+claude-rpc share                                  # poster PNG + a ready caption on your clipboard
 claude-rpc statcards                              # menu: card → link / PNG / SVG
 claude-rpc statcards stats --link --md | pbcopy   # README markdown, straight to the clipboard
 claude-rpc statcards poster --png                 # ./claude-poster.png, 2× for Discord / X
@@ -327,6 +328,7 @@ It's a thin bootstrapper — on the first session it just runs `npx claude-rpc@l
 | `serve`          | The local web dashboard (port 47474) |
 | `export`         | The aggregate as JSON, or daily rows as CSV (`--csv` `--out`) |
 | **Share** | |
+| `share [week\|month\|year\|all]` | Saves the poster PNG and copies a caption with your numbers and a link (`--no-png`, `--no-copy`, `--png <file>`) |
 | `statcards [card]` | Cards and badges as a live link, PNG or SVG: `stats` `profile` `badge` `heatmap` `poster` `session` `wrapped` (`--link` `--png [file]` `--svg [file]` `--md` `--html` `--metric` `--range` `--copy`; bare = menu) |
 | `statusline`     | One-line status for tmux/shell prompts (`--template`) |
 | `mcp`            | The stats MCP server (stdio); `mcp install` / `mcp uninstall` wire it into Claude Code |

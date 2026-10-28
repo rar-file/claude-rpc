@@ -4,6 +4,11 @@ All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachang
 
 ## [Unreleased]
 
+**Added**
+
+- **`claude-rpc share`.** One command saves the poster PNG for the last week (or `month`, `year`, `all`) and copies a caption with your real numbers and a link to the clipboard. Nothing is posted; you paste it where you like.
+- **Setup asks once about the Discord.** At the end of `setup`, a one-time y/N offers to open the community Discord invite. The answer is remembered and setup never asks again.
+
 ## [1.7.0] - 2026-10-28
 
 **Added**

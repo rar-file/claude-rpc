@@ -129,6 +129,7 @@ const REF_SOURCES = new Set([
   'devto',       // dev.to
   'twitter',     // X / Twitter
   'get',         // /get install page views (all sources)
+  'share',       // `claude-rpc share` captions
 ]);
 
 // "Get claude-rpc" Discord join link. `GET /discord?s=<surface>` counts a click

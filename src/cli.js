@@ -2395,6 +2395,30 @@ async function doCompletion(argv) {
 }
 
 // Offer tab completion once during a first setup, on a terminal only.
+// One y/N at the end of `setup`, asked at most once ever: join the community
+// Discord. y opens the invite in the browser (the link is printed too, for
+// headless boxes); n changes nothing. The ?s=cli tag is the join attribution.
+const DISCORD_JOIN_URL = 'https://claude-rpc.com/discord?s=cli';
+async function setupDiscordOffer() {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) return;
+  if (readJson(CONFIG_PATH, {}).discordAsked) return;
+  const answer = (await prompt(`  join the claude-rpc Discord? ${c.dim}help, card showcase, weekly leaderboard [y/N]${c.reset} `)).trim();
+  // Top-level, not under community: that block's presence is the telemetry
+  // consent marker migrateConfig reads.
+  writeUserConfig({ ...readJson(CONFIG_PATH, {}), discordAsked: true });
+  if (!/^y(es)?$/i.test(answer)) return;
+  try {
+    const { spawn } = await import('node:child_process');
+    const [cmd, args] = process.platform === 'win32' ? ['cmd', ['/c', 'start', '', DISCORD_JOIN_URL]]
+      : process.platform === 'darwin' ? ['open', [DISCORD_JOIN_URL]]
+      : ['xdg-open', [DISCORD_JOIN_URL]];
+    const child = spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: true });
+    child.on('error', () => {});
+    child.unref();
+  } catch { /* no opener — the printed link below covers it */ }
+  console.log(`  ${c.green}✓${c.reset}  ${c.dim}opening${c.reset} ${c.cyan}${DISCORD_JOIN_URL}${c.reset}`);
+}
+
 async function setupCompletionOffer() {
   if (!process.stdin.isTTY || !process.stdout.isTTY || process.env.CLAUDE_RPC_NO_COMPLETION) return;
   const comp = await import('./completion.js');
@@ -2411,6 +2435,12 @@ async function setupCompletionOffer() {
   } catch (e) {
     console.log(`  ${c.yellow}!${c.reset}  ${'tab completion'.padEnd(16)}${c.dim}${e.message}${c.reset}`);
   }
+}
+
+async function doShare(argv) {
+  const { runShare } = await import('./share.js');
+  const { copyToClipboard } = await import('./statcards.js');
+  await runShare(argv, { aggregate: () => aggregateOr('render'), copy: copyToClipboard });
 }
 
 async function doStatcards(argv) {
@@ -2470,6 +2500,7 @@ process.on('unhandledRejection', (e) => {
     case '__complete': await doComplete(args); break;
     case 'completion': await doCompletion(args); break;
     case 'statcards': await doStatcards(args); break;
+    case 'share': await doShare(args); break;
     // `setup` and `install` are aliases as of v0.7: both register hooks AND
     // the login autostart entry (Windows Run key, macOS LaunchAgent, Linux
     // systemd --user unit). Older behavior split them (setup = no startup,
@@ -2554,6 +2585,7 @@ process.on('unhandledRejection', (e) => {
         // Optional GitHub connect — one explicit y/N, asked at most once ever.
         // The --link path above IS a connect, so it never double-asks.
         if (!linkCode) await setupGhConnect();
+        await setupDiscordOffer();
         if (changed) await setupCompletionOffer();
       }
       setupOutro(target, changed, cli);

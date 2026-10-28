@@ -67,6 +67,10 @@ export const COMMANDS = [
     flags: [['--csv', 'Daily rows as CSV'], ['--out', 'Write to a file', 'file']] },
 
   // ── Share ──
+  { name: 'share', group: 'share', summary: 'Poster PNG + a ready caption on your clipboard', usage: '[week|month|year|all]',
+    subs: [['week', 'Last 7 days (default)'], ['month', 'Last 30 days'], ['year', 'Last 12 months'], ['all', 'All time']],
+    flags: [['--png', 'Where to save the image', 'file'], ['--no-png', 'Caption only'], ['--no-copy', 'Print, don\'t copy']],
+    examples: ['claude-rpc share', 'claude-rpc share month'] },
   { name: 'statcards', group: 'share', summary: 'Cards and badges as a live link, PNG or SVG', usage: '[card]',
     subs: [['stats', 'Stats + year heatmap'], ['profile', 'Profile card'], ['badge', 'Small badge'],
            ['heatmap', 'Year heatmap'], ['poster', 'Poster summary'], ['session', 'This session'],
