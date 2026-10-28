@@ -4,6 +4,15 @@ All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachang
 
 ## [Unreleased]
 
+**Added**
+
+- **Auto-update.** On `npm install -g` installs (which is what `npx claude-rpc@latest setup` leaves you with) the daemon checks the npm registry every 6 hours and installs a newer release from the same major version, then restarts itself. A new release has to be seen for 2 hours before it is installed, a failed install isn't retried for 24 hours, and a new major version is never installed unattended. Homebrew, the standalone exe and source checkouts only get a notice. `claude-rpc update` checks by hand, `update now` installs, `update off` turns it off. Details in SECURITY.md §3h.
+- **A Discord server.** Join from `claude-rpc.com/get` (install first, then the invite); `setup` ends with a pointer to it.
+
+**Changed**
+
+- **The "Get claude-rpc →" button on your Discord card now opens `claude-rpc.com/get`**, the install page, instead of the home page. Existing configs that still have the old default are migrated; a customised button is left alone.
+
 ## [1.6.0] - 2026-10-23
 
 **Added**

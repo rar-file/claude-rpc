@@ -17,6 +17,7 @@ import { STATE_DIR, ROOT, IS_PACKAGED, IS_NPM_INSTALL, IS_NPX } from './paths.js
 export const UPDATE_STATE_PATH = join(STATE_DIR, 'update.json');
 export const REGISTRY_URL = 'https://registry.npmjs.org/claude-rpc/latest';
 const RETRY_FAILED_MS = 24 * 3_600_000;   // don't hammer a version that failed to install
+const COOLDOWN_MS = 2 * 3_600_000;        // a release must be seen this long before it's installed — a yank window
 const INSTALL_TIMEOUT_MS = 180_000;
 const FETCH_TIMEOUT_MS = 8_000;
 
@@ -60,13 +61,16 @@ export function updateCommand(kind) {
 }
 
 // → { action: 'none' | 'notify' | 'install', reason }
-export function planUpdate({ current, latest, auto = true, kind, failed = null, now = Date.now() }) {
+export function planUpdate({ current, latest, auto = true, kind, failed = null, seen = null, cooldownMs = COOLDOWN_MS, now = Date.now() }) {
   if (!isNewer(latest, current)) return { action: 'none', reason: 'up to date' };
   if (kind !== 'npm-global') return { action: 'notify', reason: `installed via ${kind}` };
   if (!auto) return { action: 'notify', reason: 'auto-update is off' };
   if (!sameMajor(latest, current)) return { action: 'notify', reason: 'new major version — update manually' };
   if (failed && failed.version === latest && now - failed.at < RETRY_FAILED_MS) {
     return { action: 'notify', reason: 'last install attempt failed — retrying later' };
+  }
+  if (cooldownMs > 0 && !(seen && seen.version === latest && now - seen.at >= cooldownMs)) {
+    return { action: 'notify', reason: 'new release is settling — installing after the cooldown' };
   }
   return { action: 'install', reason: 'newer release available' };
 }
@@ -116,12 +120,16 @@ export async function installVersion(version) {
 
 // One check cycle. Returns { plan, latest, installed }. `install` is injectable
 // for tests; callers restart the daemon when `installed` is true.
-export async function checkForUpdate({ current, auto, kind = installKind(), fetchLatestFn = fetchLatest, install = installVersion, now = Date.now(), statePath = UPDATE_STATE_PATH } = {}) {
+export async function checkForUpdate({ current, auto, kind = installKind(), fetchLatestFn = fetchLatest, install = installVersion, now = Date.now(), cooldownMs = COOLDOWN_MS, statePath = UPDATE_STATE_PATH } = {}) {
   const latest = await fetchLatestFn();
   writeUpdateState({ checkedAt: now, ...(latest ? { latest } : {}) }, statePath);
   if (!latest) return { plan: { action: 'none', reason: 'registry unreachable' }, latest: null, installed: false };
-  const state = readUpdateState(statePath);
-  const plan = planUpdate({ current, latest, auto, kind, failed: state.failed || null, now });
+  let state = readUpdateState(statePath);
+  if (state.seen?.version !== latest) {            // first sighting starts the cooldown clock
+    writeUpdateState({ seen: { version: latest, at: now } }, statePath);
+    state = readUpdateState(statePath);
+  }
+  const plan = planUpdate({ current, latest, auto, kind, failed: state.failed || null, seen: state.seen || null, cooldownMs, now });
   if (plan.action !== 'install') return { plan, latest, installed: false };
   const res = await install(latest);
   if (res.ok) {
