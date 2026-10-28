@@ -103,6 +103,9 @@ export const COMMANDS = [
   { name: 'community', group: 'online', summary: 'Anonymous community totals', usage: '[status|on|off|report]',
     subs: [['status', 'Show it'], ['on', 'Opt in'], ['off', 'Opt out'], ['report', 'Send now']] },
 
+  { name: 'update', group: 'daemon', summary: 'Check for a new version (and auto-update)', usage: '[check|now|on|off|status]',
+    subs: [['check', 'Look for a newer release'], ['now', 'Install it now'], ['on', 'Auto-update (default)'], ['off', 'Never update unattended'], ['status', 'Show settings']] },
+
   // ── Daemon ──
   { name: 'start', group: 'daemon', summary: 'Start the Discord daemon' },
   { name: 'stop', group: 'daemon', summary: 'Stop it' },

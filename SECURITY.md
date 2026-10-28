@@ -137,11 +137,11 @@ described under **Scope** below.
 
 ## 3. Outbound network
 
-There are six distinct network behaviors: community totals (3a), gist
+There are seven distinct network behaviors: community totals (3a), gist
 publishing (3b), squads/web login (3c), subscription-usage polling (3d),
-the cosmetic GIF assets (3e), and the opt-in status webhook (3f). Each is
-independently optional. The separate desktop dashboard app, if installed,
-additionally auto-updates itself (3g).
+the cosmetic GIF assets (3e), the opt-in status webhook (3f), and the
+CLI auto-update check (3h). Each is independently optional. The separate
+desktop dashboard app, if installed, additionally auto-updates itself (3g).
 
 ### 3a. Community totals (telemetry) — ON by default for fresh installs
 
@@ -342,13 +342,28 @@ removing `webhook.url`.
 
 ### 3g. Desktop dashboard auto-update — the optional Electron app only
 
-**Source:** `dashboard/main.js` (`initAutoUpdater`, electron-updater). The npm
-CLI package never auto-updates. The *separate* desktop dashboard app, if you
+**Source:** `dashboard/main.js` (`initAutoUpdater`, electron-updater). The *separate* desktop dashboard app, if you
 install it, polls GitHub Releases hourly and downloads + installs updates on
 quit (`autoDownload` / `autoInstallOnAppQuit`) over HTTPS. The release binaries
 are currently **unsigned**, so update integrity rests on GitHub Releases + TLS
 rather than a code signature — a known gap tracked for provenance + published
 checksums. Avoid it by not installing the dashboard.
+
+### 3h. CLI auto-update — ON by default, npm global installs only
+
+**Source:** `src/updater.js`, called from the daemon; settings in
+`default-config.js` (`update`). Every ~6 hours the daemon sends one plain
+`GET https://registry.npmjs.org/claude-rpc/latest` (no identifiers, no
+payload) and reads the `version` field. If a newer **same-major** release
+exists and this copy was installed with `npm install -g`, it runs
+`npm install -g claude-rpc@<exact version>` and restarts itself — the same
+package, same npm integrity and provenance checks as a manual install.
+Homebrew, `npx`, the packaged exe and source checkouts are never modified (they
+only log that an update exists). A new major version is never installed
+unattended, a failed install is not retried for 24 hours, and the version
+string is validated as `x.y.z` before it reaches the command line.
+**Turn it off:** `claude-rpc update off` (or `update.auto: false`).
+`claude-rpc update` checks by hand; `claude-rpc update now` installs.
 
 ## 4. Local subprocesses
 
@@ -356,6 +371,7 @@ Every binary the package can spawn, with its trigger and argument shape. All
 arguments are static constants or values we control — none interpolate
 untrusted or remote input into a shell:
 
+- `npm install -g claude-rpc@<x.y.z>` — auto-update / `update now` (`src/updater.js`, 3h).
 - `reg.exe add/delete` — the Windows Run key (`src/install.js`).
 - `wscript.exe` — runs the generated windowless startup shim (`src/install.js`).
 - `powershell.exe -NoProfile -NonInteractive -EncodedCommand …` — packaged

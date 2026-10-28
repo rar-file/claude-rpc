@@ -18,7 +18,8 @@ import { desktopNotify, postWebhook, shouldWebhook, shouldNotify, sanitizeLabel 
 import { CONFIG_PATH, STATE_PATH, PID_PATH, LOG_PATH, STATE_DIR, AGGREGATE_PATH, PAUSE_PATH } from './paths.js';
 import { readUsageCache, pollUsage } from './usage.js';
 import { pollDecision, pollIntervalMs } from './watch-poll.js';
-import { claimSingleInstance } from './ensure-daemon.js';
+import { claimSingleInstance, spawnDaemonDetached } from './ensure-daemon.js';
+import { checkForUpdate } from './updater.js';
 import { scanInChild } from './scan-worker.js';
 
 if (!existsSync(STATE_DIR)) mkdirSync(STATE_DIR, { recursive: true });
@@ -974,6 +975,31 @@ async function runCommunityFlush() {
 }
 const communityFlushMs = Math.max(60_000, (config.community?.flushIntervalMin || 30) * 60 * 1000);
 setInterval(runCommunityFlush, communityFlushMs);
+
+// Auto-update: check the registry, install a newer same-major release (npm
+// global installs only), then hand over to a fresh daemon. The PID file is
+// removed first so the replacement's single-instance claim succeeds while this
+// process is still winding down.
+async function runUpdateCheck() {
+  try {
+    const r = await checkForUpdate({ current: VERSION, auto: config.update?.auto !== false });
+    if (r.installed) {
+      log(`auto-update: ${VERSION} → ${r.latest} installed; restarting`);
+      try { if (existsSync(PID_PATH)) unlinkSync(PID_PATH); } catch { /* shutdown() retries */ }
+      spawnDaemonDetached();
+      setTimeout(shutdown, 500);
+    } else if (r.error) {
+      log(`auto-update: install of ${r.latest} failed: ${String(r.error).slice(-200)}`);
+    } else if (r.plan.action === 'notify') {
+      log(`auto-update: ${r.latest} available (${r.plan.reason})`);
+    }
+  } catch (e) {
+    log('auto-update check threw:', e.message);
+  }
+}
+const updateEveryMs = Math.max(3_600_000, (config.update?.checkIntervalHours || 6) * 3_600_000);
+setInterval(runUpdateCheck, updateEveryMs);
+setTimeout(runUpdateCheck, 5 * 60_000);
 
 // Subscription-usage poll (feeds {usageWeeklyPct} & friends + `claude-rpc
 // usage`). Only while something is live — no point burning requests against

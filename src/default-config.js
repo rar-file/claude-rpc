@@ -146,6 +146,13 @@ export const DEFAULT_CONFIG = {
     endpoint: "https://claude-rpc-totals.claude-rpc.workers.dev",
     flushIntervalMin: 30,
   },
+  // Auto-update (npm global installs only; brew/npx/exe/source just get a
+  // notice). Same-major releases are installed unattended and the daemon
+  // restarts itself. Kill switch: `claude-rpc update off`. SECURITY.md §3h.
+  update: {
+    auto: true,
+    checkIntervalHours: 6,
+  },
   // Subscription usage — the numbers Claude Code's own /usage screen shows
   // (5h session %, weekly %). The daemon reads Claude Code's OAuth token
   // LOCALLY and asks api.anthropic.com — the token's issuer — for the

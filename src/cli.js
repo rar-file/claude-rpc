@@ -2190,6 +2190,47 @@ async function doCommunity(argv) {
   });
 }
 
+async function doUpdate(argv) {
+  const sub = (argv[0] || 'check').toLowerCase();
+  const { installKind, updateCommand, fetchLatest, isNewer, sameMajor, installVersion, readUpdateState, writeUpdateState } = await import('./updater.js');
+  const kind = installKind();
+  const userCfg = readJson(CONFIG_PATH, {});
+  const auto = loadConfig().update?.auto !== false;
+  if (sub === 'on' || sub === 'off') {
+    userCfg.update = { ...userCfg.update, auto: sub === 'on' };
+    writeUserConfig(userCfg);
+    console.log(`  ${c.green}✓${c.reset}  auto-update ${sub === 'on' ? 'on' : 'off'}`);
+    return;
+  }
+  if (sub === 'status') {
+    const st = readUpdateState();
+    console.log(`  ${c.cyan}·${c.reset}  v${VERSION} · installed via ${kind} · auto-update ${auto && kind === 'npm-global' ? 'on' : kind === 'npm-global' ? 'off' : 'n/a'}`);
+    if (st.updatedTo) console.log(`     ${c.dim}last auto-update: ${st.updatedFrom} → ${st.updatedTo}${c.reset}`);
+    return;
+  }
+  if (sub !== 'check' && sub !== 'now') {
+    fail(`unknown update subcommand: ${sub}`, { hint: 'try: update [check|now|on|off|status]', code: EX_USER_ERROR });
+  }
+  const latest = await fetchLatest();
+  if (!latest) fail('could not reach the npm registry', { hint: 'check your connection and try again', code: EX_BAD_STATE });
+  if (!isNewer(latest, VERSION)) {
+    console.log(`  ${c.green}✓${c.reset}  up to date ${c.dim}(v${VERSION})${c.reset}`);
+    return;
+  }
+  console.log(`  ${c.yellow}!${c.reset}  v${latest} is available ${c.dim}(you have v${VERSION})${c.reset}`);
+  if (kind !== 'npm-global' || sub === 'check') {
+    console.log(`     ${c.gray}↳ ${c.reset}${c.cyan}${kind === 'npm-global' ? 'claude-rpc update now' : updateCommand(kind)}${c.reset}`);
+    return;
+  }
+  if (!sameMajor(latest, VERSION)) console.log(`     ${c.dim}new major version — check the changelog first${c.reset}`);
+  console.log(`     ${c.dim}installing…${c.reset}`);
+  const res = await installVersion(latest);
+  if (!res.ok) fail('install failed', { hint: [res.output.slice(-300) || 'npm exited non-zero', `try: ${updateCommand(kind)}`], code: EX_BAD_STATE });
+  writeUpdateState({ updatedFrom: VERSION, updatedTo: latest, updatedAt: Date.now(), failed: null });
+  console.log(`  ${c.green}✓${c.reset}  updated to v${latest}`);
+  await restartDaemon();
+}
+
 function tailLog() {
   if (!existsSync(LOG_PATH)) {
     console.log(`  ${c.yellow}!${c.reset}  no log yet  ${c.dim}${LOG_PATH}${c.reset}`);
@@ -2588,6 +2629,7 @@ process.on('unhandledRejection', (e) => {
     case 'public':    await doPublic(); break;
     case 'privacy':   await doPrivacy(); break;
     case 'community': await doCommunity(args); break;
+    case 'update':    await doUpdate(args); break;
     case 'profile':   await doProfile(args); break;
     case 'squad':     await doSquadCmd(args); break;
     case 'link':      await doLink(args); break;
