@@ -8,6 +8,11 @@
   "trailingSlash": false,
   "redirects": [
     {
+      "source": "/discord",
+      "destination": "https://claude-rpc-totals.claude-rpc.workers.dev/discord",
+      "permanent": false
+    },
+    {
       "source": "/",
       "has": [{ "type": "host", "value": "claude-rpc.vercel.app" }],
       "destination": "https://claude-rpc.com/",

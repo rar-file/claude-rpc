@@ -36,6 +36,7 @@
 //   GET  /total.json     — JSON for arbitrary consumers / dashboards
 //   GET  /ref?s=<src>    — referral beacon (counts an allowlisted source)
 //   GET  /refs.json      — referral breakdown by source
+//   GET  /discord?s=<src> — counts a join click (ref:dc-<src>), 302 → the invite
 //   GET  /health         — sanity check
 //   OPTIONS *            — CORS preflight for the browser-facing routes
 //
@@ -128,6 +129,12 @@ const REF_SOURCES = new Set([
   'devto',       // dev.to
   'twitter',     // X / Twitter
 ]);
+
+// "Get claude-rpc" Discord join link. `GET /discord?s=<surface>` counts a click
+// against `ref:dc-<surface>` (allowlisted, IP-budgeted, no PII) and 302s to the
+// invite in env.DISCORD_INVITE. Until that's set it falls back to /community so
+// links shipped early never dead-end.
+const DC_SOURCES = new Set(['site', 'readme', 'cli', 'npm', 'wrapped', 'card', 'vscode', 'github', 'other']);
 
 // Permissive CORS for the read-only JSON endpoints — the stats page is served
 // from the Vercel origin and fetches these cross-origin.
@@ -428,6 +435,18 @@ export async function handleRef(url, env, ip = null) {
     status: 204,
     headers: { ...CORS, 'Cache-Control': 'no-store' },
   });
+}
+
+export async function handleDiscord(url, env, ip = null) {
+  let s = (url.searchParams.get('s') || '').toLowerCase();
+  if (!DC_SOURCES.has(s)) s = 'other';
+  if (await ipRateOk(env, ip)) {
+    try { await addInt(env, `ref:dc-${s}`, 1); } catch { /* best-effort */ }
+  }
+  const invite = /^https:\/\/discord\.(gg|com\/invite)\/[\w-]+$/.test(env.DISCORD_INVITE || '')
+    ? env.DISCORD_INVITE
+    : `${env.SITE_ORIGIN || 'https://claude-rpc.com'}/community`;
+  return new Response(null, { status: 302, headers: { Location: invite, 'Cache-Control': 'no-store' } });
 }
 
 // Referral breakdown: { discord: 12, wrapped: 5, ... }. Only allowlisted
@@ -2219,6 +2238,9 @@ export default {
     }
     if (request.method === 'GET' && url.pathname === '/ref') {
       return handleRef(url, env, clientIp(request));
+    }
+    if (request.method === 'GET' && url.pathname === '/discord') {
+      return handleDiscord(url, env, clientIp(request));
     }
     if (request.method === 'GET' && url.pathname === '/refs.json') {
       return handleRefs(env);

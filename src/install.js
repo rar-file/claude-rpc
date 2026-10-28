@@ -942,6 +942,7 @@ export function setupOutro(target, changed = true, cli = { cmd: 'claude-rpc', ne
   const run = cli.cmd || 'claude-rpc';
   console.log('');
   console.log(`  ${SYM_OK}  ${c.bold}setup complete${c.reset} — open Claude Code and send a prompt; your card goes live in Discord.`);
+  point('community', 'claude-rpc.com/discord?s=cli', 'questions, show your card');
   point('verify wiring', `${run} doctor`, cli.newTerminal ? 'in a new terminal' : '');
   if (IS_PACKAGED) point('start daemon', `"${target}" daemon`, 'also runs automatically at login');
   else point('manage daemon', `${run} start · stop · status`);

@@ -448,6 +448,21 @@ test('default export: routes /ref and /refs.json', async () => {
   assert.equal(refs.refs.hn, 1);
 });
 
+test('default export: /discord counts the source and redirects (fallback until invite set)', async () => {
+  const env = makeEnv();
+  const res = await worker.fetch(new Request('http://localhost/discord?s=readme'), env);
+  assert.equal(res.status, 302);
+  assert.match(res.headers.get('Location'), /\/community$/);
+  await worker.fetch(new Request('http://localhost/discord?s=bogus'), env);
+  env.DISCORD_INVITE = 'https://discord.gg/abc123';
+  const ok = await worker.fetch(new Request('http://localhost/discord?s=cli'), env);
+  assert.equal(ok.headers.get('Location'), 'https://discord.gg/abc123');
+  const refs = await (await worker.fetch(new Request('http://localhost/refs.json'), env)).json();
+  assert.equal(refs.refs['dc-readme'], 1);
+  assert.equal(refs.refs['dc-other'], 1);
+  assert.equal(refs.refs['dc-cli'], 1);
+});
+
 // ── default export (route dispatch) ────────────────────────────────────
 
 test('default export: routes /health to a 200 ok', async () => {

@@ -23,6 +23,7 @@ export const LINKS = [
   ['leaderboard', '/leaderboard', 'leaderboard'],
   ['squads', '/squads', 'squads'],
   ['community', '/community', 'community'],
+  ['discord', '/discord?s=site', 'discord ↗'],
   ['wrapped', '/wrapped', 'wrapped'],
   ['posts', '/blog', 'posts'],
   ['github', 'https://github.com/rar-file/claude-rpc', 'github ↗'],

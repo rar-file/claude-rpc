@@ -15,7 +15,7 @@
 
 **Discord Rich Presence for [Claude Code](https://claude.com/claude-code)** — your live model, project, tokens, and lifetime stats, driven by the hooks Claude Code already fires.
 
-**[claude-rpc.com →](https://claude-rpc.com)** — see it in one page.
+**[claude-rpc.com →](https://claude-rpc.com)** — see it in one page. · **[Discord →](https://claude-rpc.com/discord?s=readme)** — help, ideas, show your card.
 
 [![community · sessions](https://claude-rpc-totals.claude-rpc.workers.dev/sessions.svg)](#community-totals) &nbsp; [![community · tokens](https://claude-rpc-totals.claude-rpc.workers.dev/tokens.svg)](#community-totals)
 
