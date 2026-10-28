@@ -204,10 +204,9 @@ jobs:
 
   publish-npm:
     name: Publish to npm
-    # Gated behind BOTH test and build: a green test with a red binary build
-    # would otherwise ship an npm release with no matching .dmg/.exe in the
-    # GitHub Release the site links to. Wait for the binaries to succeed first.
-    needs: [test, build]
+    # Gated on tests only: a stalled macOS runner (v1.6.0, v1.7.0) must not
+    # hold the npm release hostage. The GitHub Release still waits on build.
+    needs: test
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
