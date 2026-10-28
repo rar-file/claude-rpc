@@ -1,0 +1,17 @@
+[Unit]
+Description=claude-rpc Discord bot (gateway presence, role buttons, join attribution, weekly posts)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/claude-rpc/bot
+EnvironmentFile=/root/.config/claude-rpc-bot/env
+ExecStart=/root/.nvm/versions/node/v24.15.0/bin/node /root/claude-rpc/bot/index.js
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

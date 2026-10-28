@@ -2124,12 +2124,9 @@ export async function handleSquadByCode(url, env) {
 
 // ── Entry point ────────────────────────────────────────────────────────
 
-import { handleInteractions, handleDiscordJson, scheduledBot } from './discord-bot.js';
+import { handleDiscordJson } from './discord-stats.js';
 
 export default {
-  async scheduled(event, env, ctx) {
-    ctx.waitUntil(scheduledBot(env, getBoardIndex).catch((e) => console.error('discord bot cron failed:', e?.message || e)));
-  },
   async fetch(request, env) {
     const url = new URL(request.url);
 
@@ -2246,9 +2243,6 @@ export default {
     }
     if (request.method === 'GET' && url.pathname === '/ref') {
       return handleRef(url, env, clientIp(request));
-    }
-    if (request.method === 'POST' && url.pathname === '/discord/interactions') {
-      return handleInteractions(request, env);
     }
     if (request.method === 'GET' && url.pathname === '/discord.json') {
       return handleDiscordJson(env);

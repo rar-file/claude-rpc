@@ -46,3 +46,4 @@ tools/launch-board/.data/
 
 # promotion / social kit drafts — kept local, never committed
 /promo/
+bot/state.json*
