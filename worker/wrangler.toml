@@ -26,3 +26,11 @@ id = "6ca3b87cd4cc46469008d28558701dac"
 GITHUB_CLIENT_ID = "Ov23liFCtlBWX8BHepyh"
 SITE_ORIGIN = "https://claude-rpc.com"
 DISCORD_INVITE = "https://discord.gg/WYJw5JKsNw"
+DISCORD_GUILD_ID = "1564964247589355551"
+DISCORD_PUBLIC_KEY = "784e8dc63170bc8604f160403d821f5c8f5b49a855da7d01875483428b29db4e"
+# Windows, macOS, Linux — the only roles the #roles buttons may toggle
+DISCORD_OS_ROLES = "1564966622261673995,1564966694491783228,1564966760841740369"
+
+# Discord bot: invite sync + weekly posts (src/discord-bot.js)
+[triggers]
+crons = ["*/15 * * * *"]

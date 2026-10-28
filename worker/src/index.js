@@ -444,9 +444,11 @@ export async function handleDiscord(url, env, ip = null) {
   if (await ipRateOk(env, ip)) {
     try { await addInt(env, `ref:dc-${s}`, 1); } catch { /* best-effort */ }
   }
-  const invite = /^https:\/\/discord\.(gg|com\/invite)\/[\w-]+$/.test(env.DISCORD_INVITE || '')
+  let perSource = null;
+  try { const code = await env.TOTALS.get(`dcinv:${s}`); if (/^[\w-]+$/.test(code || '')) perSource = `https://discord.gg/${code}`; } catch { /* fall through to the shared invite */ }
+  const invite = perSource || (/^https:\/\/discord\.(gg|com\/invite)\/[\w-]+$/.test(env.DISCORD_INVITE || '')
     ? env.DISCORD_INVITE
-    : `${env.SITE_ORIGIN || 'https://claude-rpc.com'}/community`;
+    : `${env.SITE_ORIGIN || 'https://claude-rpc.com'}/community`);
   return new Response(null, { status: 302, headers: { Location: invite, 'Cache-Control': 'no-store' } });
 }
 
@@ -2122,7 +2124,12 @@ export async function handleSquadByCode(url, env) {
 
 // ── Entry point ────────────────────────────────────────────────────────
 
+import { handleInteractions, handleDiscordJson, scheduledBot } from './discord-bot.js';
+
 export default {
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(scheduledBot(env, getBoardIndex).catch(() => {}));
+  },
   async fetch(request, env) {
     const url = new URL(request.url);
 
@@ -2239,6 +2246,12 @@ export default {
     }
     if (request.method === 'GET' && url.pathname === '/ref') {
       return handleRef(url, env, clientIp(request));
+    }
+    if (request.method === 'POST' && url.pathname === '/discord/interactions') {
+      return handleInteractions(request, env);
+    }
+    if (request.method === 'GET' && url.pathname === '/discord.json') {
+      return handleDiscordJson(env);
     }
     if (request.method === 'GET' && url.pathname === '/discord') {
       return handleDiscord(url, env, clientIp(request));
