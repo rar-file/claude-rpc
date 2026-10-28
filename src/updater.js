@@ -11,7 +11,7 @@
 // Pure decision functions up top (unit-tested); side effects below.
 
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname, delimiter } from 'node:path';
 import { STATE_DIR, ROOT, IS_PACKAGED, IS_NPM_INSTALL, IS_NPX } from './paths.js';
 
 export const UPDATE_STATE_PATH = join(STATE_DIR, 'update.json');
@@ -101,7 +101,11 @@ export async function installVersion(version) {
     let out = '';
     const win = process.platform === 'win32';
     const child = spawn(win ? 'npm.cmd' : 'npm', ['install', '-g', `claude-rpc@${version}`, '--no-fund', '--no-audit'],
-      { shell: win, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      // Put the running node's own dir first so `npm` is the one that belongs to
+      // this node (nvm/fnm/volta installs; a login-launched daemon often has a
+      // bare PATH) — i.e. the npm that created the global we're replacing.
+      { shell: win, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, PATH: `${dirname(process.execPath)}${delimiter}${process.env.PATH || ''}` } });
     const timer = setTimeout(() => { try { child.kill(); } catch { /* gone */ } }, INSTALL_TIMEOUT_MS);
     const take = (d) => { out = (out + d).slice(-2000); };
     child.stdout.on('data', take); child.stderr.on('data', take);
