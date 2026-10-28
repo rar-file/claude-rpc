@@ -4,6 +4,8 @@ All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachang
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-10-28
+
 **Added**
 
 - **Auto-update.** On `npm install -g` installs (which is what `npx claude-rpc@latest setup` leaves you with) the daemon checks the npm registry every 6 hours and installs a newer release from the same major version, then restarts itself. A new release has to be seen for 2 hours before it is installed, a failed install isn't retried for 24 hours, and a new major version is never installed unattended. Homebrew, the standalone exe and source checkouts only get a notice. `claude-rpc update` checks by hand, `update now` installs, `update off` turns it off. Details in SECURITY.md §3h.
@@ -873,7 +875,8 @@ Polish pass. Install once, never think about it again.
 
 - 81 → 134 tests. New coverage for `format.humanModel / humanTool / humanProject / fmtNum / fmtDuration / fmtHours / plural`, `languages.languageOf`, `insights.generateInsights`, `scanner.dayKey / weekKey / hourKey`, `state.readState / writeState / updateState / resetState`, `server/api.windowedAggregate / rangeToDays`, `server/page.buildHtml`, and a live route-walker over the dashboard. Every public `src/*.js` export is exercised at least once.
 
-[Unreleased]: https://github.com/rar-file/claude-rpc/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/rar-file/claude-rpc/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/rar-file/claude-rpc/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/rar-file/claude-rpc/compare/v1.5.4...v1.6.0
 [1.5.4]: https://github.com/rar-file/claude-rpc/compare/v1.5.2...v1.5.4
 [1.5.2]: https://github.com/rar-file/claude-rpc/compare/v1.5.1...v1.5.2
