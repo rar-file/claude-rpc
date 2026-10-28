@@ -128,13 +128,14 @@ const REF_SOURCES = new Set([
   'producthunt', // Product Hunt
   'devto',       // dev.to
   'twitter',     // X / Twitter
+  'get',         // /get install page views (all sources)
 ]);
 
 // "Get claude-rpc" Discord join link. `GET /discord?s=<surface>` counts a click
 // against `ref:dc-<surface>` (allowlisted, IP-budgeted, no PII) and 302s to the
 // invite in env.DISCORD_INVITE. Until that's set it falls back to /community so
 // links shipped early never dead-end.
-const DC_SOURCES = new Set(['site', 'readme', 'cli', 'npm', 'wrapped', 'card', 'vscode', 'github', 'other']);
+const DC_SOURCES = new Set(['site', 'readme', 'cli', 'npm', 'wrapped', 'card', 'vscode', 'github', 'get', 'other']);
 
 // Permissive CORS for the read-only JSON endpoints — the stats page is served
 // from the Vercel origin and fetches these cross-origin.

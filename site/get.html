@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>get claude-rpc</title>
+<meta name="description" content="Install claude-rpc in one command: your live Claude Code session on your Discord profile. Then join the Discord." />
+<link rel="canonical" href="https://claude-rpc.com/get" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
+<link rel="icon" type="image/png" href="/img/favicon.png" />
+<link rel="apple-touch-icon" href="/img/apple-touch-icon.png" />
+<style>
+  :root { --paper:#f4ede0; --ink:#1a1611; --mute:#5c5147; --rust:#c2491e; --rust-2:#a13a16; --line:rgba(26,22,17,.14); --blurple:#5865f2; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--paper); color:var(--ink); font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif; line-height:1.6; }
+  main { max-width:640px; margin:0 auto; padding:56px 16px 80px; }
+  h1 { font-family:"Space Grotesk",system-ui,sans-serif; font-size:clamp(2rem,6vw,2.8rem); letter-spacing:-.03em; line-height:1.08; margin:0 0 10px; }
+  .lead { color:var(--mute); margin:0 0 28px; }
+  .tabs { display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap; }
+  .tabs button { font:700 .8rem "JetBrains Mono",monospace; background:none; border:1.5px solid var(--line); border-radius:8px; padding:6px 12px; color:var(--mute); cursor:pointer; }
+  .tabs button[aria-pressed="true"] { background:var(--ink); color:var(--paper); border-color:var(--ink); }
+  .box { display:flex; gap:10px; align-items:center; background:var(--ink); color:var(--paper); border-radius:10px; padding:14px 16px; font:.92rem "JetBrains Mono",monospace; }
+  .box code { flex:1; overflow-x:auto; white-space:nowrap; }
+  .box button { font:700 .78rem "JetBrains Mono",monospace; background:var(--rust); color:#fff; border:0; border-radius:6px; padding:6px 12px; cursor:pointer; }
+  ol { padding-left:1.2rem; margin:28px 0; color:var(--mute); }
+  ol li { margin-bottom:6px; }
+  ol b { color:var(--ink); }
+  .discord { margin-top:36px; padding-top:28px; border-top:1px solid var(--line); }
+  .discord h2 { font-family:"Space Grotesk",system-ui,sans-serif; margin:0 0 6px; font-size:1.3rem; }
+  .discord p { margin:0 0 16px; color:var(--mute); }
+  .btn { display:inline-block; background:var(--blurple); color:#fff; text-decoration:none; font-weight:700; padding:12px 22px; border-radius:10px; }
+  .btn:hover { filter:brightness(1.08); }
+  a.alt { color:var(--rust-2); }
+  @media (prefers-color-scheme: dark) { /* page is a fixed paper theme, like the rest of the site */ }
+</style>
+<link rel="stylesheet" href="/nav.css" />
+</head>
+<body>
+<!-- site-nav -->
+<nav class="site-nav" aria-label="site">
+  <div class="sn-in">
+    <a class="sn-brand" href="/"><img src="/img/favicon.png" alt="" width="26" height="26" /> claude-rpc <span class="sn-ver" id="nav-version">v1.6.0</span></a>
+    <div class="sn-links">
+      <a href="/docs">docs</a>
+      <a href="/leaderboard">leaderboard</a>
+      <a href="/squads">squads</a>
+      <a href="/community">community</a>
+      <a href="/get?s=site" aria-current="page">get claude-rpc</a>
+      <a href="/wrapped">wrapped</a>
+      <a href="/blog">posts</a>
+      <a href="https://github.com/rar-file/claude-rpc">github ↗</a>
+    </div>
+    <a class="sn-cta" href="/#download">install →</a>
+  </div>
+</nav>
+<!-- /site-nav -->
+<main>
+  <h1>get claude-rpc</h1>
+  <p class="lead">Your live Claude Code session on your Discord profile. One command, no account.</p>
+
+  <div class="tabs" role="group" aria-label="installer">
+    <button type="button" data-os="npm" aria-pressed="true">npm (any OS)</button>
+    <button type="button" data-os="unix" aria-pressed="false">curl (macOS / Linux)</button>
+    <button type="button" data-os="brew" aria-pressed="false">Homebrew</button>
+  </div>
+  <div class="box"><code id="cmd">npx claude-rpc@latest setup</code><button type="button" id="copy">copy</button></div>
+
+  <ol>
+    <li><b>Run it.</b> It installs and wires the hooks into Claude Code (Node 18+).</li>
+    <li><b>Open Claude Code</b> and send a prompt.</li>
+    <li><b>Check Discord.</b> Your card is live. Run <code>claude-rpc doctor</code> if it isn't.</li>
+  </ol>
+  <p class="lead">Needs the Discord desktop app running. <a class="alt" href="/docs">Docs</a> · <a class="alt" href="https://github.com/rar-file/claude-rpc">GitHub</a></p>
+
+  <section class="discord">
+    <h2>Installed? Come say hi.</h2>
+    <p>Help, ideas, and a place to show your card.</p>
+    <a class="btn" href="/discord?s=get">Join the Discord</a>
+  </section>
+</main>
+<script>
+  (function () {
+    var cmds = { unix: 'curl -fsSL https://claude-rpc.com/install | sh', brew: 'brew install rar-file/claude-rpc/claude-rpc && claude-rpc setup', npm: 'npx claude-rpc@latest setup' };
+    var cmd = document.getElementById('cmd'), tabs = document.querySelectorAll('.tabs button');
+    var os = 'npm';
+    function pick(k) { cmd.textContent = cmds[k]; tabs.forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.os === k)); }); }
+    tabs.forEach(function (b) { b.addEventListener('click', function () { pick(b.dataset.os); }); });
+    pick(os);
+    document.getElementById('copy').addEventListener('click', function (e) {
+      try { navigator.clipboard.writeText(cmd.textContent); e.target.textContent = 'copied'; setTimeout(function () { e.target.textContent = 'copy'; }, 1500); } catch (_) {}
+    });
+    try { if (!sessionStorage.getItem('get-ref')) { sessionStorage.setItem('get-ref', '1'); new Image().src = 'https://claude-rpc-totals.claude-rpc.workers.dev/ref?s=get'; } } catch (_) {}
+  })();
+</script>
+</body>
+</html>
