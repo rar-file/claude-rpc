@@ -649,6 +649,7 @@ export function migrateConfig({ silent = false } = {}) {
   const SHIPPED_DEFAULT_BTNS = [
     { label: 'Claude Code', url: 'https://claude.com/claude-code' },
     { label: 'Claude Code', url: 'https://github.com/rar-file/claude-rpc' },
+    { label: 'Get claude-rpc →', url: 'https://claude-rpc.com/?ref=discord' },   // v0.13–1.6 CTA → /get
   ];
   if (NEW_BTN && Array.isArray(cfg.presence?.buttons)) {
     let changed = false;

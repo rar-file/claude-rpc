@@ -258,10 +258,10 @@ export const DEFAULT_CONFIG = {
     buttons: [
       // The card others see in Discord is the project's main distribution
       // surface — make the button a real call-to-action, not a bare repo link.
-      // ?ref=discord lets the landing page attribute installs that originate
-      // from a presence card. (When the cwd is a github repo the daemon also
+      // Lands on /get (install first, then the Discord invite). ?ref=discord
+      // lets that page attribute installs that originate from a presence card. (When the cwd is a github repo the daemon also
       // prepends a "View on GitHub →" button, so both can show.)
-      { label: "Get claude-rpc →", url: "https://claude-rpc.com/?ref=discord" },
+      { label: "Get claude-rpc →", url: "https://claude-rpc.com/get?ref=discord" },
     ],
   },
   statusIcons: {

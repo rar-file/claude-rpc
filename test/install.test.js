@@ -44,6 +44,7 @@ function migrateInPlace(cfg) {
   const SHIPPED_DEFAULT_BTNS = [
     { label: 'Claude Code', url: 'https://claude.com/claude-code' },
     { label: 'Claude Code', url: 'https://github.com/rar-file/claude-rpc' },
+    { label: 'Get claude-rpc →', url: 'https://claude-rpc.com/?ref=discord' },
   ];
   if (NEW_BTN && Array.isArray(cfg.presence?.buttons)) {
     let changed = false;
@@ -152,6 +153,19 @@ test('migrate: v0.8.1 repo default button is upgraded to the CTA', () => {
   const added = migrateInPlace(cfg);
   assert.ok(added.includes('presence.buttons[] → CTA'), 'button migrated');
   assert.deepEqual(cfg.presence.buttons[0], DEFAULT_CONFIG.presence.buttons[0]);
+});
+
+test('migrate: the v0.13 home-page CTA is upgraded to the /get CTA', () => {
+  const cfg = {
+    clientId: '123', appName: 'Claude Code',
+    presence: {
+      byStatus: { working: { details: 'X', state: 'Y' } },
+      buttons: [{ label: 'Get claude-rpc →', url: 'https://claude-rpc.com/?ref=discord' }],
+    },
+  };
+  const added = migrateInPlace(cfg);
+  assert.ok(added.includes('presence.buttons[] → CTA'), 'button migrated');
+  assert.equal(cfg.presence.buttons[0].url, 'https://claude-rpc.com/get?ref=discord');
 });
 
 test('migrate: a relabeled-but-dead claude.com link gets repointed, label kept', () => {

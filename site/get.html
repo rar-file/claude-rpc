@@ -91,7 +91,7 @@
     document.getElementById('copy').addEventListener('click', function (e) {
       try { navigator.clipboard.writeText(cmd.textContent); e.target.textContent = 'copied'; setTimeout(function () { e.target.textContent = 'copy'; }, 1500); } catch (_) {}
     });
-    try { if (!sessionStorage.getItem('get-ref')) { sessionStorage.setItem('get-ref', '1'); new Image().src = 'https://claude-rpc-totals.claude-rpc.workers.dev/ref?s=get'; } } catch (_) {}
+    try { if (!sessionStorage.getItem('get-ref')) { sessionStorage.setItem('get-ref', '1'); var q = new URLSearchParams(location.search), src = (q.get('ref') || q.get('utm_source') || 'get').toLowerCase().replace(/[^a-z]/g, '').slice(0, 20) || 'get'; new Image().src = 'https://claude-rpc-totals.claude-rpc.workers.dev/ref?s=' + encodeURIComponent(src); } } catch (_) {}
   })();
 </script>
 </body>
