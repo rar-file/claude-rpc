@@ -23,6 +23,7 @@ import { DEFAULT_CONFIG } from './default-config.js';
 import { VERSION } from './version.js';
 import { c, SYM_OK, SYM_WARN, SYM_FAIL, SYM_INFO, hintLine } from './ui.js';
 import { inferLegacyVerifyIntent } from './verify.js';
+import { hookWord } from './shell-path.js';
 
 const STARTUP_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run';
 const STARTUP_VALUE = 'ClaudeRPC';
@@ -161,6 +162,20 @@ export function isOurHook(h) {
   return !!h && (h._claudeRpc === true || isOurHookCommand(h.command));
 }
 
+// The scripts hooks and autostart launch. Normally this install's own; setup
+// under npx repoints them at the global copy it just installed (see
+// useGlobalInstall) — the _npx cache can be evicted at any time.
+let hookScript = HOOK_SCRIPT;
+let daemonScript = DAEMON_SCRIPT;
+
+// The command Claude Code runs for `event`. See shell-path.js for why Windows
+// paths are emitted bare / 8.3 instead of quoted (PowerShell hook shells).
+export function hookCommand(exePath, event, { script = hookScript, node = process.execPath } = {}) {
+  return IS_PACKAGED
+    ? `${hookWord(exePath)} hook ${event}`
+    : `${hookWord(node)} ${hookWord(script)} ${event}`;
+}
+
 export function installHooks(exePath, { silent = false, ccVersion = detectClaudeCodeVersion() } = {}) {
   const settings = readJson(CLAUDE_SETTINGS, {});
   const before = JSON.stringify(settings.hooks || {});
@@ -174,10 +189,7 @@ export function installHooks(exePath, { silent = false, ccVersion = detectClaude
   // for both npm and dev installs; only the packaged exe is self-contained. This
   // survives `npm update` (HOOK_SCRIPT is stable) and an nvm version switch (nvm
   // keeps prior versions on disk); re-run setup only if that node is removed.
-  const node = process.execPath.replace(/\\/g, '/');
-  const cmdFor = IS_PACKAGED
-    ? (event) => `"${exePath}" hook ${event}`
-    : (event) => `"${node}" "${HOOK_SCRIPT.replace(/\\/g, '/')}" ${event}`;
+  const cmdFor = (event) => hookCommand(exePath, event);
 
   const optional = supportedOptionalEvents(ccVersion);
   for (const event of Object.keys(OPTIONAL_EVENTS)) {
@@ -245,7 +257,7 @@ const SYSTEMD_UNIT = join(homedir(), '.config', 'systemd', 'user', SYSTEMD_UNIT_
 // (absolute node, like the hooks — login shells under nvm have no node on PATH).
 function daemonLaunch(exePath) {
   if (IS_PACKAGED) return { exe: exePath, args: ['daemon'] };
-  return { exe: process.execPath, args: [DAEMON_SCRIPT] };
+  return { exe: process.execPath, args: [daemonScript] };
 }
 
 // `npm` with the flags every call here needs: npm is npm.cmd on Windows (so a
@@ -709,20 +721,22 @@ export function migrateConfig({ silent = false } = {}) {
 // command and report success, leaving the user to discover the breakage
 // the next time they open Claude Code. Returns { ok, detail }.
 function verifyHookPipe(exePath) {
-  // Spawn exactly what installHooks wired: the packaged exe, or the absolute
-  // node + hook.js. Both are absolute, so there's no PATH/PATHEXT/shell
-  // resolution — it works under the same minimal hook shell Claude Code uses
-  // (the reason the old `claude-rpc` / bare-`node` forms failed under nvm).
-  const cmd  = IS_PACKAGED ? exePath : process.execPath;
-  const args = IS_PACKAGED ? ['hook', 'SessionStart'] : [HOOK_SCRIPT, 'SessionStart'];
+  // Run the exact command installHooks wired, through a shell Claude Code may
+  // use for hooks: sh on POSIX; on Windows, PowerShell — the strictest of its
+  // hook shells (a quoted-first command parses there as an expression, #48).
+  // Spawning node directly, as this used to, passed while every real hook
+  // failed.
+  const command = hookCommand(exePath, 'SessionStart');
+  const opts = { input: '', encoding: 'utf8', timeout: 8000, windowsHide: true };
   let result;
   try {
-    result = spawnSync(cmd, args, {
-      input: '',
-      encoding: 'utf8',
-      timeout: 3000,
-      windowsHide: true,
-    });
+    result = process.platform === 'win32'
+      ? spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], opts)
+      : spawnSync('/bin/sh', ['-c', command], opts);
+    // No PowerShell on this box (stripped image) — fall back to cmd.
+    if (result.error?.code === 'ENOENT' && process.platform === 'win32') {
+      result = spawnSync(command, { ...opts, shell: true });
+    }
   } catch (e) {
     return { ok: false, detail: `spawn failed: ${e.message}` };
   }
@@ -759,15 +773,27 @@ function globalInstalledVersion() {
   } catch { return null; }   // not installed / npm missing / unreadable
 }
 
+// Point hooks + autostart at the global copy promoteNpxToGlobal installed,
+// not this _npx cache tree. The global daemon's selfHealOnUpdate can't fix it
+// later: the version stamp already matches, so it never re-wires (#48).
+function useGlobalInstall() {
+  try {
+    const root = (npmSync(['root', '-g'], { timeout: 8000 }).stdout || '').trim();
+    const dir = root && join(root, 'claude-rpc', 'src');
+    if (dir && existsSync(join(dir, 'hook.js')) && existsSync(join(dir, 'daemon.js'))) {
+      hookScript = join(dir, 'hook.js');
+      daemonScript = join(dir, 'daemon.js');
+    }
+  } catch { /* npm unavailable — keep this tree; the next setup heals it */ }
+}
+
 // `npx claude-rpc setup` runs from npm's _npx cache, which npm may evict at
 // any time, so first install the same version globally (`npm install -g`).
 // Best-effort + loud: a failed -g (perms, offline) returns false so the caller
 // stops with the manual command. What happens next: the rest of setup still
-// runs in THIS process, so installHooks and addStartupEntry wire the cache
-// copy's absolute HOOK_SCRIPT / DAEMON_SCRIPT paths; only the daemon launch
-// (cli.js `setup`) explicitly runs the global copy. That global daemon's
-// selfHealOnUpdate then re-wires hooks + autostart to the global paths — but
-// only when the version stamp doesn't already match this version.
+// runs in THIS process; useGlobalInstall then repoints installHooks and
+// addStartupEntry at the global copy, and the daemon launch (cli.js `setup`)
+// runs the global copy explicitly.
 function promoteNpxToGlobal() {
   // Already promoted on a previous run AND current? Skip the redundant -g (also
   // lets setup succeed when a correct global exists but `npm -g` would fail —
@@ -867,6 +893,7 @@ export async function install({ exePath } = {}) {
       throw err;
     }
     step(SYM_OK, 'global install', `claude-rpc@${VERSION}`);
+    useGlobalInstall();
   }
   const incoming = exePath || process.execPath;
   // Canonicalize first so hook + startup entries point at a stable location,

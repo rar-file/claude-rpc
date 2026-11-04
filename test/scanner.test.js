@@ -4,7 +4,9 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync, appendFileSync, mkdtempSync, mkdirSync, rmSync, utimesSync, statSync } from 'node:fs';
+import { writeFileSync, appendFileSync, mkdtempSync, mkdirSync, rmSync, utimesSync, statSync, renameSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -630,4 +632,33 @@ test('parseTranscript: tiny read chunks give the same result as one big read', (
   }
   assert.equal(whole.inputTokens, 75);
   rmSync(dir, { recursive: true });
+});
+
+// ── Lifetime totals survive Claude Code's transcript cleanup ──────────
+// Claude Code deletes transcripts older than cleanupPeriodDays (30 by default).
+// The scanner used to drop their cache entries, so lifetime totals — and the
+// profile slice the worker SETs from them — shrank as history aged out.
+test('scan: a pruned transcript keeps counting; a moved one is not double-counted', (t) => {
+  const home = mkdtempSync(join(tmpdir(), 'rpc-gone-'));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const proj = join(home, 'projects');
+  mkdirSync(join(proj, 'a'), { recursive: true });
+  const line = (n) => JSON.stringify({ type: 'assistant', sessionId: 'x', timestamp: '2026-09-01T10:00:00Z',
+    message: { id: `m${n}`, model: 'claude-opus-4-7', usage: { input_tokens: n, output_tokens: 0 }, content: [] } }) + '\n';
+  writeFileSync(join(proj, 'a', 'old.jsonl'), line(100));
+  writeFileSync(join(proj, 'a', 'moved.jsonl'), line(10));
+  const run = (code) => {
+    const r = spawnSync(process.execPath, ['--input-type=module', '-e',
+      `const { scan } = await import(${JSON.stringify(pathToFileURL(join(import.meta.dirname, '..', 'src', 'scanner.js')).href)});
+       const { aggregate } = scan({ projectsDir: ${JSON.stringify(proj)} }); console.log(aggregate.inputTokens);`],
+    { env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    return Number(r.stdout.trim());
+  };
+  assert.equal(run(), 110);
+  rmSync(join(proj, 'a', 'old.jsonl'));                       // Claude Code's cleanup
+  mkdirSync(join(proj, 'b'));
+  renameSync(join(proj, 'a', 'moved.jsonl'), join(proj, 'b', 'moved.jsonl')); // project dir renamed
+  assert.equal(run(), 110);
+  assert.equal(run(), 110, 'stable across rescans');
 });

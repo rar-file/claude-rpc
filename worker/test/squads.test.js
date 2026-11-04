@@ -718,3 +718,18 @@ test('expired canonical (pf gone): pair/claim falls back to claiming the index f
   assert.equal(await env.TOTALS.get('gh:ghostgh'), IDS.bob, 'gh index repointed to the heir');
   assert.equal(pf(env, IDS.bob).verified, true, 'heir is verified');
 });
+
+// Pre-1.7.2 clients dropped transcripts Claude Code pruned (30-day cleanup)
+// from their lifetime totals; a shrinking publish must not shrink the slice.
+test('a machine slice\'s lifetime counters never go down; streak may reset', async () => {
+  const env = makeEnv();
+  await seedProfile(env, IDS.alice, 'keeper', { tokens: 18_000, sessions: 50, activeMs: 9_000_000, streak: 7 });
+  await seedProfile(env, IDS.alice, 'keeper', { tokens: 5_000, sessions: 20, activeMs: 1_000_000, streak: 1 });
+  const p = pf(env, IDS.alice);
+  assert.equal(p.tokens, 18_000);
+  assert.equal(p.sessions, 50);
+  assert.equal(p.activeMs, 9_000_000);
+  assert.equal(p.streak, 1);
+  await seedProfile(env, IDS.alice, 'keeper', { tokens: 20_000 });
+  assert.equal(pf(env, IDS.alice).tokens, 20_000, 'growth still lands');
+});

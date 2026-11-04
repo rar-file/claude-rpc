@@ -792,13 +792,18 @@ function publicProfile(p) {
 
 // A single machine's clamped contribution. Mirrors handleProfile's setClamp
 // ceilings; missing fields fall back to the slice's previous value.
+// tokens/sessions/activeMs are lifetime counters and never go DOWN: clients
+// before 1.7.2 dropped transcripts Claude Code pruned (cleanupPeriodDays,
+// 30 by default) from their totals, so every flush shrank the slice as old
+// history aged out. Streak is a current run and may legitimately reset.
 function machineSlice(body, prevSlice = {}, now = Date.now()) {
   const setClamp = (v, max, prevV) =>
     v == null ? (prevV || 0) : Math.min(max, Math.max(0, Math.floor(Number(v) || 0)));
+  const keepMax = (v, max, prevV) => Math.max(setClamp(v, max, prevV), Math.min(max, prevV || 0));
   return {
-    tokens:    setClamp(body.tokens,   MAX_PF_TOKENS,    prevSlice.tokens),
-    sessions:  setClamp(body.sessions, MAX_PF_SESSIONS,  prevSlice.sessions),
-    activeMs:  setClamp(body.activeMs, MAX_PF_ACTIVE_MS, prevSlice.activeMs),
+    tokens:    keepMax(body.tokens,   MAX_PF_TOKENS,    prevSlice.tokens),
+    sessions:  keepMax(body.sessions, MAX_PF_SESSIONS,  prevSlice.sessions),
+    activeMs:  keepMax(body.activeMs, MAX_PF_ACTIVE_MS, prevSlice.activeMs),
     streak:    setClamp(body.streak,   MAX_STREAK,       prevSlice.streak),
     // Per-day series for the heatmap. Absent (older client, or heatmap opted
     // out) keeps nothing new but never erases what an earlier flush stored —

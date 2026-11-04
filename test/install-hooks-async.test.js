@@ -69,3 +69,14 @@ test('installHooks: newer events only for a Claude Code that knows them (an unkn
   hooks = installAt(home, '2.0.0');
   for (const e of ['PostToolUseFailure', 'PostCompact', 'StopFailure']) assert.equal(e in hooks, false, e);
 });
+
+test('installHooks: the wired command runs through sh, like Claude Code\'s hook shell', (t) => {
+  if (process.platform === 'win32') return t.skip('POSIX shell check');
+  const home = mkdtempSync(join(tmpdir(), 'rpc-async-'));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const hooks = install(home);
+  const cmd = hooks.SessionStart[0].hooks[0].command.replace(/SessionStart$/, 'Notification');
+  const r = spawnSync('/bin/sh', ['-c', cmd], { input: '{}', encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(JSON.parse(r.stdout.trim()).continue, true);
+});

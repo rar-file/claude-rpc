@@ -819,8 +819,14 @@ function readCache() {
   if (!existsSync(SCAN_CACHE_PATH)) return { _v: CACHE_VERSION, files: {} };
   try {
     const raw = JSON.parse(readFileSync(SCAN_CACHE_PATH, 'utf8'));
-    if (!raw || raw._v !== CACHE_VERSION) return { _v: CACHE_VERSION, files: {} };
-    return raw;
+    if (!raw || typeof raw.files !== 'object') return { _v: CACHE_VERSION, files: {} };
+    if (raw._v === CACHE_VERSION) return raw;
+    // A version bump re-parses everything still on disk, but `_gone` entries
+    // (transcripts Claude Code already pruned) can't be re-parsed — carry them
+    // over or the bump erases that history for good.
+    const files = {};
+    for (const [k, v] of Object.entries(raw.files || {})) if (v && v._gone) files[k] = v;
+    return { _v: CACHE_VERSION, files };
   } catch { return { _v: CACHE_VERSION, files: {} }; }
 }
 
@@ -1283,7 +1289,7 @@ export function scan({ projectsDir, projectsDirs, onProgress, force = false, ext
     let st;
     try { st = statSync(fp); } catch { continue; }
     const sig = `${st.mtimeMs}:${st.size}`;
-    if (!force && cache.files[fp]?._sig === sig) {
+    if (!force && cache.files[fp]?._sig === sig && !cache.files[fp]._gone) {
       skipped += 1;
       continue;
     }
@@ -1300,17 +1306,31 @@ export function scan({ projectsDir, projectsDirs, onProgress, force = false, ext
       // skip corrupt file but keep prior cache entry
     }
   }
-  // Remove cache entries for transcripts that disappeared from disk. Only
-  // wipe entries whose root is one of the dirs we just scanned — otherwise
-  // a one-off backfill against a subset of dirs would nuke cache for
-  // unrelated paths.
+  // Transcripts that disappeared from disk are KEPT as `_gone` entries, not
+  // deleted. Claude Code prunes transcripts older than cleanupPeriodDays (30 by
+  // default), and dropping them made every "lifetime" total — and the profile
+  // slice the worker SETs from it — shrink as history aged out. A gone entry is
+  // dropped only when the same transcript is still on disk under another path (a
+  // moved/renamed project dir), which would otherwise count it twice. Only
+  // entries under the dirs we just scanned are touched, so a one-off backfill
+  // against a subset of dirs leaves unrelated paths alone.
   let removed = 0;
   const sep = process.platform === 'win32' ? '\\' : '/';
   const dirPrefixes = dirs.map((d) => d.replace(/[/\\]+$/, '') + sep);
+  // Transcript basenames are the session (or subagent) id, so they survive a move.
+  const baseOf = (p) => p.slice(Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\')) + 1);
+  const liveNames = new Set([...seen].map(baseOf));
   for (const key of Object.keys(cache.files)) {
     if (seen.has(key)) continue;
-    if (dirPrefixes.some((p) => key.startsWith(p))) {
+    if (!dirPrefixes.some((p) => key.startsWith(p))) continue;
+    const entry = cache.files[key];
+    if (!entry || liveNames.has(baseOf(key))) {
       delete cache.files[key];
+      removed += 1;
+    } else if (!entry._gone) {
+      // Append-parse bookkeeping is useless for a file that no longer exists.
+      const { _parse, _offset, _size, ...kept } = entry;
+      cache.files[key] = { ...kept, _gone: true };
       removed += 1;
     }
   }

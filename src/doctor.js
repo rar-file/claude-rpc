@@ -7,6 +7,7 @@
 
 import { existsSync, readFileSync, statSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { hookWord } from './shell-path.js';
 import {
   IS_PACKAGED, IS_NPM_INSTALL,
   CONFIG_PATH, CANONICAL_EXE, USER_CONFIG_DIR, HOOK_SCRIPT,
@@ -113,8 +114,10 @@ export function classifyHookCommand(cmd, {
   const launcher = m ? (m[1] ?? m[2]) : '';
   if (launcher && !launcher.includes('/') && !launcher.includes('\\')) return 'legacy';
   if (launcher && !exists(launcher)) return 'dead';
-  if (packaged && !c.includes(canonicalExe)) return 'stale';
-  if (npm && !c.includes(hookScript.replace(/\\/g, '/'))) return 'stale';
+  // Windows hooks may carry the 8.3 short form of the path (shell-path.js).
+  const wired = (p) => c.includes(p) || c.includes(p.replace(/\\/g, '/')) || c.includes(hookWord(p).replace(/"/g, ''));
+  if (packaged && !wired(canonicalExe)) return 'stale';
+  if (npm && !wired(hookScript)) return 'stale';
   return 'ok';
 }
 
