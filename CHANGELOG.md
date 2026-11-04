@@ -4,6 +4,12 @@ All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachang
 
 ## [Unreleased]
 
+**Fixed**
+
+- **Hooks work when Claude Code runs them through PowerShell** ([#48](https://github.com/rar-file/claude-rpc/issues/48)). On Windows the hook command started with a quoted path, which PowerShell reads as an expression, so every hook event failed. Paths with spaces now use their short 8.3 form unquoted (`C:/PROGRA~1/nodejs/node.exe`), which sh, cmd and PowerShell all run. `setup` now tests the hook through PowerShell rather than calling node directly, so it catches a broken command. Existing installs are rewired on update.
+- **`npx claude-rpc@latest setup` wires hooks and autostart to the global install**, not npx's throwaway cache.
+- **Lifetime totals no longer shrink.** Claude Code deletes transcripts older than 30 days, and their tokens, sessions and time used to drop out of your totals and your leaderboard profile with them. Deleted transcripts now keep counting, and the server never lowers a machine's lifetime numbers. History lost before this release can't be recovered.
+
 ## [1.7.1] - 2026-10-28
 
 **Added**
