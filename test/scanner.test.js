@@ -6,7 +6,6 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { writeFileSync, appendFileSync, mkdtempSync, mkdirSync, rmSync, utimesSync, statSync, renameSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -649,7 +648,7 @@ test('scan: a pruned transcript keeps counting; a moved one is not double-counte
   writeFileSync(join(proj, 'a', 'moved.jsonl'), line(10));
   const run = (code) => {
     const r = spawnSync(process.execPath, ['--input-type=module', '-e',
-      `const { scan } = await import(${JSON.stringify(pathToFileURL(join(import.meta.dirname, '..', 'src', 'scanner.js')).href)});
+      `const { scan } = await import(${JSON.stringify(new URL('../src/scanner.js', import.meta.url).href)});
        const { aggregate } = scan({ projectsDir: ${JSON.stringify(proj)} }); console.log(aggregate.inputTokens);`],
     { env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: 'utf8' });
     assert.equal(r.status, 0, r.stderr);
