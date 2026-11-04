@@ -4,6 +4,8 @@ All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachang
 
 ## [Unreleased]
 
+## [1.7.2] - 2026-11-04
+
 **Fixed**
 
 - **Hooks work when Claude Code runs them through PowerShell** ([#48](https://github.com/rar-file/claude-rpc/issues/48)). On Windows the hook command started with a quoted path, which PowerShell reads as an expression, so every hook event failed. Paths with spaces now use their short 8.3 form unquoted (`C:/PROGRA~1/nodejs/node.exe`), which sh, cmd and PowerShell all run. `setup` now tests the hook through PowerShell rather than calling node directly, so it catches a broken command. Existing installs are rewired on update.
@@ -888,7 +890,8 @@ Polish pass. Install once, never think about it again.
 
 - 81 → 134 tests. New coverage for `format.humanModel / humanTool / humanProject / fmtNum / fmtDuration / fmtHours / plural`, `languages.languageOf`, `insights.generateInsights`, `scanner.dayKey / weekKey / hourKey`, `state.readState / writeState / updateState / resetState`, `server/api.windowedAggregate / rangeToDays`, `server/page.buildHtml`, and a live route-walker over the dashboard. Every public `src/*.js` export is exercised at least once.
 
-[Unreleased]: https://github.com/rar-file/claude-rpc/compare/v1.7.1...HEAD
+[Unreleased]: https://github.com/rar-file/claude-rpc/compare/v1.7.2...HEAD
+[1.7.2]: https://github.com/rar-file/claude-rpc/compare/v1.7.1...v1.7.2
 [1.7.1]: https://github.com/rar-file/claude-rpc/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/rar-file/claude-rpc/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/rar-file/claude-rpc/compare/v1.5.4...v1.6.0
