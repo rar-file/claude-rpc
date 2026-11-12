@@ -4,6 +4,8 @@ All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachang
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-11-12
+
 **Added**
 
 - **Settings in the browser.** `claude-rpc settings` (or the Settings link on the dashboard) opens a page where you edit what the card says for each status, its images, extra frames and buttons, with a live preview; start, stop and restart the daemon and read its log; and choose per project whether it shows as public, name only or hidden. Saving writes only the fields you changed, so defaults keep updating with new releases.
@@ -912,7 +914,8 @@ Polish pass. Install once, never think about it again.
 
 - 81 → 134 tests. New coverage for `format.humanModel / humanTool / humanProject / fmtNum / fmtDuration / fmtHours / plural`, `languages.languageOf`, `insights.generateInsights`, `scanner.dayKey / weekKey / hourKey`, `state.readState / writeState / updateState / resetState`, `server/api.windowedAggregate / rangeToDays`, `server/page.buildHtml`, and a live route-walker over the dashboard. Every public `src/*.js` export is exercised at least once.
 
-[Unreleased]: https://github.com/rar-file/claude-rpc/compare/v1.7.4...HEAD
+[Unreleased]: https://github.com/rar-file/claude-rpc/compare/v1.8.0...HEAD
+[1.8.0]: https://github.com/rar-file/claude-rpc/compare/v1.7.4...v1.8.0
 [1.7.4]: https://github.com/rar-file/claude-rpc/compare/v1.7.3...v1.7.4
 [1.7.3]: https://github.com/rar-file/claude-rpc/compare/v1.7.2...v1.7.3
 [1.7.2]: https://github.com/rar-file/claude-rpc/compare/v1.7.1...v1.7.2
