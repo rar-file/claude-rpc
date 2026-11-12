@@ -4,6 +4,10 @@ All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachang
 
 ## [Unreleased]
 
+**Fixed**
+
+- **Presence shows up within about 15 seconds of opening Discord.** When Discord wasn't running, the daemon backed off to one connection attempt every 5 minutes, so opening Discord after Claude Code could leave the card missing for minutes. It now checks every 15 seconds while Discord is closed, and keeps the long backoff only for a Discord client that is running but failing.
+
 ## [1.7.2] - 2026-11-04
 
 **Fixed**

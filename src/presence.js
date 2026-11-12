@@ -162,6 +162,31 @@ export function throttleDecision({ hash, lastSentHash, lastSentAt, now, gapMs, f
   return { action: 'defer', waitMs };
 }
 
+// Discord reconnect pacing. Two different outages, two different caps:
+//
+//   absent  — no IPC socket accepted at all (Discord isn't running). A probe is
+//             a handful of local connects that fail instantly and touches no
+//             Discord process, so we keep polling fast. Otherwise someone who
+//             opens Discord after Claude Code waits out a multi-minute backoff
+//             and reads it as "presence doesn't work".
+//   present — a socket answered and then failed (handshake error, drop). Here
+//             the backoff protects a struggling client, so it climbs to 5min.
+//
+// `delayMs` is the current step; the caller stores `nextDelayMs` for the next
+// failure and resets to RECONNECT_BASE_MS on a successful connect. ±30% jitter
+// keeps sibling daemons from retrying in lockstep.
+export const RECONNECT_BASE_MS = 5_000;
+export const RECONNECT_CAP_MS = 300_000;
+export const RECONNECT_ABSENT_CAP_MS = 15_000;
+export function reconnectPlan({ delayMs, absent, rand = Math.random() }) {
+  const cap = absent ? RECONNECT_ABSENT_CAP_MS : RECONNECT_CAP_MS;
+  const step = Math.min(cap, Math.max(RECONNECT_BASE_MS, delayMs || 0));
+  return {
+    waitMs: Math.round(step * (0.7 + rand * 0.6)),
+    nextDelayMs: Math.min(cap, step * 2),
+  };
+}
+
 // Large-image key precedence (returns the TEMPLATE string; the caller fills it):
 //   1. statusAssets[status]          per-status art ("working" gif, etc.)
 //   2. modelAssets[fable|opus|sonnet|haiku|default]   per-model art, never stale

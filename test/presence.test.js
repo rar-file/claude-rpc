@@ -5,7 +5,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-const { makeRotationCursor, pickFrames, selectFrame, resolveLargeImageKey, shouldShowGithubButton, pickActiveSession, throttleDecision } =
+const { makeRotationCursor, pickFrames, selectFrame, resolveLargeImageKey, shouldShowGithubButton, pickActiveSession, throttleDecision,
+  reconnectPlan, RECONNECT_BASE_MS, RECONNECT_CAP_MS, RECONNECT_ABSENT_CAP_MS } =
   await import('../src/presence.js');
 
 // ── pickFrames ─────────────────────────────────────────────────────────
@@ -364,4 +365,45 @@ test('throttleDecision: keepalive never fires before the first successful write'
     gapMs: GAP, flushPending: false, keepaliveMs: KEEPALIVE,
   });
   assert.deepEqual(d, { action: 'skip', waitMs: 0 });
+});
+
+// ── reconnectPlan (Discord reconnect pacing) ───────────────────────────
+// Walk the plan the way the daemon does: feed nextDelayMs back in.
+function walk(absent, steps) {
+  const waits = [];
+  let delayMs = RECONNECT_BASE_MS;
+  for (let i = 0; i < steps; i++) {
+    const p = reconnectPlan({ delayMs, absent, rand: 0.5 }); // 0.5 → no jitter
+    waits.push(p.waitMs);
+    delayMs = p.nextDelayMs;
+  }
+  return waits;
+}
+
+test('reconnectPlan: Discord not running polls fast forever', () => {
+  // Opening Discord after Claude Code must show presence within ~15s, not
+  // after a 5-minute backoff.
+  const waits = walk(true, 12);
+  assert.deepEqual(waits.slice(0, 3), [5_000, 10_000, 15_000]);
+  assert.ok(waits.every((w) => w <= RECONNECT_ABSENT_CAP_MS));
+  assert.equal(waits.at(-1), RECONNECT_ABSENT_CAP_MS);
+});
+
+test('reconnectPlan: a failing live client backs off to the 5min cap', () => {
+  const waits = walk(false, 10);
+  assert.deepEqual(waits.slice(0, 4), [5_000, 10_000, 20_000, 40_000]);
+  assert.equal(waits.at(-1), RECONNECT_CAP_MS);
+});
+
+test('reconnectPlan: a long backoff collapses once Discord is simply absent', () => {
+  // Client crashed mid-backoff: the next probe finds no socket at all.
+  const p = reconnectPlan({ delayMs: RECONNECT_CAP_MS, absent: true, rand: 0.5 });
+  assert.equal(p.waitMs, RECONNECT_ABSENT_CAP_MS);
+  assert.equal(p.nextDelayMs, RECONNECT_ABSENT_CAP_MS);
+});
+
+test('reconnectPlan: jitter stays within ±30% and never below base', () => {
+  assert.equal(reconnectPlan({ delayMs: 10_000, absent: false, rand: 0 }).waitMs, 7_000);
+  assert.equal(reconnectPlan({ delayMs: 10_000, absent: false, rand: 1 }).waitMs, 13_000);
+  assert.equal(reconnectPlan({ delayMs: 0, absent: true, rand: 0.5 }).waitMs, RECONNECT_BASE_MS);
 });

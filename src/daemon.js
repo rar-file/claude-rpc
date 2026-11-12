@@ -4,7 +4,7 @@ import { existsSync, unlinkSync, watch, appendFileSync, mkdirSync, statSync, ren
 import { basename, dirname, join } from 'node:path';
 import { Client, isBridgeUser } from './discord-ipc.js';
 import { readState, sweepStaleStateTmp, listSessionStates, sweepStaleSessionStates } from './state.js';
-import { makeRotationCursor, pickFrames, selectFrame, resolveLargeImageKey, shouldShowGithubButton, pickActiveSession, throttleDecision } from './presence.js';
+import { makeRotationCursor, pickFrames, selectFrame, resolveLargeImageKey, shouldShowGithubButton, pickActiveSession, throttleDecision, reconnectPlan, RECONNECT_BASE_MS } from './presence.js';
 import { buildVars, fillTemplate, framePasses, applyIdle, applyShipped, applyTrigger, humanProject } from './format.js';
 import { scan, readAggregate, findLiveSessions, readSessionTokens, readSessionModel } from './scanner.js';
 import { detectClaudeProcess } from './claude-proc.js';
@@ -139,14 +139,15 @@ let recentSends = [];
 // Tracked separately from the render hash so we fire once per transition.
 let lastNotifiedStatus = null;
 let reconnectTimer = null;
-// Exponential backoff for Discord reconnect: 5s → 10s → 20s → … → 300s cap.
-// Reset to RECONNECT_BASE_MS on a successful connect so the next outage
-// also starts gentle. Jitter (±30%) keeps multiple daemons (e.g. a user
-// running both packaged and dev simultaneously) from synchronizing
-// reconnect storms against Discord's IPC socket.
-const RECONNECT_BASE_MS = 5_000;
-const RECONNECT_CAP_MS  = 300_000;
+// Current Discord reconnect step — pacing lives in presence.reconnectPlan
+// (fast flat poll while Discord isn't running, exponential backoff to 5min
+// when a live client keeps failing). Reset on a successful connect.
 let reconnectDelayMs    = RECONNECT_BASE_MS;
+// The "Discord isn't running" poll is every ~15s; logging each miss would
+// write ~5,700 lines a day. One line per this interval keeps the log quiet
+// while still landing inside the tail doctor reads for IPC state.
+const ABSENT_LOG_EVERY_MS = 5 * 60_000;
+let lastAbsentLogAt = 0;
 // Rotation cursor (index + lastAt + status). selectFrame in presence.js resets
 // it on a status transition — otherwise the cursor carries over from idle's
 // 12-frame rotation into a single-frame working state and back, producing a
@@ -622,6 +623,7 @@ async function connect() {
     connected = true;
     // Reset backoff so the next outage also starts at RECONNECT_BASE_MS.
     reconnectDelayMs = RECONNECT_BASE_MS;
+    lastAbsentLogAt = 0;
     bridgeClient = isBridgeUser(client.user);
     if (bridgeClient) {
       // Doctor greps this line: "connected as" feeds ipcStateFromLog, "arrpc"
@@ -641,24 +643,26 @@ async function connect() {
   });
   try { await self.login(); }
   catch (e) {
-    if (client === self) scheduleReconnect(`Discord login failed: ${e.message}`);
+    // ECONNREFUSED is login()'s "no IPC socket accepted" — Discord isn't
+    // running, as opposed to a client that answered and then failed.
+    if (client === self) scheduleReconnect(`Discord login failed: ${e.message}`, { absent: e.code === 'ECONNREFUSED' });
   } finally {
     if (client === self) connecting = false;
   }
 }
 
-function scheduleReconnect(reason = 'reconnect') {
+function scheduleReconnect(reason = 'reconnect', { absent = false } = {}) {
   connected = false;
   if (reconnectTimer) return;
-  // ±30% jitter on the current step. Cheap protection against
-  // synchronized reconnect storms from sibling daemons.
-  const jitter = 0.7 + Math.random() * 0.6;
-  const wait = Math.round(reconnectDelayMs * jitter);
-  log(`${reason} — retry in ${Math.round(wait / 1000)}s. Is Discord desktop running?`);
-  reconnectTimer = setTimeout(() => { reconnectTimer = null; connect(); }, wait);
-  // Step the base for the *next* failure. Cap at 5min so a long Discord
-  // outage doesn't push us into multi-hour silences.
-  reconnectDelayMs = Math.min(RECONNECT_CAP_MS, reconnectDelayMs * 2);
+  const { waitMs, nextDelayMs } = reconnectPlan({ delayMs: reconnectDelayMs, absent });
+  const now = Date.now();
+  if (!absent || now - lastAbsentLogAt >= ABSENT_LOG_EVERY_MS) {
+    // Doctor greps "retry in Ns" (ipcStateFromLog) — keep the token if rewording.
+    log(`${reason} — retry in ${Math.round(waitMs / 1000)}s. Is Discord desktop running?`);
+    if (absent) lastAbsentLogAt = now;
+  }
+  reconnectTimer = setTimeout(() => { reconnectTimer = null; connect(); }, waitMs);
+  reconnectDelayMs = nextDelayMs;
 }
 
 function watchFiles() {
