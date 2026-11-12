@@ -4,6 +4,8 @@ All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachang
 
 ## [Unreleased]
 
+## [1.7.4] - 2026-11-12
+
 **Fixed**
 
 - **New models show up under their own name and a sensible price.** A model released after the price table was written (Fable 5.2, say) used to be folded into the oldest row of its family: it appeared as "Fable 5" in the model mix and was priced at 5.0 rates. Stats are now grouped by the model's real version, and an unknown version borrows the price of its nearest earlier release instead of an old generic rate.
@@ -901,7 +903,8 @@ Polish pass. Install once, never think about it again.
 
 - 81 → 134 tests. New coverage for `format.humanModel / humanTool / humanProject / fmtNum / fmtDuration / fmtHours / plural`, `languages.languageOf`, `insights.generateInsights`, `scanner.dayKey / weekKey / hourKey`, `state.readState / writeState / updateState / resetState`, `server/api.windowedAggregate / rangeToDays`, `server/page.buildHtml`, and a live route-walker over the dashboard. Every public `src/*.js` export is exercised at least once.
 
-[Unreleased]: https://github.com/rar-file/claude-rpc/compare/v1.7.3...HEAD
+[Unreleased]: https://github.com/rar-file/claude-rpc/compare/v1.7.4...HEAD
+[1.7.4]: https://github.com/rar-file/claude-rpc/compare/v1.7.3...v1.7.4
 [1.7.3]: https://github.com/rar-file/claude-rpc/compare/v1.7.2...v1.7.3
 [1.7.2]: https://github.com/rar-file/claude-rpc/compare/v1.7.1...v1.7.2
 [1.7.1]: https://github.com/rar-file/claude-rpc/compare/v1.7.0...v1.7.1
