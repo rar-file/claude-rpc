@@ -129,7 +129,9 @@ This repo holds more than the npm package:
 - `worker/` (the Cloudflare Worker) is **versioned independently**, is not
   published to npm, and ships by a manual `wrangler deploy` (above) — a
   worker-only change needs no root release.
-- `dashboard/` (the Electron app) is not published to npm, but it is **not**
+- `dashboard/` (the desktop app: a thin Electron shell that runs `setup`,
+  shows the CLI's own `/settings` page and adds a tray icon — it has no UI of
+  its own) is not published to npm, but it is **not**
   versioned independently: `scripts/prep-dashboard.js` (run by `release.yml`
   and by `npm run dist:mac` / `dist:win`) overwrites `dashboard/package.json`'s
   version with the root version before electron-builder names the artifacts

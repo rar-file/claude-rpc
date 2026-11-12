@@ -23,7 +23,7 @@ With that caveat, the likely candidates:
 
 - **More install paths.** npm, the Homebrew tap, and standalone binaries exist; AUR and a `.deb` are the obvious gaps, `winget`/`scoop` after that.
 - **Windows reliability.** The daemon already runs an mtime-poll fallback because `fs.watch` is unreliable there; Windows deserves the same first-class confidence as macOS/Linux, not a fallback.
-- **Presence customization in the dashboard.** The rotation frames and 200+ template variables are fully configurable in `config.json`, but the Electron dashboard only edits a subset. A frame editor with live preview would make the most powerful feature discoverable.
+- **Presence customization in the dashboard.** The rotation frames and 200+ template variables are fully configurable in `config.json`, and the settings page (`claude-rpc settings`) now edits each status's lines, image and extra frames with a live preview. Still missing there: custom triggers, goals and webhooks.
 - **Smarter idle story.** Idle detection works, but the away/back transitions could be richer — per-frame idle variants, configurable grace periods.
 
 ## later / maybe

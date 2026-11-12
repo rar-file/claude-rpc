@@ -415,6 +415,26 @@ No subprocess passes untrusted or remote input to a shell — arguments are
 static or escaped. The historical `shell: true` paths (`verifyHookPipe`, and the
 gist `gh` wrapper on Windows) use only trusted args.
 
+## 4a. Local dashboard server — only while `serve`, `wrapped` or `settings` runs
+
+**Source:** `src/server/index.js`, `src/server/settings.js`. The daemon serves
+no HTTP. `claude-rpc serve` / `wrapped` / `settings` (and the desktop app, which
+runs `serve` for its window) start a server bound to **127.0.0.1 only**, port
+47474 (`CLAUDE_RPC_PORT`).
+
+- **Host allowlist:** requests whose `Host` isn't `localhost` / `127.0.0.1` /
+  `::1` get 403, which closes DNS rebinding.
+- **Read routes** return your own stats and config to the page.
+- **Write routes** (`POST /api/settings`, `/api/daemon`, `/api/workspaces`)
+  save `config.json`, start/stop the daemon, and set per-project visibility.
+  Because any site open in your browser can send requests to localhost, they
+  are accepted only when the `Origin` header is this exact host and port and
+  the body is `application/json` (which a cross-site form cannot send without a
+  CORS preflight the server never answers). A save is validated and written
+  atomically; it can only change the claude-rpc config file.
+- The desktop app's window gets no extra access: no preload script, no IPC,
+  `sandbox` on, `nodeIntegration` off. It is the same page a browser tab gets.
+
 ## 5. What it stores locally
 
 Three per-user locations (paths are defined in `src/paths.js`):

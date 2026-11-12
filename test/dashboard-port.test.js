@@ -25,9 +25,9 @@ test('dashboard port: uses CLAUDE_RPC_PORT when set', (t) => {
   assert.equal(resolveRpcPort(), 12345);
 });
 
-test('dashboard port: renderer.js contains no hardcoded 47474', async () => {
+test('dashboard port: main.js contains no hardcoded 47474', async () => {
   const { readFileSync } = await import('node:fs');
-  const renderer = readFileSync(join(ROOT, 'dashboard', 'renderer.js'), 'utf8');
-  const noComments = renderer.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
-  assert.ok(!noComments.includes('47474'), 'renderer.js must not hardcode port 47474');
+  const main = readFileSync(join(ROOT, 'dashboard', 'main.js'), 'utf8');
+  const noComments = main.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.ok(!noComments.includes('47474'), 'main.js must not hardcode port 47474');
 });

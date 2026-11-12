@@ -70,7 +70,7 @@ brew install rar-file/claude-rpc/claude-rpc && claude-rpc setup
 .\claude-rpc.exe setup
 ```
 
-`setup` copies the exe to a fixed per-user location (so the download can go afterwards) and adds that folder to your user PATH, so `claude-rpc <command>` works in any new terminal. Prefer a GUI? The release's `claude-rpc-<version>-x64-setup.exe` (installer, auto-updates) and `claude-rpc-<version>-x64-portable.exe` (no install) are the desktop dashboard app, which runs the same `setup` for you on first launch.
+`setup` copies the exe to a fixed per-user location (so the download can go afterwards) and adds that folder to your user PATH, so `claude-rpc <command>` works in any new terminal. Prefer a GUI? The release's `claude-rpc-<version>-x64-setup.exe` (installer, auto-updates) and `claude-rpc-<version>-x64-portable.exe` (no install) are the desktop app: it runs the same `setup` for you on first launch, then gives you the settings page in a window and daemon controls in the tray.
 
 That's the whole pitch.
 
@@ -120,12 +120,12 @@ A rotation frame can show your **subscription usage** — `Usage · 34% weekly` 
 
 ### on your machine
 
-Three local surfaces, all reading the same `~/.claude-rpc/aggregate.json`:
+Local surfaces, all served from your own machine:
 
 <table>
 <tr>
 <td align="center" width="50%"><b>web dashboard</b><br/><sub><code>claude-rpc serve</code> · port 47474</sub><br/><br/><img src="docs/dashboard.png" alt="Web dashboard with range selector, activity chart, heatmap, cost panel, languages stack, and leaderboards" /></td>
-<td align="center" width="50%"><b>settings gui</b><br/><sub><code>npm run dashboard</code> · Electron</sub><br/><br/><img src="docs/electron.png" alt="Electron config editor with Presence / Discord / Assets / Timing / Daemon / Privacy / Stats tabs" /></td>
+<td align="center" width="50%"><b>settings</b><br/><sub><code>claude-rpc settings</code> · same port</sub><br/><br/><img src="docs/settings.png" alt="Settings page with daemon status and controls, and a card editor with a live preview per status" /></td>
 </tr>
 </table>
 
@@ -326,6 +326,7 @@ It's a thin bootstrapper — on the first session it just runs `npx claude-rpc@l
 | `insights`       | 3–5 auto-generated lines about your history |
 | `wrapped`        | Your animated year in review; `--publish` puts it on `claude-rpc.com/wrapped/<handle>` |
 | `serve`          | The local web dashboard (port 47474) |
+| `settings`       | Edit the card, daemon and per-project privacy in the browser |
 | `export`         | The aggregate as JSON, or daily rows as CSV (`--csv` `--out`) |
 | **Share** | |
 | `share [week\|month\|year\|all]` | Saves the poster PNG and copies a caption with your numbers and a link (`--no-png`, `--no-copy`, `--png <file>`) |
@@ -444,7 +445,7 @@ npm test                  # 550+ tests, a few seconds
 npm run lint              # eslint over src + test + vscode-extension
 npm run start             # run daemon in foreground
 npm run serve             # web dashboard against your real data
-npm run dashboard         # Electron settings GUI (dev mode)
+npm run dashboard         # desktop app shell (dev mode; shows the settings page)
 npm run build:exe         # SEA single-file binary for the current OS
 ```
 

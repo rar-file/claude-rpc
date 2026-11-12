@@ -10,6 +10,7 @@ All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachang
 
 **Changed**
 
+- **The desktop app is now a thin shell.** Its own seven-tab settings window is gone; the app shows the same settings page as `claude-rpc settings`, and keeps what a browser tab can't do: running setup on first launch, the tray icon with daemon controls, and auto-update. About 1,900 lines of duplicate UI removed, and the window no longer has any privileged bridge into the system.
 - `claude-rpc serve`, `wrapped` and `settings` now open the page in the dashboard that is already running instead of failing with "port in use".
 
 ## [1.7.4] - 2026-11-12

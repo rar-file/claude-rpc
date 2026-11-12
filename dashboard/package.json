@@ -2,7 +2,7 @@
   "name": "claude-rpc-dashboard",
   "version": "0.13.7",
   "private": true,
-  "description": "Desktop control panel for claude-rpc \u2014 daemon control, config editor, presence preview",
+  "description": "Desktop app for claude-rpc \u2014 runs setup, shows the settings page, tray daemon controls, auto-update",
   "license": "MIT",
   "author": "Archer Simmons",
   "main": "main.js",
@@ -38,11 +38,6 @@
     "files": [
       "main.js",
       "port.js",
-      "config-edit.js",
-      "preload.js",
-      "index.html",
-      "styles.css",
-      "renderer.js",
       "tray.png"
     ],
     "extraResources": [
@@ -52,14 +47,6 @@
         "filter": [
           "**/*"
         ]
-      },
-      {
-        "from": "../config.example.json",
-        "to": "config.example.json"
-      },
-      {
-        "from": "../src/default-config.js",
-        "to": "default-config.mjs"
       }
     ],
     "asar": true,
