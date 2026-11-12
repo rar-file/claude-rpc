@@ -690,10 +690,10 @@ test('buildVars: delegated work / rhythm / context vars (v1.2)', () => {
 });
 
 test('buildVars: cache savings estimate priced at top-model rates (v1.2)', () => {
-  // 100M cache-read tokens at opus rates: (5.00 - 0.50) per 1M ≈ $450 saved.
+  // 100M cache-read tokens at Opus 4.8 rates: (5.00 - 0.50) per 1M ≈ $450 saved.
   const agg = {
     cacheReadTokens: 100e6,
-    modelSplit: [{ model: 'opus', cost: 90, costPct: 1, tokens: 100 }],
+    modelSplit: [{ model: 'opus-4-8', cost: 90, costPct: 1, tokens: 100 }],
   };
   const v = buildVars(baseState(), {}, agg);
   assert.ok(Math.abs(v.cacheSavedUsd - 450) < 1, `expected ≈450, got ${v.cacheSavedUsd}`);

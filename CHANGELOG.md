@@ -4,6 +4,11 @@ All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachang
 
 ## [Unreleased]
 
+**Fixed**
+
+- **New models show up under their own name and a sensible price.** A model released after the price table was written (Fable 5.2, say) used to be folded into the oldest row of its family: it appeared as "Fable 5" in the model mix and was priced at 5.0 rates. Stats are now grouped by the model's real version, and an unknown version borrows the price of its nearest earlier release instead of an old generic rate.
+- **Prices updated** to the 2026-11-12 list: Fable 5.2 and Mythos 5.2 added ($8 / $40), Sonnet 5.5 cache reads corrected to $0.10. The first scan after updating re-reads your transcripts once so existing history is re-priced.
+
 ## [1.7.3] - 2026-11-12
 
 **Fixed**

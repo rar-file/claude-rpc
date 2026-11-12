@@ -3,7 +3,7 @@ import { join, basename } from 'node:path';
 import { homedir } from 'node:os';
 import { CLAUDE_PROJECTS, SCAN_CACHE_PATH, AGGREGATE_PATH, DATA_DIR, EVENTS_LOG_PATH } from './paths.js';
 import { languageOf } from './languages.js';
-import { costFor, pricingKeyFor } from './pricing.js';
+import { costFor, modelKeyFor } from './pricing.js';
 import { classifyShip } from './ships.js';
 import { renameSyncRetry } from './atomic-rename.js';
 import { localDateStamp } from './fmt.js';
@@ -17,7 +17,10 @@ import { localDateStamp } from './fmt.js';
 // full rescan that backfills model-mix history for already-scanned files.
 // v8: usage counted at each message's final values (usageDelta), not its first
 //     line's — re-parse to correct output tokens/cost in existing history.
-const CACHE_VERSION = 8;
+// v9: model buckets keyed by the model's real version (modelKeyFor) and the
+//     2026-11 price table (Fable 5.2, Sonnet 5.5 cache reads) — re-parse so
+//     history stops showing e.g. Fable 5.2 as "Fable 5" at 5.0 rates.
+const CACHE_VERSION = 9;
 
 // Cap counted gap between consecutive timestamps. Anything larger is treated
 // as the user walking away — we count only what's plausibly active time.
@@ -375,8 +378,9 @@ function parseChunkInto(text, summary, pstate) {
       const counted = usageDelta(pstate.recentIds, r.message?.id, r.message?.usage);
       const firstSeen = !!counted?.first;
       const u = r.message?.usage ? counted?.delta : null;
-      // Per-model split bucket, keyed by pricing key so cost/tokens/turns align.
-      const mkey = turnModel ? pricingKeyFor(turnModel) : null;
+      // Per-model split bucket, keyed by the model's own version (not its
+      // pricing row) so a release newer than the price table keeps its name.
+      const mkey = turnModel ? modelKeyFor(turnModel) : null;
       const mb = mkey ? (summary.byModel[mkey] ||= { turns: 0, tokens: 0, cost: 0 }) : null;
       // Per-day model split (day granularity only — week/hour stay lean).
       // Powers model-mix-over-time; the all-time byModel can't trend.
