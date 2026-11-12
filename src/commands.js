@@ -63,6 +63,7 @@ export const COMMANDS = [
   { name: 'wrapped', group: 'stats', summary: 'Your animated year in review',
     flags: [['--publish', 'Put it on claude-rpc.com/wrapped/<handle>'], ['--year', 'Which year', 'any'], ['--yes', 'Skip the confirm']] },
   { name: 'serve', group: 'stats', summary: 'Open the live web dashboard' },
+  { name: 'settings', group: 'start', summary: 'Edit your card, daemon and privacy in the browser' },
   { name: 'export', group: 'stats', summary: 'Everything as JSON, or daily rows as CSV',
     flags: [['--csv', 'Daily rows as CSV'], ['--out', 'Write to a file', 'file']] },
 

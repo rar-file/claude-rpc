@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Claude · Settings</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+<style>
+{{STYLES}}</style>
+</head>
+<body class="settings">
+<main class="page">
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="mark">◆</span>
+      <span>Settings</span>
+    </div>
+    <div class="top-right">
+      <a class="wrapped-link" href="/">← Stats</a>
+    </div>
+  </header>
+
+  <div class="set-error" id="load-error" hidden></div>
+
+  <!-- ── Daemon ──────────────────────────────────────── -->
+  <section class="set-card" aria-labelledby="h-daemon">
+    <div class="set-head">
+      <h2 id="h-daemon">Daemon</h2>
+      <span class="set-hint">The background process that updates your Discord card.</span>
+    </div>
+    <div class="daemon-row">
+      <span class="dot" id="daemon-dot"></span>
+      <div class="daemon-text">
+        <div class="daemon-title" id="daemon-title">Checking…</div>
+        <div class="daemon-sub" id="daemon-sub"></div>
+      </div>
+      <div class="btn-row">
+        <button class="btn" id="daemon-start">Start</button>
+        <button class="btn" id="daemon-restart">Restart</button>
+        <button class="btn" id="daemon-stop">Stop</button>
+      </div>
+    </div>
+    <details class="log" id="log-details">
+      <summary>Log</summary>
+      <pre id="log" tabindex="0"></pre>
+    </details>
+  </section>
+
+  <!-- ── Card ────────────────────────────────────────── -->
+  <section class="set-card" aria-labelledby="h-card">
+    <div class="set-head">
+      <h2 id="h-card">Card</h2>
+      <span class="set-hint">What Discord shows for each thing Claude is doing.</span>
+    </div>
+    <div class="seg" id="status-tabs" role="tablist" aria-label="Status"></div>
+
+    <div class="preview" aria-live="polite">
+      <div class="avatar" id="pv-avatar"></div>
+      <div class="pv-text">
+        <div class="pv-app" id="pv-app"></div>
+        <div class="pv-details" id="pv-details"></div>
+        <div class="pv-state" id="pv-state"></div>
+      </div>
+    </div>
+
+    <div class="grid2">
+      <label class="field">Top line
+        <input type="text" id="f-details" autocomplete="off" />
+      </label>
+      <label class="field">Bottom line
+        <input type="text" id="f-state" autocomplete="off" />
+      </label>
+      <label class="field">Image
+        <input type="text" id="f-asset" autocomplete="off" placeholder="Image link or Discord asset key" />
+      </label>
+      <label class="field">Image hover text
+        <input type="text" id="f-hover" autocomplete="off" />
+      </label>
+    </div>
+    <div class="insert">
+      <label for="var-pick">Insert a live value</label>
+      <select id="var-pick"><option value="">Choose…</option></select>
+      <span class="set-hint">Adds it to the line you were last typing in, like <code>{project}</code>.</span>
+    </div>
+
+    <div class="sub-head">
+      <h3>Extra frames</h3>
+      <span class="set-hint">Shown in turn after the lines above. A frame is skipped while its condition is empty.</span>
+    </div>
+    <div id="frames"></div>
+    <button class="btn ghost" id="add-frame">+ Add frame</button>
+  </section>
+
+  <!-- ── Discord ─────────────────────────────────────── -->
+  <section class="set-card" aria-labelledby="h-discord">
+    <div class="set-head"><h2 id="h-discord">Discord</h2></div>
+    <div class="grid2">
+      <label class="field">App name
+        <input type="text" id="f-appName" autocomplete="off" />
+      </label>
+      <label class="field">Application ID
+        <input type="text" id="f-clientId" inputmode="numeric" autocomplete="off" />
+      </label>
+      <label class="field">Shown as
+        <select id="f-activityType">
+          <option value="0">Playing</option>
+          <option value="2">Listening to</option>
+          <option value="3">Watching</option>
+          <option value="5">Competing in</option>
+        </select>
+      </label>
+      <div class="checks">
+        <label class="check"><input type="checkbox" id="f-showElapsed" /> Show elapsed time</label>
+        <label class="check"><input type="checkbox" id="f-githubButton" /> Link public GitHub repos</label>
+      </div>
+    </div>
+    <div class="sub-head">
+      <h3>Buttons</h3>
+      <span class="set-hint">Up to 2. Only other people see them on your card.</span>
+    </div>
+    <div id="buttons"></div>
+    <button class="btn ghost" id="add-button">+ Add button</button>
+  </section>
+
+  <!-- ── Behaviour ───────────────────────────────────── -->
+  <section class="set-card" aria-labelledby="h-behaviour">
+    <div class="set-head"><h2 id="h-behaviour">Behaviour</h2></div>
+    <div class="grid3">
+      <label class="field">Rotate frames every
+        <span class="unit"><input type="number" id="f-rotation" min="5" step="1" /> sec</span>
+      </label>
+      <label class="field">Idle after
+        <span class="unit"><input type="number" id="f-idle" min="0" step="1" /> sec</span>
+      </label>
+      <label class="field">Clear card after
+        <span class="unit"><input type="number" id="f-stale" min="0" step="1" /> min</span>
+      </label>
+      <label class="field">"Just shipped" stays
+        <span class="unit"><input type="number" id="f-shipped" min="0" step="1" /> sec</span>
+      </label>
+    </div>
+    <div class="checks row">
+      <label class="check"><input type="checkbox" id="f-hideWhenStale" /> Hide the card when Claude Code is closed</label>
+      <label class="check"><input type="checkbox" id="f-notify" /> Desktop notification when Claude needs you</label>
+    </div>
+  </section>
+
+  <!-- ── Privacy ─────────────────────────────────────── -->
+  <section class="set-card" aria-labelledby="h-privacy">
+    <div class="set-head">
+      <h2 id="h-privacy">Privacy</h2>
+      <span class="set-hint">Per project. Changes apply right away.</span>
+    </div>
+    <div id="workspaces"></div>
+  </section>
+
+  <footer>
+    <span id="config-path"></span>
+    <span>127.0.0.1:{{PORT}} · <span id="version"></span></span>
+  </footer>
+</main>
+
+<!-- Sticky save bar: only visible with unsaved changes or a result to report -->
+<div class="savebar" id="savebar" hidden>
+  <span class="save-msg" id="save-msg" role="status"></span>
+  <button class="btn" id="revert">Discard</button>
+  <button class="btn primary" id="save">Save</button>
+</div>
+
+<script>
+{{SCRIPT}}</script>
+</body>
+</html>

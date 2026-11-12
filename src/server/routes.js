@@ -9,6 +9,7 @@ import { generateInsights } from '../insights.js';
 import { badgeSvg } from '../badge.js';
 import { renderCard } from '../card.js';
 import { snapshot, windowedAggregate, aggregateToCsv, wrappedData } from './api.js';
+import { getSettings, saveSettings, daemonAction, getLog, listWorkspaces, setWorkspaceVisibility } from './settings.js';
 
 export const JSON_HEADERS = {
   'content-type': 'application/json',
@@ -89,3 +90,18 @@ ROUTES.set('GET /api/card.svg', (req, res, { query }) => {
   });
   res.end(svg);
 });
+
+// ── Settings page (/settings) ───────────────────────────────────────────
+// POST handlers receive the parsed JSON body as `body`; index.js has already
+// checked the request is same-origin JSON before it gets here.
+const sendJson = (res, obj) => {
+  res.writeHead(obj && obj.error ? 400 : 200, JSON_HEADERS);
+  res.end(JSON.stringify(obj));
+};
+
+ROUTES.set('GET /api/settings', (req, res) => sendJson(res, getSettings()));
+ROUTES.set('POST /api/settings', (req, res, { body }) => sendJson(res, saveSettings(body)));
+ROUTES.set('POST /api/daemon', async (req, res, { body }) => sendJson(res, await daemonAction(body && body.action)));
+ROUTES.set('GET /api/log', (req, res) => sendJson(res, getLog()));
+ROUTES.set('GET /api/workspaces', (req, res) => sendJson(res, listWorkspaces()));
+ROUTES.set('POST /api/workspaces', (req, res, { body }) => sendJson(res, setWorkspaceVisibility(body)));

@@ -4,6 +4,14 @@ All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachang
 
 ## [Unreleased]
 
+**Added**
+
+- **Settings in the browser.** `claude-rpc settings` (or the Settings link on the dashboard) opens a page where you edit what the card says for each status, its images, extra frames and buttons, with a live preview; start, stop and restart the daemon and read its log; and choose per project whether it shows as public, name only or hidden. Saving writes only the fields you changed, so defaults keep updating with new releases.
+
+**Changed**
+
+- `claude-rpc serve`, `wrapped` and `settings` now open the page in the dashboard that is already running instead of failing with "port in use".
+
 ## [1.7.4] - 2026-11-12
 
 **Fixed**

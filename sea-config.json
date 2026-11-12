@@ -10,6 +10,9 @@
     "dashboard.client.js": "src/server/assets/dashboard.client.js",
     "wrapped.html": "src/server/assets/wrapped.html",
     "wrapped.css": "src/server/assets/wrapped.css",
-    "wrapped.client.js": "src/server/assets/wrapped.client.js"
+    "wrapped.client.js": "src/server/assets/wrapped.client.js",
+    "settings.html": "src/server/assets/settings.html",
+    "settings.css": "src/server/assets/settings.css",
+    "settings.client.js": "src/server/assets/settings.client.js"
   }
 }

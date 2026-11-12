@@ -1,4 +1,4 @@
-// dashboard/config-edit.js: the settings GUI shows defaults merged with the
+// src/config-edit.js: the settings page shows defaults merged with the
 // user's config.json, and on save writes back only what the user changed.
 //
 // Regression (audit B9): the GUI used to load the raw two-line config, show no
@@ -6,13 +6,10 @@
 // merge, so that silently deleted the default "Get claude-rpc →" button.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 import { DEFAULT_CONFIG } from '../src/default-config.js';
-import { mergeConfig as srcMergeConfig } from '../src/config.js';
-
-const require = createRequire(import.meta.url);
-const { mergeConfig, applyEdits, deepEqual } = require('../dashboard/config-edit.js');
+import { mergeConfig } from '../src/config.js';
+import { applyEdits, deepEqual } from '../src/config-edit.js';
 
 const EXAMPLE = JSON.parse(
   readFileSync(new URL('../config.example.json', import.meta.url), 'utf8'),
@@ -21,20 +18,6 @@ const clone = (v) => structuredClone(v);
 
 // What the GUI shows for a given file: defaults + overrides.
 const viewOf = (raw) => mergeConfig(DEFAULT_CONFIG, raw);
-
-test('mergeConfig matches src/config.js (objects merge, arrays replace)', () => {
-  const overrides = [
-    {},
-    EXAMPLE,
-    { presence: { buttons: [] } },
-    { presence: { buttons: [{ label: 'Mine', url: 'https://example.com' }], githubButton: false } },
-    { statusIcons: { working: '' }, goals: { dailyHours: 4 }, triggers: [{ match: 'npm test' }] },
-    { presence: null, extra: { nested: [1, 2] } },
-  ];
-  for (const over of overrides) {
-    assert.deepEqual(mergeConfig(DEFAULT_CONFIG, over), srcMergeConfig(DEFAULT_CONFIG, over));
-  }
-});
 
 test('B9: saving an untouched fresh config writes nothing new, so the default button survives', () => {
   const raw = clone(EXAMPLE);

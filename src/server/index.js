@@ -17,7 +17,8 @@ import { exec } from 'node:child_process';
 import { ROUTES, JSON_HEADERS } from './routes.js';
 import { projectDrilldown, dayDetail } from './api.js';
 import { watchSources, addClient, removeClient } from './sse.js';
-import { buildHtml, buildWrappedHtml } from './page.js';
+import { buildHtml, buildWrappedHtml, buildSettingsHtml } from './page.js';
+import { writeAllowed } from './settings.js';
 
 const PORT = Number(process.env.CLAUDE_RPC_PORT) || 47474;
 
@@ -25,8 +26,10 @@ const PORT = Number(process.env.CLAUDE_RPC_PORT) || 47474;
 // (shown in the footer), which is fixed for the life of the process.
 const HTML = buildHtml({ port: PORT });
 const WRAPPED_HTML = buildWrappedHtml();
+const SETTINGS_HTML = buildSettingsHtml({ port: PORT });
 const PAGES = new Map([
   ['/', HTML], ['/index.html', HTML],
+  ['/settings', SETTINGS_HTML], ['/settings.html', SETTINGS_HTML], // config, daemon, privacy
   ['/wrapped', WRAPPED_HTML], ['/wrapped.html', WRAPPED_HTML], // animated year-in-review
 ]);
 
@@ -85,8 +88,9 @@ function dispatch(req, res) {
   }
 
   // Static /api/* endpoints (state, wrapped, aggregate, insights, badge.svg,
-  // card.svg, export.json, export.csv) — see routes.js.
+  // card.svg, export.json, export.csv, settings) — see routes.js.
   const handler = ROUTES.get(key);
+  if (handler && req.method === 'POST') return handleWrite(req, res, handler, query);
   if (handler) return handler(req, res, { query });
 
   const page = req.method === 'GET' && PAGES.get(path);
@@ -97,6 +101,31 @@ function dispatch(req, res) {
   }
 
   res.writeHead(404).end('not found');
+}
+
+const MAX_BODY_BYTES = 512 * 1024;
+
+function handleWrite(req, res, handler, query) {
+  const fail = (code, error) => {
+    if (!res.headersSent) res.writeHead(code, JSON_HEADERS).end(JSON.stringify({ error }));
+  };
+  if (!writeAllowed(req.headers)) return fail(403, 'forbidden');
+  const chunks = [];
+  let size = 0;
+  req.on('data', (c) => {
+    size += c.length;
+    if (size > MAX_BODY_BYTES) { fail(413, 'request too large'); req.destroy(); return; }
+    chunks.push(c);
+  });
+  req.on('error', () => fail(400, 'bad request'));
+  req.on('end', async () => {
+    if (res.headersSent) return;
+    let body;
+    try { body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); }
+    catch { return fail(400, 'body is not valid JSON'); }
+    try { await handler(req, res, { query, body }); }
+    catch { fail(500, 'internal error'); }
+  });
 }
 
 const server = createServer((req, res) => {
@@ -117,14 +146,45 @@ const server = createServer((req, res) => {
 // `claude-rpc serve`, or the tray and the Stats tab each spawning one. Say why
 // in one line and exit non-zero instead. Once listening, an 'error' is logged
 // and the dashboard keeps running (same policy as the floor).
-server.on('error', (e) => {
+// `claude-rpc wrapped` / `settings` set CLAUDE_RPC_OPEN_PATH to land on that
+// page instead of the dashboard.
+const OPEN_PATH = process.env.CLAUDE_RPC_OPEN_PATH || '';
+
+function openBrowser(url) {
+  if (process.env.CLAUDE_RPC_NO_OPEN) return;
+  const opener = process.platform === 'win32' ? `start "" "${url}"`
+    : process.platform === 'darwin' ? `open "${url}"`
+    : `xdg-open "${url}"`;
+  // windowsHide so the cmd.exe that runs `start` doesn't flash a console.
+  exec(opener, { windowsHide: true }, () => {});
+}
+
+// Is the thing already on our port a claude-rpc dashboard new enough to have
+// the page we want? /api/settings exists on every build that serves /settings.
+async function dashboardAlreadyUp(base) {
+  try {
+    const res = await fetch(`${base}/api/settings`, { signal: AbortSignal.timeout(1500) });
+    return res.ok && typeof (await res.json()).version === 'string';
+  } catch { return false; }
+}
+
+server.on('error', async (e) => {
   if (server.listening) {
     try { console.error('dashboard error:', e?.message || e); } catch { /* ignore */ }
     return;
   }
   const base = `http://127.0.0.1:${PORT}`;
+  // A dashboard is already running (another terminal, a previous `serve`):
+  // that's not a failure — open the page in it.
+  if (e?.code === 'EADDRINUSE' && await dashboardAlreadyUp(base)) {
+    console.log(`◆ Claude RPC dashboard is already running: ${base}${OPEN_PATH}`);
+    openBrowser(base + OPEN_PATH);
+    // Let the opener spawn before exiting.
+    setTimeout(() => process.exit(0), 300);
+    return;
+  }
   console.error(e?.code === 'EADDRINUSE'
-    ? `✗ Port ${PORT} is already in use — a dashboard may already be running at ${base} (set CLAUDE_RPC_PORT to use another port).`
+    ? `✗ Port ${PORT} is in use by another program or an older claude-rpc dashboard — stop it, or set CLAUDE_RPC_PORT to use another port.`
     : `✗ Dashboard could not listen on 127.0.0.1:${PORT}: ${e?.message || e}`);
   process.exit(1);
 });
@@ -134,19 +194,10 @@ server.listen(PORT, '127.0.0.1', () => {
   // without leaving watchers behind.
   watchSources();
   const base = `http://127.0.0.1:${PORT}`;
-  // `claude-rpc wrapped` sets CLAUDE_RPC_OPEN_PATH=/wrapped to land on the
-  // animated year-in-review instead of the dashboard.
-  const openPath = process.env.CLAUDE_RPC_OPEN_PATH || '';
-  const url = base + openPath;
+  const url = base + OPEN_PATH;
   console.log(`◆ Claude RPC dashboard: ${base}`);
-  console.log(`  ${openPath ? 'opening ' + url + '  ·  ' : ''}Ctrl-C to stop.`);
-  if (!process.env.CLAUDE_RPC_NO_OPEN) {
-    const opener = process.platform === 'win32' ? `start "" "${url}"`
-      : process.platform === 'darwin' ? `open "${url}"`
-      : `xdg-open "${url}"`;
-    // windowsHide so the cmd.exe that runs `start` doesn't flash a console.
-    exec(opener, { windowsHide: true }, () => {});
-  }
+  console.log(`  ${OPEN_PATH ? 'opening ' + url + '  ·  ' : ''}Ctrl-C to stop.`);
+  openBrowser(url);
 });
 
 process.on('SIGINT', () => process.exit(0));

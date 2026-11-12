@@ -2482,7 +2482,7 @@ process.on('unhandledRejection', (e) => {
   // Fast-exit commands touch none of the core graph (they import their own
   // module, if any); daemon control needs only ensure-daemon. Everything else
   // loads the core once up front, so its bindings are set for every handler.
-  const FAST_PATHS = new Set(['--version', '-V', '-v', '--help', '-h', 'help', '__complete', 'hook', 'mcp', 'daemon', 'serve', 'wrapped', 'scan-worker', 'tail', 'logs', 'log', 'pause', 'resume', 'unpause']);
+  const FAST_PATHS = new Set(['--version', '-V', '-v', '--help', '-h', 'help', '__complete', 'hook', 'mcp', 'daemon', 'serve', 'wrapped', 'settings', 'scan-worker', 'tail', 'logs', 'log', 'pause', 'resume', 'unpause']);
   // `<command> --help` → that command's page (before it runs at all).
   if (cmd && (args.includes('--help') || args.includes('-h')) && !['hook', 'scan-worker', '__complete'].includes(cmd)) {
     const { findCommand } = await import('./commands.js');
@@ -2646,6 +2646,8 @@ process.on('unhandledRejection', (e) => {
     case 'wrapped':
       if (args.includes('--publish')) { await doWrappedPublish(args); break; }
       process.env.CLAUDE_RPC_OPEN_PATH = '/wrapped'; await import('./server/index.js'); break;
+    case 'settings':
+      process.env.CLAUDE_RPC_OPEN_PATH = '/settings'; await import('./server/index.js'); break;
     case 'pause':     await doPause(args); break;
     case 'resume':
     case 'unpause':   await doResume(); break;

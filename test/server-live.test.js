@@ -204,7 +204,7 @@ test('serve: live data comes from per-session state files and matches the card',
   }
 });
 
-test('serve: a second instance on a busy port exits 1 with a clear message', async (t) => {
+test('serve: a second instance hands off to the running dashboard instead of failing', async (t) => {
   const PORT = 47994;
   const sb = makeSandbox();
   t.after(() => rmSync(sb.root, { recursive: true, force: true }));
@@ -218,9 +218,26 @@ test('serve: a second instance on a busy port exits 1 with a clear message', asy
   const second = boot(PORT, sb);
   t.after(() => second.kill());
   const code = await Promise.race([second.exited, delay(5000).then(() => 'still running')]);
-  assert.equal(code, 1, `second instance must exit 1, not hang (output: ${second.out})`);
-  assert.match(second.out, /already in use/);
+  assert.equal(code, 0, `second instance must exit 0, not hang (output: ${second.out})`);
+  assert.match(second.out, /already running/);
   assert.ok(second.out.includes(`http://127.0.0.1:${PORT}`), 'points at the running dashboard');
   assert.equal(second.out.trim().split('\n').length, 1, 'one line');
   assert.equal((await getJson(PORT, '/api/state')).status, 200, 'first instance unaffected');
+});
+
+test('serve: a port held by something else exits 1 with a clear message', async (t) => {
+  const PORT = 47993;
+  const sb = makeSandbox();
+  t.after(() => rmSync(sb.root, { recursive: true, force: true }));
+  const { createServer } = await import('node:http');
+  const other = createServer((req, res) => res.end('not a dashboard'));
+  await new Promise((r) => other.listen(PORT, '127.0.0.1', r));
+  t.after(() => other.close());
+
+  const inst = boot(PORT, sb);
+  t.after(() => inst.kill());
+  const code = await Promise.race([inst.exited, delay(5000).then(() => 'still running')]);
+  assert.equal(code, 1, `must exit 1, not hang (output: ${inst.out})`);
+  assert.match(inst.out, /in use by another program/);
+  assert.equal(inst.out.trim().split('\n').length, 1, 'one line');
 });
