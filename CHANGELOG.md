@@ -4,6 +4,8 @@ All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachang
 
 ## [Unreleased]
 
+## [1.7.3] - 2026-11-12
+
 **Fixed**
 
 - **Presence shows up within about 15 seconds of opening Discord.** When Discord wasn't running, the daemon backed off to one connection attempt every 5 minutes, so opening Discord after Claude Code could leave the card missing for minutes. It now checks every 15 seconds while Discord is closed, and keeps the long backoff only for a Discord client that is running but failing.
@@ -894,7 +896,8 @@ Polish pass. Install once, never think about it again.
 
 - 81 → 134 tests. New coverage for `format.humanModel / humanTool / humanProject / fmtNum / fmtDuration / fmtHours / plural`, `languages.languageOf`, `insights.generateInsights`, `scanner.dayKey / weekKey / hourKey`, `state.readState / writeState / updateState / resetState`, `server/api.windowedAggregate / rangeToDays`, `server/page.buildHtml`, and a live route-walker over the dashboard. Every public `src/*.js` export is exercised at least once.
 
-[Unreleased]: https://github.com/rar-file/claude-rpc/compare/v1.7.2...HEAD
+[Unreleased]: https://github.com/rar-file/claude-rpc/compare/v1.7.3...HEAD
+[1.7.3]: https://github.com/rar-file/claude-rpc/compare/v1.7.2...v1.7.3
 [1.7.2]: https://github.com/rar-file/claude-rpc/compare/v1.7.1...v1.7.2
 [1.7.1]: https://github.com/rar-file/claude-rpc/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/rar-file/claude-rpc/compare/v1.6.0...v1.7.0
