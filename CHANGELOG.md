@@ -4,6 +4,8 @@ All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachang
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-11-18
+
 **Fixed**
 
 - **`claude-rpc stop` now stays stopped.** Stopping used to last only until the next Claude Code session opened, which started the daemon right back up. A stop now holds across sessions and reboots until `claude-rpc start` (or `restart`/`setup`). It waits for the daemon to actually exit, and a leftover second daemon exits within 30 seconds. The settings page and the desktop app's tray do the same.
@@ -930,7 +932,8 @@ Polish pass. Install once, never think about it again.
 
 - 81 → 134 tests. New coverage for `format.humanModel / humanTool / humanProject / fmtNum / fmtDuration / fmtHours / plural`, `languages.languageOf`, `insights.generateInsights`, `scanner.dayKey / weekKey / hourKey`, `state.readState / writeState / updateState / resetState`, `server/api.windowedAggregate / rangeToDays`, `server/page.buildHtml`, and a live route-walker over the dashboard. Every public `src/*.js` export is exercised at least once.
 
-[Unreleased]: https://github.com/rar-file/claude-rpc/compare/v1.8.0...HEAD
+[Unreleased]: https://github.com/rar-file/claude-rpc/compare/v1.9.0...HEAD
+[1.9.0]: https://github.com/rar-file/claude-rpc/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/rar-file/claude-rpc/compare/v1.7.4...v1.8.0
 [1.7.4]: https://github.com/rar-file/claude-rpc/compare/v1.7.3...v1.7.4
 [1.7.3]: https://github.com/rar-file/claude-rpc/compare/v1.7.2...v1.7.3
