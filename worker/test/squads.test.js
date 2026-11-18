@@ -733,3 +733,44 @@ test('a machine slice\'s lifetime counters never go down; streak may reset', asy
   await seedProfile(env, IDS.alice, 'keeper', { tokens: 20_000 });
   assert.equal(pf(env, IDS.alice).tokens, 20_000, 'growth still lands');
 });
+
+// A shrink used to FREEZE the slice (shown = max) until the client climbed back
+// past its old peak. Growth after a confirmed shrink must count again.
+test('slice: a persistent shrink re-bases, so new usage shows up instead of freezing', async () => {
+  const env = makeEnv();
+  await seedProfile(env, IDS.alice, 'grower', { tokens: 18_000 });
+  for (let i = 0; i < 3; i++) await seedProfile(env, IDS.alice, 'grower', { tokens: 5_000 }); // pruned history
+  assert.equal(pf(env, IDS.alice).tokens, 18_000, 'never shrinks');
+  await seedProfile(env, IDS.alice, 'grower', { tokens: 6_000 });
+  assert.equal(pf(env, IDS.alice).tokens, 19_000, '+1000 of new usage lands even though 6000 < 18000');
+});
+
+test('slice: a one-off short read that recovers is not counted as growth', async () => {
+  const env = makeEnv();
+  await seedProfile(env, IDS.alice, 'blip', { tokens: 18_000 });
+  await seedProfile(env, IDS.alice, 'blip', { tokens: 2_000 });   // transient partial aggregate
+  await seedProfile(env, IDS.alice, 'blip', { tokens: 18_500 });
+  assert.equal(pf(env, IDS.alice).tokens, 18_500, 'only the real +500');
+});
+
+test('slice: a legacy slice (no client baseline) is never lowered and unfreezes on the next report', async () => {
+  const env = makeEnv();
+  await seedProfile(env, IDS.alice, 'legacy', { tokens: 1_000 });
+  const p = pf(env, IDS.alice);
+  p.machines[IDS.alice] = { tokens: 329_000, sessions: 20, activeMs: 1, streak: 0, updatedAt: 1 }; // pre-1.9 shape
+  p.tokens = 329_000;
+  env.TOTALS.store.set('pf:' + IDS.alice, { value: JSON.stringify(p), ttl: null });
+  await seedProfile(env, IDS.alice, 'legacy', { tokens: 257_000 });
+  assert.equal(pf(env, IDS.alice).tokens, 329_000);
+  await seedProfile(env, IDS.alice, 'legacy', { tokens: 260_000 });
+  assert.equal(pf(env, IDS.alice).tokens, 332_000);
+});
+
+test('POST /profile tells the publishing machine how many machines feed its identity', async () => {
+  const env = makeEnv();
+  const body = await seedProfile(env, IDS.alice, 'counted', { tokens: 4_000 });
+  assert.equal(body.machines.length, 1);
+  assert.equal(body.machines[0].self, true);
+  assert.equal(body.machine.tokens, 4_000);
+  assert.ok(!JSON.stringify(body).includes(IDS.alice), 'no instanceIds in the response');
+});

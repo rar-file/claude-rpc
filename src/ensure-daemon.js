@@ -12,14 +12,29 @@
 // daemon survives.
 
 import { createRequire } from 'node:module';
-import { join } from 'node:path';
-import { PID_PATH, STATE_DIR, DAEMON_SCRIPT, CANONICAL_EXE, IS_PACKAGED } from './paths.js';
+import { dirname, join } from 'node:path';
+import {
+  PID_PATH, STATE_DIR, DAEMON_SCRIPT, CANONICAL_EXE, IS_PACKAGED, DAEMON_INFO_PATH, STOPPED_PATH,
+} from './paths.js';
+import { renameSyncRetry, sleepSync } from './atomic-rename.js';
+import { VERSION } from './version.js';
 
 // require()d, not imported — on the hook hot path; see hook.js.
 const require = createRequire(import.meta.url);
 const {
   openSync, closeSync, writeFileSync, readFileSync, unlinkSync, existsSync, statSync, mkdirSync,
 } = require('node:fs');
+
+// The daemon rewrites its heartbeat (DAEMON_INFO_PATH.beatAt) this often (its
+// lifecycle watchdog tick); a
+// beat older than BEAT_STALE_MS means the pid in the pid file is not our daemon
+// any more (it died without cleanup and the OS recycled the pid — common after a
+// Windows/macOS reboot, where the tmp dir and its stale pid file survive) or the
+// daemon is wedged. Generous on purpose: a laptop waking from sleep shows a stale
+// beat for up to one interval, and the cost of a false "dead" is one duplicate
+// spawn that the daemons' own pid-file check reaps within a watchdog tick.
+export const BEAT_EVERY_MS = 30_000;
+export const BEAT_STALE_MS = 5 * 60_000;
 
 // mtime of this marker = last time any launcher attempted a spawn. A short
 // cooldown stops concurrent SessionStart hooks (several sessions opening at
@@ -42,10 +57,91 @@ export function readPid(pidPath = PID_PATH) {
   catch { return 0; }
 }
 
+// { pid, version, startedAt, beatAt } written by daemons from 1.9.0 on, or null
+// (missing, unreadable, or an older daemon that never wrote one).
+export function readDaemonInfo(infoPath = DAEMON_INFO_PATH) {
+  try {
+    const j = JSON.parse(readFileSync(infoPath, 'utf8'));
+    return j && typeof j === 'object' && Number.isFinite(j.pid) ? j : null;
+  } catch { return null; }
+}
+
+export function writeDaemonInfo(info, infoPath = DAEMON_INFO_PATH) {
+  try {
+    mkdirSync(dirname(infoPath), { recursive: true });
+    const tmp = `${infoPath}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify(info));
+    renameSyncRetry(tmp, infoPath);
+  } catch { /* advisory — liveness falls back to the bare pid probe */ }
+}
+
+// Pure: is `pid` our live daemon? A live pid is only trusted when the heartbeat
+// written for THAT pid is fresh; with no heartbeat for it (a pre-1.9 daemon, or
+// the info file belongs to someone else) the bare probe is all we have.
+export function pidIsDaemon(pid, { info = null, alive = isAlive, now = Date.now(), staleMs = BEAT_STALE_MS } = {}) {
+  if (!pid || !alive(pid)) return false;
+  if (info && info.pid === pid && Number.isFinite(info.beatAt) && now - info.beatAt > staleMs) return false;
+  return true;
+}
+
 // The pid of the live daemon, or 0 if none is running.
-export function daemonAlive(pidPath = PID_PATH) {
+export function daemonAlive(pidPath = PID_PATH, infoPath = DAEMON_INFO_PATH) {
   const pid = readPid(pidPath);
-  return pid && isAlive(pid) ? pid : 0;
+  return pidIsDaemon(pid, { info: pid ? readDaemonInfo(infoPath) : null }) ? pid : 0;
+}
+
+// ── stop intent ──────────────────────────────────────────────────────────
+// `stop` used to send one signal and record nothing, so the very next
+// SessionStart hook (any new session, /clear, a `claude -p` run) spawned the
+// daemon right back. The marker makes a stop stick: the hook, the login
+// autostart (the daemon checks it at boot) and running daemons (their watchdog
+// checks it) all honor it until start/restart/setup clears it.
+export function isStopped(path = STOPPED_PATH) {
+  return existsSync(path);
+}
+export function markStopped(path = STOPPED_PATH) {
+  try { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, String(Date.now())); return true; }
+  catch { return false; }
+}
+export function clearStopped(path = STOPPED_PATH) {
+  try { if (existsSync(path)) unlinkSync(path); } catch { /* best-effort */ }
+}
+
+// Stop the daemon and wait until it is really gone. SIGTERM, then SIGKILL if it
+// ignored that for `graceMs` (on Windows process.kill is always a hard kill).
+// A hard kill skips the daemon's own cleanup, so a pid file still naming the
+// dead pid is removed here — otherwise a recycled pid reads as "running".
+// Resolves true when no daemon is left. `kill`/`sleep` are injectable for tests.
+export async function stopDaemonAndWait({
+  pidPath = PID_PATH, infoPath = DAEMON_INFO_PATH, graceMs = 3000, killMs = 1500,
+  kill = (pid, sig) => process.kill(pid, sig), sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
+} = {}) {
+  const pid = daemonAlive(pidPath, infoPath);
+  if (!pid) { cleanupPidFile(0, pidPath); return true; }
+  const gone = async (ms) => {
+    const deadline = Date.now() + ms;
+    for (;;) {
+      if (!isAlive(pid)) return true;
+      if (Date.now() >= deadline) return false;
+      await sleep(50);
+    }
+  };
+  try { kill(pid, 'SIGTERM'); } catch { /* already gone / not ours */ }
+  let ok = await gone(graceMs);
+  if (!ok) {
+    try { kill(pid, 'SIGKILL'); } catch { /* already gone */ }
+    ok = await gone(killMs);
+  }
+  if (ok) cleanupPidFile(pid, pidPath);
+  return ok;
+}
+
+// Remove the pid file if it still names `pid` (or a dead process when pid=0).
+function cleanupPidFile(pid, pidPath = PID_PATH) {
+  try {
+    const cur = readPid(pidPath);
+    if (cur && (cur === pid || (!pid && !isAlive(cur)))) unlinkSync(pidPath);
+  } catch { /* gone already */ }
 }
 
 // The single source of truth for HOW to launch the daemon, shared by every
@@ -79,8 +175,9 @@ export function spawnDaemonDetached() {
 
 // Pure decision for the hook's self-heal: should THIS SessionStart spawn a
 // daemon? Separated from the side effects so it's unit-testable.
-export function shouldSpawnDaemon({ autostart, daemonPid, lastAttemptMs, now, cooldownMs }) {
+export function shouldSpawnDaemon({ autostart, stopped = false, daemonPid, lastAttemptMs, now, cooldownMs }) {
   if (autostart === false) return false;                                  // explicit opt-out
+  if (stopped) return false;                                              // `claude-rpc stop` sticks
   if (daemonPid) return false;                                            // already running
   if (lastAttemptMs && now - lastAttemptMs < cooldownMs) return false;    // within the cooldown
   return true;
@@ -94,10 +191,60 @@ export function shouldSpawnDaemon({ autostart, daemonPid, lastAttemptMs, now, co
 export function ensureDaemonRunning({ autostart = true, now = Date.now(), cooldownMs = SPAWN_COOLDOWN_MS } = {}) {
   let lastAttemptMs = 0;
   try { if (existsSync(SPAWN_MARKER)) lastAttemptMs = statSync(SPAWN_MARKER).mtimeMs; } catch { /* unreadable — treat as never */ }
-  if (!shouldSpawnDaemon({ autostart, daemonPid: daemonAlive(), lastAttemptMs, now, cooldownMs })) return null;
+  const stopped = isStopped();
+  let daemonPid = daemonAlive();
+  // An update swaps the files on disk but the running daemon keeps executing
+  // the old code — forever, since nothing restarted it (`npm i -g`, the
+  // desktop app's updater, a re-downloaded exe). The hook is the newer code, so
+  // it replaces a daemon that is older than itself (or too old to say).
+  if (daemonPid && autostart !== false && !stopped
+      && shouldReplaceDaemon({ info: readDaemonInfo(), pid: daemonPid, version: VERSION, lastAttemptMs, now })) {
+    stampSpawn(now);
+    if (!replaceDaemonSync(daemonPid)) return null;
+    daemonPid = 0;
+    lastAttemptMs = 0;
+  }
+  if (!shouldSpawnDaemon({ autostart, stopped, daemonPid, lastAttemptMs, now, cooldownMs })) return null;
+  stampSpawn(now);
+  return spawnDaemonDetached();
+}
+
+function stampSpawn(now) {
   try { mkdirSync(STATE_DIR, { recursive: true }); } catch { /* exists / unwritable */ }
   try { writeFileSync(SPAWN_MARKER, String(now)); } catch { /* best-effort cooldown */ }
-  return spawnDaemonDetached();
+}
+
+// Pure: should a launcher at `version` replace the running daemon? Yes when the
+// daemon reports an older version, or reports nothing (pre-1.9 daemons never
+// wrote daemon.json). The no-info case is rate-limited to one attempt per
+// REPLACE_COOLDOWN_MS so an unwritable tmp dir can't restart it every session.
+const REPLACE_COOLDOWN_MS = 30 * 60_000;
+export function shouldReplaceDaemon({ info, pid, version, lastAttemptMs = 0, now = Date.now(), cooldownMs = REPLACE_COOLDOWN_MS }) {
+  if (info && info.pid === pid) return typeof info.version === 'string' && isNewerVersion(version, info.version);
+  return !(lastAttemptMs && now - lastAttemptMs < cooldownMs);
+}
+
+export function isNewerVersion(a, b) {
+  const p = (v) => (/^(\d+)\.(\d+)\.(\d+)/.exec(String(v || '')) || []).slice(1).map(Number);
+  const x = p(a), y = p(b);
+  if (x.length !== 3 || y.length !== 3) return false;
+  for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] > y[i];
+  return false;
+}
+
+// Synchronous stop for the hook (it can't await): SIGTERM, wait ≤2s for the
+// process to go, hard-kill if it didn't. True once it's gone.
+function replaceDaemonSync(pid) {
+  const waitGone = (ms) => {
+    const deadline = Date.now() + ms;
+    while (Date.now() < deadline) { if (!isAlive(pid)) return true; sleepSync(50); }
+    return !isAlive(pid);
+  };
+  try { process.kill(pid, 'SIGTERM'); } catch { /* gone */ }
+  let gone = waitGone(2000);
+  if (!gone) { try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } gone = waitGone(1000); }
+  if (gone) cleanupPidFile(pid);
+  return gone;
 }
 
 // Atomic single-instance claim, called once by the daemon at startup. Returns
@@ -107,7 +254,7 @@ export function ensureDaemonRunning({ autostart = true, now = Date.now(), cooldo
 // losers read the winner's live pid and step aside. A stale file (dead owner,
 // empty, or our own recycled pid) is reclaimed and the create retried — so a
 // crashed daemon never blocks its successor.
-export function claimSingleInstance({ pidPath = PID_PATH, pid = process.pid, alive = isAlive } = {}) {
+export function claimSingleInstance({ pidPath = PID_PATH, pid = process.pid, alive = (p) => pidIsDaemon(p, { info: readDaemonInfo() }) } = {}) {
   for (let attempt = 0; attempt < 4; attempt++) {
     let fd;
     try {

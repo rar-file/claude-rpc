@@ -5,7 +5,7 @@ import './safe-stdio.js';
 import { readFileSync, writeFileSync, existsSync, watchFile, unlinkSync } from 'node:fs';
 import process from 'node:process';
 import { basename, join } from 'node:path';
-import { DAEMON_SCRIPT, STATE_PATH, STATE_DIR, LOG_PATH, AGGREGATE_PATH, CONFIG_PATH, USER_CONFIG_DIR, IS_PACKAGED, IS_NPX, EXE_PATH } from './paths.js';
+import { DAEMON_SCRIPT, STATE_PATH, STATE_DIR, LOG_PATH, AGGREGATE_PATH, CONFIG_PATH, USER_CONFIG_DIR, IS_PACKAGED, IS_NPX, EXE_PATH, ROOT } from './paths.js';
 import { VERSION } from './version.js';
 import { c, fail, tailLines, heat, sparkline, fmtDelta, topPercentile, EX_USER_ERROR, EX_BAD_STATE, EX_SYS_ERROR } from './ui.js';
 import * as lb from './leaderboard.js';
@@ -21,13 +21,14 @@ import { writeFileAtomic } from './atomic-rename.js';
 // node:crypto, node:readline, node:child_process) are imported inside that
 // command's handler, like doctor.js/card.js/mcp.js always were.
 let readActiveState, statePathFor, loadConfig, hasUserConfig, spawnDaemonDetached, daemonAlive;
+let stopDaemonAndWait, markStopped, clearStopped, isStopped, readDaemonInfo, shouldReplaceDaemon;
 let buildVars, fillTemplate, humanProject, humanTool, applyIdle, framePasses, fmtNum, fmtHours;
 let scan, readAggregate, findLiveSessions, dayKey, weekKey;
 let fmtCost;
 let readUsageCache, fetchUsage, writeUsageCache, fmtResetTime, fmtResetDay;
 
 async function loadDaemonCtl() {
-  ({ spawnDaemonDetached, daemonAlive } = await import('./ensure-daemon.js'));
+  ({ spawnDaemonDetached, daemonAlive, stopDaemonAndWait, markStopped, clearStopped, isStopped, readDaemonInfo, shouldReplaceDaemon } = await import('./ensure-daemon.js'));
 }
 
 // Idempotent — repeat imports resolve from the module cache.
@@ -91,7 +92,19 @@ function splitEqArgs(argv) {
   return out;
 }
 
+// " · v1.8.0 (update installed — restarting)" when the running daemon is not
+// this copy's version, so a stale daemon is visible instead of silent.
+function daemonVersionNote(pid) {
+  const info = readDaemonInfo();
+  if (!info || info.pid !== pid) return `${c.dim} · version unknown (pre-1.9 daemon — claude-rpc restart)${c.reset}`;
+  if (info.version === VERSION) return '';
+  return `${c.yellow} · running v${info.version}, installed v${VERSION} — claude-rpc restart${c.reset}`;
+}
+
+// An explicit start always clears a previous `stop` (the marker every launcher
+// honors), so `start` after `stop` behaves the way it reads.
 function startDaemon({ quiet = false } = {}) {
+  clearStopped();
   const pid = daemonAlive();
   if (pid) {
     if (!quiet) console.log(`  ${c.yellow}!${c.reset}  ${'daemon running'.padEnd(16)}${c.dim}already up (pid ${pid}) · bounce it with ${c.reset}${c.cyan}claude-rpc restart${c.reset}`);
@@ -130,41 +143,40 @@ async function confirmDaemonUp({ timeoutMs = 3000, intervalMs = 100 } = {}) {
   }
 }
 
-function stopDaemon({ quiet = false } = {}) {
+// `stop` is durable: the marker keeps the SessionStart hook, the login
+// autostart and any straggler daemon from bringing it back until `start`.
+// Waits for the process to actually exit (hard-kill after 3s) instead of
+// reporting success for a signal that may not have landed.
+async function stopDaemon({ quiet = false } = {}) {
+  markStopped();
   const pid = daemonAlive();
-  if (!pid) { if (!quiet) console.log(`  ${c.cyan}·${c.reset}  daemon not running`); return false; }
-  try {
-    process.kill(pid, 'SIGTERM');
-    if (!quiet) console.log(`  ${c.green}✓${c.reset}  ${'daemon stopping'.padEnd(16)}${c.dim}sent SIGTERM to pid ${pid}${c.reset}`);
+  if (!pid) {
+    if (!quiet) console.log(`  ${c.cyan}·${c.reset}  ${'daemon stopped'.padEnd(16)}${c.dim}wasn't running · stays off until ${c.reset}${c.cyan}claude-rpc start${c.reset}`);
     return true;
-  } catch (e) {
-    if (!quiet) console.log(`  ${c.red}✗${c.reset}  ${'stop failed'.padEnd(16)}${c.dim}${e.message}${c.reset}`);
-    return false;
   }
+  const ok = await stopDaemonAndWait();
+  if (quiet) return ok;
+  if (ok) console.log(`  ${c.green}✓${c.reset}  ${'daemon stopped'.padEnd(16)}${c.dim}pid ${pid} · stays off until ${c.reset}${c.cyan}claude-rpc start${c.reset}`);
+  else console.log(`  ${c.red}✗${c.reset}  ${'stop failed'.padEnd(16)}${c.dim}pid ${pid} is still running — it will exit at its next check (≤30s)${c.reset}`);
+  return ok;
 }
 
-// Resolves once the replacement daemon has been spawned (true) or couldn't be
-// (false), so callers can confirm it and a following `stop` finds its pid.
-function restartDaemon() {
-  return new Promise((resolve) => {
-    if (!stopDaemon({ quiet: true })) { resolve(startDaemon()); return; }
-    // Poll for the old daemon to release the PID file rather than guessing with a
-    // fixed sleep — under load 600ms wasn't always enough, and startDaemon would
-    // then see it "still up" and no-op, leaving NO daemon running once the old
-    // one exited. Give up after ~3s, force-kill the wedged pid, and start anyway.
-    const deadline = Date.now() + 3000;
-    const tick = () => {
-      if (!daemonAlive()) { resolve(startDaemon()); return; }
-      if (Date.now() >= deadline) {
-        const pid = daemonAlive();
-        if (pid) { try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ } }
-        resolve(startDaemon());
-        return;
-      }
-      setTimeout(tick, 50);
-    };
-    setTimeout(tick, 50);
-  });
+// Stop (and wait for) the running daemon, then start a fresh one. Resolves
+// once the replacement has been spawned (true) or couldn't be (false).
+async function restartDaemon() {
+  clearStopped();
+  await stopDaemonAndWait();
+  return startDaemon();
+}
+
+// After an update the running daemon still executes the OLD code. setup (and
+// the desktop app's post-update setup) replaces a daemon older than this copy,
+// or one too old to report its version.
+async function replaceOutdatedDaemon() {
+  const pid = daemonAlive();
+  if (!pid || !shouldReplaceDaemon({ info: readDaemonInfo(), pid, version: VERSION })) return false;
+  await stopDaemonAndWait();
+  return true;
 }
 
 // ── Box drawing — auto-widens to fit longest line ────────────────────────────
@@ -422,7 +434,8 @@ async function showStatus() {
   console.log('');
 
   box('daemon', [
-    pair('status',  pid ? `${c.green}● running${c.reset}  pid ${pid}` : `${c.red}○ not running${c.reset}`, ''),
+    pair('status',  pid ? `${c.green}● running${c.reset}  pid ${pid}${daemonVersionNote(pid)}`
+      : isStopped() ? `${c.yellow}○ stopped${c.reset}  ${c.dim}(claude-rpc start to resume)${c.reset}` : `${c.red}○ not running${c.reset}`, ''),
     pair('client',  config.clientId || '—'),
     pair('config',  shortPath(CONFIG_PATH), c.gray),
     // The file behind the session shown below (hooks write one per session),
@@ -1779,8 +1792,9 @@ function profileNextStep() {
   }
 }
 
-function profileStatus() {
+async function profileStatus() {
   const p = (loadConfig().profile) || {};
+  const { readProfileResult } = await import('./community.js');
   const handleOk = lb.isValidHandle(p.handle);
   const boardUrl = handleOk ? `https://claude-rpc.com/u/${encodeURIComponent(p.handle)}` : '';
 
@@ -1791,8 +1805,22 @@ function profileStatus() {
   const githubLine = p.githubUser
     ? `${p.githubUser}${p.verified ? `  ${c.green}✓ verified${c.reset}` : `  ${c.dim}(unverified)${c.reset}`}`
     : `${c.dim}—${c.reset}`;
+  const last = readProfileResult();
+  const ago = (t) => {
+    const m = Math.round((Date.now() - t) / 60_000);
+    return m < 60 ? `${m}m ago` : m < 2880 ? `${Math.round(m / 60)}h ago` : `${Math.round(m / 1440)}d ago`;
+  };
+  const lastLines = [];
+  if (p.enabled && last) {
+    if (last.ok === false) {
+      lastLines.push(pair('last', `${c.red}✗ refused ${ago(last.failedAt)}${c.reset} ${c.dim}${last.reason}${last.error ? ` · ${last.error}` : ''}${c.reset}`, ''));
+    } else if (last.at) {
+      lastLines.push(pair('last', `${c.green}✓${c.reset} ${c.dim}published ${ago(last.at)}${c.reset}`, ''));
+    }
+  }
   box('profile', [
     pair('state',  p.enabled ? `${c.green}● publishing${c.reset}` : `${c.dim}○ off${c.reset}`, ''),
+    ...lastLines,
     pair('handle', handleOk ? `${c.cyan}${p.handle}${c.reset}` : `${c.dim}(unset)${c.reset}`, ''),
     pair('name',   p.displayName || `${c.dim}—${c.reset}`, ''),
     pair('github', githubLine, ''),
@@ -1803,6 +1831,15 @@ function profileStatus() {
   // Setup checklist — same shape every time, so the user always sees where
   // they are and the exact next command. This is the screen the daemon's
   // breadcrumbs point back to.
+  if (p.enabled && last?.ok === false) {
+    const hint = publishFailHint(last);
+    for (const h of [].concat(hint)) console.log(`  ${c.yellow}!${c.reset}  ${c.dim}${h}${c.reset}`);
+    console.log('');
+  }
+  if (p.enabled && last?.site) {
+    for (const line of siteBreakdown(last)) console.log(`  ${line}`);
+    console.log('');
+  }
   const steps = profileSteps(p);
   if (steps.every((s) => s.done)) {
     console.log(`  ${c.green}✓${c.reset}  all set — you're live at ${c.cyan}${boardUrl}${c.reset}`);
@@ -1912,16 +1949,51 @@ async function profilePublish() {
       hint: 'claude-rpc profile set --handle <name> && claude-rpc profile on', code: EX_BAD_STATE,
     });
   }
-  const { flushProfile } = await import('./community.js');
+  const { flushProfile, recordProfileResult } = await import('./community.js');
   console.log(`  ${c.dim}publishing @${cfg.profile.handle} to the board…${c.reset}`);
   const r = await flushProfile(cfg);
+  recordProfileResult(r);
   if (r.ok) {
     console.log(`  ${c.green}✓${c.reset}  published — see it at ${c.cyan}https://claude-rpc.com/u/${encodeURIComponent(cfg.profile.handle)}${c.reset}`);
+    for (const line of siteBreakdown({ ok: true, at: Date.now(), totals: r.totals, site: r.site })) console.log(`     ${line}`);
   } else if (r.reason === 'rate-limited') {
     console.log(`  ${c.yellow}!${c.reset}  rate-limited — already published in the last minute; the board has you`);
   } else {
-    return fail(`publish failed: ${r.reason}${r.error ? ' (' + r.error + ')' : ''}`, { code: EX_SYS_ERROR });
+    return fail(`publish failed: ${r.reason}${r.error ? ' (' + r.error + ')' : ''}`, { hint: publishFailHint(r), code: EX_SYS_ERROR });
   }
+}
+
+// Why a publish was refused, in terms of what to do. A 409 is almost always a
+// second machine that was never linked: its local handle is the one its main
+// machine already owns, so every flush is refused and its usage never reaches
+// the board.
+function publishFailHint(r) {
+  if (r.reason === 'http-409') {
+    return ['this machine isn\'t linked to the identity that owns that handle',
+      'run `claude-rpc link` on a linked machine, then `claude-rpc link <code>` here'];
+  }
+  if (r.reason === 'network') return 'no connection to the board — the daemon retries every 30 min';
+  return 'run `claude-rpc doctor`';
+}
+
+// Lines describing where the board's number comes from: this machine's share,
+// the identity total, and any linked machine that has stopped reporting.
+function siteBreakdown(rec) {
+  const out = [];
+  if (!rec?.site) return out;
+  const ms = rec.site.machines;
+  const n = Array.isArray(ms) ? ms.length : null;
+  const mine = rec.totals?.tokens;
+  out.push(`${c.dim}this machine ${fmtNum(mine || 0)} tokens · board total ${fmtNum(rec.site.tokens || 0)}${n && n > 1 ? ` across ${n} linked machines` : ''}${c.reset}`);
+  if (n && n > 1) {
+    const quietDays = 3;
+    const stale = ms.filter((m) => !m.self && m.updatedAt && Date.now() - m.updatedAt > quietDays * 86_400_000);
+    for (const m of stale) {
+      const days = Math.round((Date.now() - m.updatedAt) / 86_400_000);
+      out.push(`${c.yellow}!${c.reset} ${c.dim}a linked machine (${fmtNum(m.tokens)} tokens) hasn't published in ${days} days — run ${c.reset}${c.cyan}claude-rpc profile publish${c.reset}${c.dim} there; if its daemon is down, ${c.reset}${c.cyan}claude-rpc start${c.reset}`);
+    }
+  }
+  return out;
 }
 
 // The gist-verification dance shared by `profile verify` and setup's optional
@@ -2204,8 +2276,27 @@ async function doUpdate(argv) {
   }
   if (sub === 'status') {
     const st = readUpdateState();
+    const ago = (t) => {
+      const m = Math.round((Date.now() - t) / 60_000);
+      return m < 60 ? `${m}m ago` : m < 2880 ? `${Math.round(m / 60)}h ago` : `${Math.round(m / 1440)}d ago`;
+    };
     console.log(`  ${c.cyan}·${c.reset}  v${VERSION} · installed via ${kind} · auto-update ${auto && kind === 'npm-global' ? 'on' : kind === 'npm-global' ? 'off' : 'n/a'}`);
-    if (st.updatedTo) console.log(`     ${c.dim}last auto-update: ${st.updatedFrom} → ${st.updatedTo}${c.reset}`);
+    const { daemonAlive: alive, readDaemonInfo: info } = await import('./ensure-daemon.js');
+    const pid = alive();
+    const di = info();
+    if (pid) {
+      const dv = di && di.pid === pid ? di.version : null;
+      if (!dv) console.log(`     ${c.yellow}!${c.reset} ${c.dim}the running daemon predates version reporting — ${c.reset}${c.cyan}claude-rpc restart${c.reset}${c.dim} to run v${VERSION}${c.reset}`);
+      else if (dv !== VERSION) console.log(`     ${c.yellow}!${c.reset} ${c.dim}the running daemon is v${dv} — ${c.reset}${c.cyan}claude-rpc restart${c.reset}${c.dim} to run v${VERSION}${c.reset}`);
+    }
+    if (st.checkedAt) console.log(`     ${c.dim}last check: ${ago(st.checkedAt)}${st.latest ? ` · latest v${st.latest}` : ' · registry unreachable'}${c.reset}`);
+    else console.log(`     ${c.dim}no check yet — the daemon checks 5 min after it starts, then every 6h${c.reset}`);
+    if (st.latest && isNewer(st.latest, VERSION)) {
+      const why = st.lastPlan?.latest === st.latest ? st.lastPlan.reason : null;
+      console.log(`     ${c.yellow}!${c.reset} v${st.latest} is out${why ? ` ${c.dim}(${why})${c.reset}` : ''} — ${c.cyan}${kind === 'npm-global' ? 'claude-rpc update now' : updateCommand(kind)}${c.reset}`);
+    }
+    if (st.failed) console.log(`     ${c.red}✗${c.reset} ${c.dim}install of v${st.failed.version} failed ${ago(st.failed.at)}: ${String(st.failed.output || '').split('\n').pop().slice(0, 160)}${c.reset}`);
+    if (st.updatedTo) console.log(`     ${c.dim}last auto-update: ${st.updatedFrom} → ${st.updatedTo}${st.updatedAt ? ` (${ago(st.updatedAt)})` : ''}${c.reset}`);
     return;
   }
   if (sub !== 'check' && sub !== 'now') {
@@ -2226,9 +2317,17 @@ async function doUpdate(argv) {
   console.log(`     ${c.dim}installing…${c.reset}`);
   const res = await installVersion(latest);
   if (!res.ok) fail('install failed', { hint: [res.output.slice(-300) || 'npm exited non-zero', `try: ${updateCommand(kind)}`], code: EX_BAD_STATE });
+  const { installedVersion } = await import('./updater.js');
+  if (installedVersion() !== latest) {
+    fail(`npm finished, but this copy is still v${VERSION}`, {
+      hint: [`npm installs its globals somewhere other than ${ROOT} (npm prefix / volta / pnpm)`, 'update with the tool that installed claude-rpc'],
+      code: EX_BAD_STATE,
+    });
+  }
   writeUpdateState({ updatedFrom: VERSION, updatedTo: latest, updatedAt: Date.now(), failed: null });
   console.log(`  ${c.green}✓${c.reset}  updated to v${latest}`);
-  await restartDaemon();
+  // Restart a running daemon onto the new code; a stopped one stays stopped.
+  if (daemonAlive()) await restartDaemon();
 }
 
 function tailLog() {
@@ -2286,6 +2385,7 @@ function overview() {
   const vars = buildVars(state, cfg, aggregate);
   const dot = pid
     ? `${c.green}●${c.reset} running ${c.dim}pid ${pid}${c.reset}`
+    : isStopped() ? `${c.yellow}○${c.reset} ${c.dim}daemon stopped — ${c.reset}${c.cyan}claude-rpc start${c.reset}${c.dim} to resume${c.reset}`
     : `${c.yellow}○${c.reset} ${c.dim}daemon not running${c.reset}`;
   if (pid) {
     console.log(`  ${dot}  ${c.gray}·${c.reset}  ${c.bold}${vars.modelPretty}${c.reset} in ${c.bold}${vars.project}${c.reset}  ${c.gray}·${c.reset}  ${statusColor(vars.status)}${vars.statusVerbose}${c.reset}`);
@@ -2517,7 +2617,13 @@ process.on('unhandledRejection', (e) => {
       // immediately, instead of making the user run a separate `start`.
       // Best-effort — a start hiccup must never make `setup` look failed.
       try {
-        if (IS_NPX) {
+        // `--auto` = the desktop app re-running setup after its own update:
+        // it must not undo a `claude-rpc stop`. A person running setup means it.
+        if (!args.includes('--auto')) clearStopped();
+        if (!isStopped()) await replaceOutdatedDaemon();
+        if (isStopped()) {
+          console.log(`  ${c.cyan}·${c.reset}  ${'daemon stopped'.padEnd(16)}${c.dim}left off (you ran stop) · ${c.reset}${c.cyan}claude-rpc start${c.reset}${c.dim} to resume${c.reset}`);
+        } else if (IS_NPX) {
           // Our own tree is npm's throwaway _npx cache; launch from the global
           // install setup just promoted to. The global copy must be resolved
           // EXPLICITLY (npm root -g): inside an npx run, PATH has the _npx
@@ -2601,7 +2707,7 @@ process.on('unhandledRejection', (e) => {
       if (!(await import('./install.js')).migrateConfig()) console.log(`  ${c.green}✓${c.reset}  config already current — nothing to migrate`);
       break;
     case 'start':     if (startDaemon()) await confirmDaemonUp(); break;
-    case 'stop':      stopDaemon(); break;
+    case 'stop':      await stopDaemon(); break;
     case 'restart':   if (await restartDaemon()) await confirmDaemonUp(); break;
     case 'status': {
       const dumpFlag = args.some((a) => a === '--dump' || a === '-d');
@@ -2747,14 +2853,11 @@ process.on('unhandledRejection', (e) => {
           } catch (e) {
             console.warn(`  ${c.yellow}!${c.reset}  ${'refresh skipped'.padEnd(16)}${c.dim}${e.message}${c.reset}`);
           }
-          const wasRunning = stopDaemon({ quiet: true });
+          // Wait for the old daemon to really exit (a fixed 700ms sleep let
+          // startDaemon see it "still up" and no-op, leaving none running).
+          await stopDaemonAndWait();
           try { if (existsSync(STATE_PATH)) unlinkSync(STATE_PATH); } catch { /* state.json locked or already gone — next hook will recreate it */ }
-          if (wasRunning) {
-            // Brief wait for the OS to release the pid file before we spawn.
-            setTimeout(() => startDaemon(), 700);
-          } else {
-            startDaemon();
-          }
+          startDaemon();
         }
       } else if (!cmd) {
         // True no-args invocation in dev/npm mode → one-screen overview.

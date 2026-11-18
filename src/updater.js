@@ -10,7 +10,7 @@
 //
 // Pure decision functions up top (unit-tested); side effects below.
 
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, accessSync, constants as fsConstants } from 'node:fs';
 import { join, dirname, delimiter } from 'node:path';
 import { STATE_DIR, ROOT, IS_PACKAGED, IS_NPM_INSTALL, IS_NPX } from './paths.js';
 
@@ -61,10 +61,13 @@ export function updateCommand(kind) {
 }
 
 // → { action: 'none' | 'notify' | 'install', reason }
-export function planUpdate({ current, latest, auto = true, kind, failed = null, seen = null, cooldownMs = COOLDOWN_MS, now = Date.now() }) {
+export function planUpdate({ current, latest, auto = true, kind, writable = true, failed = null, seen = null, cooldownMs = COOLDOWN_MS, now = Date.now() }) {
   if (!isNewer(latest, current)) return { action: 'none', reason: 'up to date' };
   if (kind !== 'npm-global') return { action: 'notify', reason: `installed via ${kind}` };
   if (!auto) return { action: 'notify', reason: 'auto-update is off' };
+  // A root-owned global (system node, `sudo npm i -g`) fails with EACCES every
+  // single attempt — say so once instead of failing silently every day.
+  if (!writable) return { action: 'notify', reason: 'the global npm folder needs admin rights — update manually' };
   if (!sameMajor(latest, current)) return { action: 'notify', reason: 'new major version — update manually' };
   if (failed && failed.version === latest && now - failed.at < RETRY_FAILED_MS) {
     return { action: 'notify', reason: 'last install attempt failed — retrying later' };
@@ -118,9 +121,24 @@ export async function installVersion(version) {
   });
 }
 
-// One check cycle. Returns { plan, latest, installed }. `install` is injectable
-// for tests; callers restart the daemon when `installed` is true.
-export async function checkForUpdate({ current, auto, kind = installKind(), fetchLatestFn = fetchLatest, install = installVersion, now = Date.now(), cooldownMs = COOLDOWN_MS, statePath = UPDATE_STATE_PATH } = {}) {
+// Can this process replace its own package? (npm writes the new copy into the
+// folder that holds ours: …/lib/node_modules on POSIX, %AppData%\npm\node_modules.)
+export function installDirWritable(root = ROOT) {
+  try { accessSync(dirname(root), fsConstants.W_OK); return true; } catch { return false; }
+}
+
+// The version now on disk where THIS copy lives. npm exiting 0 doesn't mean it
+// replaced us: with a different npm prefix (volta, pnpm/yarn/bun globals, a
+// changed `npm config prefix`) it installs somewhere else, the restart comes
+// back up on the old code, and the daemon reinstalled again every 5 minutes.
+export function installedVersion(root = ROOT) {
+  try { return JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version || null; } catch { return null; }
+}
+
+// One check cycle. Returns { plan, latest, installed }. `install`, `verify`
+// and `writable` are injectable for tests; callers restart the daemon when
+// `installed` is true.
+export async function checkForUpdate({ current, auto, kind = installKind(), fetchLatestFn = fetchLatest, install = installVersion, verify = (v) => installedVersion() === v, writable = installDirWritable, now = Date.now(), cooldownMs = COOLDOWN_MS, statePath = UPDATE_STATE_PATH } = {}) {
   const latest = await fetchLatestFn();
   writeUpdateState({ checkedAt: now, ...(latest ? { latest } : {}) }, statePath);
   if (!latest) return { plan: { action: 'none', reason: 'registry unreachable' }, latest: null, installed: false };
@@ -129,9 +147,14 @@ export async function checkForUpdate({ current, auto, kind = installKind(), fetc
     writeUpdateState({ seen: { version: latest, at: now } }, statePath);
     state = readUpdateState(statePath);
   }
-  const plan = planUpdate({ current, latest, auto, kind, failed: state.failed || null, seen: state.seen || null, cooldownMs, now });
+  const plan = planUpdate({ current, latest, auto, kind, writable: kind === 'npm-global' ? writable() : true, failed: state.failed || null, seen: state.seen || null, cooldownMs, now });
+  writeUpdateState({ lastPlan: { action: plan.action, reason: plan.reason, latest, at: now } }, statePath);
   if (plan.action !== 'install') return { plan, latest, installed: false };
   const res = await install(latest);
+  if (res.ok && !verify(latest)) {
+    res.ok = false;
+    res.output = `npm reported success but this copy (${ROOT}) is still v${current} — npm installs its globals somewhere else here (npm prefix / volta / pnpm). Update with the tool that installed claude-rpc.`;
+  }
   if (res.ok) {
     writeUpdateState({ updatedFrom: current, updatedTo: latest, updatedAt: now, failed: null }, statePath);
     return { plan, latest, installed: true };

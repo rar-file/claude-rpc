@@ -790,20 +790,50 @@ function publicProfile(p) {
 // with the same ceilings a single profile uses, and the recomputed sums are
 // clamped again so an N-machine identity can't exceed the per-field ceiling.
 
-// A single machine's clamped contribution. Mirrors handleProfile's setClamp
-// ceilings; missing fields fall back to the slice's previous value.
-// tokens/sessions/activeMs are lifetime counters and never go DOWN: clients
-// before 1.7.2 dropped transcripts Claude Code pruned (cleanupPeriodDays,
-// 30 by default) from their totals, so every flush shrank the slice as old
-// history aged out. Streak is a current run and may legitimately reset.
-function machineSlice(body, prevSlice = {}, now = Date.now()) {
-  const setClamp = (v, max, prevV) =>
-    v == null ? (prevV || 0) : Math.min(max, Math.max(0, Math.floor(Number(v) || 0)));
-  const keepMax = (v, max, prevV) => Math.max(setClamp(v, max, prevV), Math.min(max, prevV || 0));
+// A single machine's clamped contribution. Missing fields keep the slice's
+// previous value.
+//
+// tokens/sessions/activeMs are lifetime counters: they never go DOWN, and the
+// GROWTH the client reports is what moves them. The client's own total can
+// legitimately drop — clients before 1.7.2 lose transcripts Claude Code prunes
+// (cleanupPeriodDays, 30 by default), and any client loses history when its
+// scan cache is wiped or reinstalled. The old rule (shown = max(shown, report))
+// then FROZE the machine on the site until its local total climbed back past
+// the old peak — weeks of new usage that never showed up. Now each slice keeps
+// `raw`, the client's last report, and adds report − raw. A lower report is
+// held as a provisional dip (a one-off short read must not turn into phantom
+// growth when it recovers); once it persists for DIP_CONFIRM flushes (~1.5h)
+// the baseline re-bases onto it so growth from there counts again.
+// Streak is a current run and may legitimately reset.
+const SLICE_COUNTERS = [['tokens', MAX_PF_TOKENS], ['sessions', MAX_PF_SESSIONS], ['activeMs', MAX_PF_ACTIVE_MS]];
+const DIP_CONFIRM = 3;
+const clampCounter = (v, max) => Math.min(max, Math.max(0, Math.floor(Number(v) || 0)));
+
+export function machineSlice(body, prevSlice = {}, now = Date.now()) {
+  const setClamp = (v, max, prevV) => (v == null ? (prevV || 0) : clampCounter(v, max));
+  const prevRaw = prevSlice.raw && typeof prevSlice.raw === 'object' ? prevSlice.raw : null;
+  const shown = {}, raw = {};
+  let dipped = false;
+  for (const [k, max] of SLICE_COUNTERS) {
+    const prevShown = Math.min(max, prevSlice[k] || 0);
+    const base = prevRaw && Number.isFinite(prevRaw[k]) ? prevRaw[k] : null;
+    if (body[k] == null) { shown[k] = prevShown; raw[k] = base ?? prevShown; continue; }
+    const v = clampCounter(body[k], max);
+    if (base == null) { shown[k] = Math.max(prevShown, v); raw[k] = v; continue; } // first report under this model
+    if (v >= base) { shown[k] = Math.min(max, prevShown + (v - base)); raw[k] = v; continue; }
+    shown[k] = prevShown; raw[k] = base; dipped = true;
+  }
+  let dips = dipped ? (prevSlice.dips || 0) + 1 : 0;
+  if (dips >= DIP_CONFIRM) {
+    for (const [k, max] of SLICE_COUNTERS) if (body[k] != null) raw[k] = clampCounter(body[k], max);
+    dips = 0;
+  }
   return {
-    tokens:    keepMax(body.tokens,   MAX_PF_TOKENS,    prevSlice.tokens),
-    sessions:  keepMax(body.sessions, MAX_PF_SESSIONS,  prevSlice.sessions),
-    activeMs:  keepMax(body.activeMs, MAX_PF_ACTIVE_MS, prevSlice.activeMs),
+    tokens:    shown.tokens,
+    sessions:  shown.sessions,
+    activeMs:  shown.activeMs,
+    raw,
+    ...(dips ? { dips } : {}),
     streak:    setClamp(body.streak,   MAX_STREAK,       prevSlice.streak),
     // Per-day series for the heatmap. Absent (older client, or heatmap opted
     // out) keeps nothing new but never erases what an earlier flush stored —
@@ -867,6 +897,21 @@ function ensureMachines(p, selfId) {
     };
   }
   return p.machines;
+}
+
+// Fold an already-STORED slice (another profile's, during a merge) into a slot:
+// its displayed values are not a client report, so they combine by max, and
+// the slice's own client baseline (`raw`) comes along so the machine's next
+// flush continues counting from where it was.
+function foldSlice(slice, prev = {}, now = Date.now()) {
+  const out = machineSlice(slice, { ...prev, raw: undefined }, now);
+  const r = (slice && slice.raw) || prev.raw;
+  if (r && typeof r === 'object') {
+    out.raw = {};
+    for (const [k, max] of SLICE_COUNTERS) out.raw[k] = clampCounter(r[k] ?? out[k], max);
+  }
+  delete out.dips;
+  return out;
 }
 
 // Recompute the displayed top-level totals from the slice map: sum the additive
@@ -1011,7 +1056,19 @@ export async function handleProfile(request, env) {
     await env.TOTALS.put(BOARD_INDEX_KEY, JSON.stringify(index));
   } catch { /* best-effort */ }
 
-  return new Response(JSON.stringify({ ok: true, profile: publicProfile(next) }), {
+  // `machines`/`machine` go only to the publishing machine (its instanceId is
+  // the credential), never into a public read: how many installs feed this
+  // identity, and when each last reported, so `claude-rpc profile` can show a
+  // linked machine that stopped publishing instead of a silently low total.
+  const slices = Object.entries(next.machines || {});
+  return new Response(JSON.stringify({
+    ok: true,
+    profile: publicProfile(next),
+    machine: { tokens: next.machines[machineId].tokens },
+    machines: slices.map(([mid, m]) => ({
+      self: mid === machineId, tokens: m?.tokens || 0, updatedAt: m?.updatedAt || null,
+    })),
+  }), {
     headers: { ...CORS, 'Content-Type': 'application/json' },
   });
 }
@@ -1895,7 +1952,7 @@ async function mergeIntoCanonical(env, machineId, canonicalId, canonicalProfile)
       : { [machineId]: nProf };
     for (const [mid, slice] of Object.entries(slices)) {
       if (mid === canonicalId) continue;
-      C.machines[mid] = machineSlice(slice, C.machines[mid]);
+      C.machines[mid] = foldSlice(slice, C.machines[mid]);
       if (mid !== machineId) absorbed.push(mid);
     }
   }

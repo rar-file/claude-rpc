@@ -17,8 +17,9 @@ import {
 } from './paths.js';
 import { findLiveSessions } from './scanner.js';
 import { listSessionStates, readActiveState } from './state.js';
-import { isAlive } from './ensure-daemon.js';
+import { isAlive, isStopped, readDaemonInfo, BEAT_STALE_MS } from './ensure-daemon.js';
 import { detectGithubUrl } from './git.js';
+import { VERSION } from './version.js';
 import { resolveVisibility, listPrivateCwds, detectGithubPrivate } from './privacy.js';
 import { readClaudeCredentials, readUsageCache } from './usage.js';
 import { EVENTS as HOOK_EVENTS, isOurHook } from './install.js';
@@ -295,6 +296,11 @@ function checkCliOnPath() {
 }
 
 function checkDaemon() {
+  if (isStopped()) {
+    // A deliberate `claude-rpc stop` is not a fault; --fix leaves it alone.
+    check('daemon running', 'warn', 'stopped (you ran `claude-rpc stop`)', 'run `claude-rpc start` to resume');
+    return false;
+  }
   if (!existsSync(PID_PATH)) {
     check('daemon running', 'warn', 'no pid file',
       'run `claude-rpc start` to launch the daemon', 'daemon');
@@ -305,6 +311,22 @@ function checkDaemon() {
     check('daemon running', 'fail', `stale pid file (${pid})`,
       'run `claude-rpc start` — old daemon died without cleaning up', 'daemon');
     return false;
+  }
+  const info = readDaemonInfo();
+  if (info && info.pid === pid && Date.now() - (info.beatAt || 0) > BEAT_STALE_MS) {
+    check('daemon running', 'fail', `pid ${pid} is alive but the daemon's heartbeat stopped — a recycled pid or a wedged daemon`,
+      'run `claude-rpc restart`', 'daemon');
+    return false;
+  }
+  if (!info || info.pid !== pid) {
+    check('daemon running', 'warn', `pid ${pid} — started by an older claude-rpc, still running its code`,
+      'run `claude-rpc restart` to run this version', 'daemon');
+    return true;
+  }
+  if (info.version !== VERSION) {
+    check('daemon running', 'warn', `pid ${pid} is running v${info.version}, installed is v${VERSION}`,
+      'run `claude-rpc restart` to run this version', 'daemon');
+    return true;
   }
   check('daemon running', 'pass', `pid ${pid}`);
   return true;

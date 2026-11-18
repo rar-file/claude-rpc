@@ -930,8 +930,13 @@ export async function install({ exePath } = {}) {
   // Cross-platform login autostart: Windows Run-key, macOS LaunchAgent, Linux
   // systemd --user. Best-effort — a failure leaves the SessionStart self-heal
   // as the (already reliable) fallback, so setup never fails on this.
-  try { await addStartupEntry(target); }
-  catch (e) { step(SYM_WARN, 'startup entry', `failed: ${e.message} — session self-heal still covers it`, console.warn); }
+  // autostart:false opts out of login autostart everywhere — setup, doctor
+  // --fix and the desktop app's post-update setup used to re-enable it.
+  if (readJson(CONFIG_PATH, {}).autostart === false) noop('login autostart off (autostart:false)');
+  else {
+    try { await addStartupEntry(target); }
+    catch (e) { step(SYM_WARN, 'startup entry', `failed: ${e.message} — session self-heal still covers it`, console.warn); }
+  }
   const cli = IS_PACKAGED ? await putCliOnPath(target) : { cmd: 'claude-rpc', newTerminal: false };
   // Nothing changed: the checklist above stayed silent, so say so in one line.
   if (!runDirty && probe.ok) {
@@ -983,6 +988,18 @@ export async function uninstall() {
   console.log('');
   console.log(`  ${c.bold}${c.magenta}◆ claude-rpc uninstall${c.reset}`);
   console.log('');
+  // Stop the daemon FIRST and leave the stop marker: a surviving daemon kept
+  // running after uninstall, and its update self-heal re-added the hooks and
+  // the login autostart (and its auto-updater could reinstall the package).
+  // The marker also stops any straggler at its next watchdog tick; `setup`
+  // clears it on a reinstall.
+  {
+    const { markStopped, stopDaemonAndWait } = await import('./ensure-daemon.js');
+    markStopped();
+    if (await stopDaemonAndWait()) step(SYM_OK, 'daemon', 'stopped');
+    else step(SYM_WARN, 'daemon', 'still running — it exits on its own within 30s', console.warn);
+    try { if (existsSync(VERSION_STAMP)) unlinkSync(VERSION_STAMP); } catch { /* best-effort */ }
+  }
   uninstallHooks();
   await removeStartupEntry();
   const { removeCliFromPath } = await import('./cli-path.js');

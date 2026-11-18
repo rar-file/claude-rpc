@@ -45,6 +45,10 @@ import { adoptLegacyFile, writeFileAtomic } from './atomic-rename.js';
 // wipes; ensureCursor / markCursorFresh move it here once.
 export const CURSOR_PATH = join(DATA_DIR, 'community-cursor.json');
 export const LEGACY_CURSOR_PATH = join(STATE_DIR, 'community-cursor.json');
+// Last profile publish result — what `claude-rpc profile` shows, so a machine
+// whose publishes are rejected (unlinked → "handle taken"), or a linked machine
+// that went quiet, is visible instead of a silently low site total.
+export const PROFILE_STATUS_PATH = join(DATA_DIR, 'profile-status.json');
 
 export function readCursor(path = CURSOR_PATH) {
   if (!existsSync(path)) return { sessions: 0, tokens: 0, ts: 0 };
@@ -368,11 +372,41 @@ export async function flushProfile(cfg, {
   const payload = buildProfilePayload(aggregate, profile, { instanceId });
   const { res, fail } = await postJson(fetchImpl, community.endpoint, '/profile', payload);
   if (fail) return fail;
+  let body = null;
+  try { body = await res.json(); } catch { /* non-JSON body */ }
   if (!res.ok) {
     if (res.status === 429) return { ok: false, reason: 'rate-limited' };
-    return { ok: false, reason: `http-${res.status}` };
+    return { ok: false, reason: `http-${res.status}`, ...(body?.error ? { error: String(body.error).slice(0, 200) } : {}) };
   }
-  return { ok: true, totals: { tokens: payload.tokens, sessions: payload.sessions, activeMs: payload.activeMs } };
+  return {
+    ok: true,
+    totals: { tokens: payload.tokens, sessions: payload.sessions, activeMs: payload.activeMs },
+    // What the board shows for the whole identity, and per linked machine
+    // (no ids — just "this one" and when each last reported). Older workers
+    // don't send `machines`.
+    site: body?.profile ? {
+      tokens: body.profile.tokens || 0,
+      machines: Array.isArray(body.machines) ? body.machines.map((m) => ({
+        self: !!m.self, tokens: Number(m.tokens) || 0, updatedAt: Number(m.updatedAt) || null,
+      })) : null,
+    } : null,
+  };
+}
+
+// Persist a flushProfile result for `claude-rpc profile`. Rate-limited results
+// carry no news and are skipped; a failure keeps the last success alongside it.
+export function recordProfileResult(result, { path = PROFILE_STATUS_PATH, now = Date.now() } = {}) {
+  if (!result || result.reason === 'rate-limited' || result.reason === 'disabled') return;
+  let prev = {};
+  try { prev = JSON.parse(readFileSync(path, 'utf8')) || {}; } catch { /* first write */ }
+  const next = result.ok
+    ? { ok: true, at: now, totals: result.totals, site: result.site || null }
+    : { ...prev, ok: false, failedAt: now, reason: result.reason, error: result.error || null };
+  try { writeFileAtomic(path, JSON.stringify(next)); } catch { /* advisory */ }
+}
+
+export function readProfileResult(path = PROFILE_STATUS_PATH) {
+  try { return JSON.parse(readFileSync(path, 'utf8')); } catch { return null; }
 }
 
 // Single best-effort flush. Returns { ok, reason, delta? } — never throws.

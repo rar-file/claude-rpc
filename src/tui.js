@@ -11,7 +11,7 @@ import { readActiveState } from './state.js';
 import { readAggregate, findLiveSessions, dayKey } from './scanner.js';
 import { buildVars, applyIdle, humanProject, fmtNum } from './format.js';
 import { loadConfig } from './config.js';
-import { daemonAlive } from './ensure-daemon.js';
+import { daemonAlive, isStopped } from './ensure-daemon.js';
 import { fmtCost } from './pricing.js';
 import { heat } from './ui.js';
 
@@ -175,7 +175,7 @@ export function loadSnapshot() {
   const aggregate = readAggregate() || {};
   const vars = buildVars(state, config, aggregate);
   // daemonAlive treats EPERM as alive (the pid exists, we just can't signal it).
-  return { state, config, aggregate, vars, pid: daemonAlive() || null };
+  return { state, config, aggregate, vars, pid: daemonAlive() || null, stopped: isStopped() };
 }
 
 const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -418,6 +418,7 @@ export function renderFrame(data, { width, height, tab }) {
 
   const status = data.pid
     ? `${C.green}●${C.reset} ${C.dim}running · pid ${data.pid}${C.reset}`
+    : data.stopped ? `${C.yellow}○${C.reset} ${C.dim}daemon stopped · claude-rpc start${C.reset}`
     : `${C.red}○${C.reset} ${C.dim}daemon not running${C.reset}`;
   const tabBar = TABS.map((t, i) => (i === tab
     ? `${C.bold}${C.cyan}‹ ${t.label} ›${C.reset}`

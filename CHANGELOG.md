@@ -4,6 +4,22 @@ All notable changes to claude-rpc. Format: [Keep a Changelog](https://keepachang
 
 ## [Unreleased]
 
+**Fixed**
+
+- **`claude-rpc stop` now stays stopped.** Stopping used to last only until the next Claude Code session opened, which started the daemon right back up. A stop now holds across sessions and reboots until `claude-rpc start` (or `restart`/`setup`). It waits for the daemon to actually exit, and a leftover second daemon exits within 30 seconds. The settings page and the desktop app's tray do the same.
+- **Updates now actually take effect.** After `npm i -g`, an auto-update or a desktop-app update, the daemon kept running the old code until a reboot, because nothing restarted it. The daemon now notices new files on disk and restarts onto them, and the session hook and `setup` replace a daemon older than themselves. `claude-rpc status` shows when the running daemon is a different version.
+- **Auto-update no longer leaves two daemons running.** The restart after an update deleted the new daemon's pid file, so `status` said "not running", the next session started a second daemon, and `stop` could only ever kill one of them.
+- **Auto-update no longer reinstalls in a loop.** Where npm keeps its global packages somewhere other than claude-rpc's own folder (Volta, pnpm, a changed npm prefix), npm reported success, the daemon restarted on the same old version and installed again every 5 minutes. The installed version is now checked, and a mismatch is reported as a failure. A global folder that needs admin rights is now a one-line notice instead of a daily failed attempt.
+- **`claude-rpc update status` shows what happened**: when it last checked, the latest version, why it didn't install, the last failure, and whether the running daemon is out of date.
+- **`uninstall` stops the daemon.** A daemon left running after uninstall used to put the hooks and login autostart back the next time it updated.
+- **No more phantom "running" daemon after a reboot or crash.** On Windows and macOS the old pid file survives a reboot; if that pid was reused by another process, the daemon looked alive and never restarted. A heartbeat now tells the difference.
+- `autostart: false` is now respected by `setup`, `doctor --fix` and the desktop app (they used to re-enable login autostart).
+- **The board keeps counting after a machine's local total drops.** Before 1.7.2, transcripts Claude Code deleted after 30 days were subtracted from your total, and a wiped scan cache or a reinstall does the same today. The board then froze that machine's number until its local count climbed back past the old peak. New usage now counts straight away, and the number never goes down.
+
+**Added**
+
+- **`claude-rpc profile` shows where your board number comes from**: this machine's tokens, the total across your linked machines, any linked machine that hasn't published in days, and a publish the board refused (with the fix). An unlinked second machine whose publishes are refused as "handle taken" used to fail silently forever.
+
 ## [1.8.0] - 2026-11-12
 
 **Added**

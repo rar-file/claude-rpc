@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import './safe-stdio.js';
-import { existsSync, unlinkSync, watch, appendFileSync, mkdirSync, statSync, renameSync, readdirSync } from 'node:fs';
+import { existsSync, unlinkSync, watch, appendFileSync, mkdirSync, statSync, renameSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { Client, isBridgeUser } from './discord-ipc.js';
 import { readState, sweepStaleStateTmp, listSessionStates, sweepStaleSessionStates } from './state.js';
@@ -15,10 +15,10 @@ import { loadConfig } from './config.js';
 import { selfHealOnUpdate } from './install.js';
 import { VERSION } from './version.js';
 import { desktopNotify, postWebhook, shouldWebhook, shouldNotify, sanitizeLabel } from './notify.js';
-import { CONFIG_PATH, STATE_PATH, PID_PATH, LOG_PATH, STATE_DIR, AGGREGATE_PATH, PAUSE_PATH } from './paths.js';
+import { CONFIG_PATH, STATE_PATH, PID_PATH, LOG_PATH, STATE_DIR, AGGREGATE_PATH, PAUSE_PATH, DAEMON_INFO_PATH, ROOT, IS_PACKAGED, CANONICAL_EXE } from './paths.js';
 import { readUsageCache, pollUsage } from './usage.js';
 import { pollDecision, pollIntervalMs } from './watch-poll.js';
-import { claimSingleInstance, spawnDaemonDetached } from './ensure-daemon.js';
+import { claimSingleInstance, spawnDaemonDetached, isStopped, readPid, isAlive, readDaemonInfo, writeDaemonInfo, BEAT_EVERY_MS, BEAT_STALE_MS } from './ensure-daemon.js';
 import { checkForUpdate } from './updater.js';
 import { scanInChild } from './scan-worker.js';
 
@@ -68,6 +68,42 @@ process.on('uncaughtException', (e) => {
 process.on('unhandledRejection', (e) => {
   try { log('unhandledRejection (continuing):', e?.stack || e?.message || String(e)); } catch { /* see above */ }
 });
+
+// Signal handlers go in before the pid-file claim below: a SIGTERM that lands
+// between the claim and a late handler install killed the daemon the default
+// way and stranded its pid file. (shutdown is hoisted; it tolerates the
+// not-yet-initialised IPC client.)
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
+process.on('SIGHUP', shutdown);
+
+// `claude-rpc stop` is durable — it holds across sessions and reboots. A login
+// autostart entry (or anything else) that launches us while stopped exits
+// cleanly (code 0, so systemd's Restart=on-failure leaves it be).
+if (isStopped()) {
+  log('Stopped by `claude-rpc stop` — not starting. Run `claude-rpc start` to resume.');
+  process.exit(0);
+}
+
+// Single-instance guard — an ATOMIC claim (see ensure-daemon.claimSingleInstance).
+// Many launchers can fire at once now that the SessionStart hook self-heals the
+// daemon: a manual `start`, a Windows Run entry, and several concurrent sessions'
+// hooks could all spawn a daemon in the same instant. A second daemon would
+// fight over setActivity every ~4s and double-count the additive community
+// total. The exclusive-create claim makes exactly one survive; a live owner →
+// we exit; a stale pid (dead, or recycled with a stale heartbeat) → we reclaim.
+// Claimed BEFORE the update self-heal below so a losing duplicate never
+// re-wires hooks or touches the login autostart.
+const ownerPid = claimSingleInstance();
+if (ownerPid) {
+  log(`Another daemon (pid ${ownerPid}) is already running — exiting.`);
+  process.exit(0);
+}
+const STARTED_AT = Date.now();
+function beat() {
+  writeDaemonInfo({ pid: process.pid, version: VERSION, startedAt: STARTED_AT, beatAt: Date.now() });
+}
+beat();
 
 // Wrap loadConfig so a parse/IO failure logs once and the daemon keeps
 // running on baked-in defaults. The Electron settings GUI saves the file
@@ -164,20 +200,6 @@ const sessionPathMemo = new Map();
 // from a moving transcript mtime, and missing-hook scenarios leave it null —
 // either case would make startTimestamp jump on every rotation.
 let effectiveSessionStart = null;
-
-// Single-instance guard — an ATOMIC claim (see ensure-daemon.claimSingleInstance).
-// Many launchers can fire at once now that the SessionStart hook self-heals the
-// daemon: a manual `start`, a Windows Run entry, and several concurrent sessions'
-// hooks could all spawn a daemon in the same instant. A second daemon would
-// fight over setActivity every ~4s and double-count the additive community
-// total. The old read-then-write guard had a window where two starters both saw
-// "no live owner" and both wrote their pid; the exclusive-create claim closes it
-// so exactly one survives. A live owner → we exit; a stale pid → we reclaim it.
-const ownerPid = claimSingleInstance();
-if (ownerPid) {
-  log(`Another daemon (pid ${ownerPid}) is already running — exiting.`);
-  process.exit(0);
-}
 
 // Reclaim any per-pid state tmp files orphaned by a hard-killed writer, plus
 // per-session state files from sessions that ended long ago. The session-state
@@ -816,17 +838,85 @@ async function runBackgroundScan({ force = false } = {}) {
 
 function shutdown() {
   log('Shutting down…');
-  // Both calls below are best-effort cleanup on the way out the door.
-  // If the IPC client is already half-dead or the PID file was removed
-  // by something else, we don't care — we're exiting anyway.
-  try { client?.destroy(); } catch { /* IPC already gone */ }
-  try { if (existsSync(PID_PATH)) unlinkSync(PID_PATH); } catch { /* race vs another shutdown */ }
+  // Best-effort cleanup on the way out the door. Only remove the pid/info
+  // files if they are still OURS: during an update handover the replacement
+  // daemon claims the pid file while we wind down, and deleting it blindly
+  // orphaned the replacement (`status` said "not running", the next hook
+  // spawned a second daemon, and `stop` could only ever kill one of them).
+  try { client?.destroy(); } catch { /* IPC already gone (or not created yet) */ }
+  try { if (readPid() === process.pid) unlinkSync(PID_PATH); } catch { /* race vs another shutdown */ }
+  try { if (readDaemonInfo()?.pid === process.pid) unlinkSync(DAEMON_INFO_PATH); } catch { /* gone */ }
   process.exit(0);
 }
 
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
-process.on('SIGHUP', shutdown);
+// ── Lifecycle watchdog ──────────────────────────────────────────────────────
+// Every BEAT_EVERY_MS: honor a `stop` (any daemon still alive — a duplicate the
+// signal missed, one a launcher started anyway — exits), reconcile the pid file
+// (a tmp cleaner deleting it used to let every SessionStart add one more
+// daemon), refresh the heartbeat, and hand over to new code once an update has
+// replaced the files on disk.
+function onDiskVersion() {
+  if (IS_PACKAGED) {
+    // The packaged exe can't be read for a version; its file changing under us
+    // (setup/the desktop app copying a new build over the canonical exe) is the
+    // signal. Only meaningful when we ARE the canonical exe.
+    const norm = (x) => (process.platform === 'win32' ? x.toLowerCase() : x);
+    if (norm(process.execPath) !== norm(CANONICAL_EXE)) return null;
+    try { const st = statSync(CANONICAL_EXE); return `${st.size}:${st.mtimeMs}`; } catch { return null; }
+  }
+  try { return JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).version || null; } catch { return null; }
+}
+const BOOT_DISK_VERSION = onDiskVersion();
+let diskChangeSeen = null;   // needs two consecutive sightings — npm may be mid-extract
+let handingOver = false;
+let handoverBlockedUntil = 0;
+
+// Spawn a fresh daemon from whatever is on disk and exit once it has claimed
+// the pid file. If it never comes up, keep running (better old code than none)
+// and don't try again for an hour.
+function handOver(reason) {
+  if (handingOver || Date.now() < handoverBlockedUntil) return;
+  handingOver = true;
+  log(`${reason} — handing over to a fresh daemon`);
+  try { if (readPid() === process.pid) unlinkSync(PID_PATH); } catch { /* gone */ }
+  spawnDaemonDetached();
+  const deadline = Date.now() + 8000;
+  const poll = setInterval(() => {
+    const cur = readPid();
+    if (cur && cur !== process.pid && isAlive(cur)) { clearInterval(poll); shutdown(); return; }
+    if (Date.now() < deadline) return;
+    clearInterval(poll);
+    log('Handover failed: the new daemon never came up — staying on this one');
+    try { writeFileSync(PID_PATH, String(process.pid)); } catch { /* unwritable */ }
+    handingOver = false;
+    handoverBlockedUntil = Date.now() + 60 * 60_000;
+  }, 250);
+}
+
+function lifecycleTick() {
+  if (handingOver) return;
+  if (isStopped()) { log('Stop requested (`claude-rpc stop`)'); shutdown(); return; }
+  const cur = readPid();
+  if (cur !== process.pid) {
+    const info = readDaemonInfo();
+    if (cur && isAlive(cur) && info?.pid === cur && Date.now() - (info.beatAt || 0) < BEAT_STALE_MS) {
+      log(`Another daemon (pid ${cur}) owns the pid file — exiting as a duplicate`);
+      try { client?.destroy(); } catch { /* gone */ }
+      process.exit(0);
+    }
+    try { writeFileSync(PID_PATH, String(process.pid)); log(`Pid file ${cur ? `named pid ${cur}` : 'was missing'} — restored`); }
+    catch { /* unwritable — run lockless */ }
+  }
+  beat();
+  const disk = onDiskVersion();
+  if (disk && BOOT_DISK_VERSION && disk !== BOOT_DISK_VERSION) {
+    if (diskChangeSeen === disk) handOver(`Update on disk (${IS_PACKAGED ? 'new exe' : `${VERSION} → ${disk}`})`);
+    diskChangeSeen = disk;
+  } else {
+    diskChangeSeen = null;
+  }
+}
+setInterval(lifecycleTick, BEAT_EVERY_MS);
 
 log('Claude RPC daemon starting. clientId=', config.clientId);
 if (!config.clientId || config.clientId === '1234567890123456789') {
@@ -949,7 +1039,7 @@ async function runCommunityFlush() {
   // independent of community totals but reuses the same anonymous instanceId.
   if (!config.community?.enabled && !config.profile?.enabled) return;
   try {
-    const { flushCommunity, flushProfile } = await import('./community.js');
+    const { flushCommunity, flushProfile, recordProfileResult } = await import('./community.js');
     if (config.community?.enabled) {
       const result = await flushCommunity(config);
       if (result.ok && result.delta) {
@@ -960,6 +1050,7 @@ async function runCommunityFlush() {
     }
     if (config.profile?.enabled) {
       const pr = await flushProfile(config);
+      recordProfileResult(pr);
       if (pr.ok && pr.totals) {
         log(`profile: published @${config.profile.handle} (${pr.totals.tokens} tokens)`);
       } else if (!pr.ok && pr.reason !== 'rate-limited' && pr.reason !== 'disabled') {
@@ -988,10 +1079,9 @@ async function runUpdateCheck() {
   try {
     const r = await checkForUpdate({ current: VERSION, auto: config.update?.auto !== false });
     if (r.installed) {
-      log(`auto-update: ${VERSION} → ${r.latest} installed; restarting`);
-      try { if (existsSync(PID_PATH)) unlinkSync(PID_PATH); } catch { /* shutdown() retries */ }
-      spawnDaemonDetached();
-      setTimeout(shutdown, 500);
+      handOver(`auto-update: ${VERSION} → ${r.latest} installed`);
+    } else if (r.plan.reason === 'registry unreachable') {
+      log('auto-update: could not reach the npm registry — will retry');
     } else if (r.error) {
       log(`auto-update: install of ${r.latest} failed: ${String(r.error).slice(-200)}`);
     } else if (r.plan.action === 'notify') {

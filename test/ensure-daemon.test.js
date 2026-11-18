@@ -126,3 +126,91 @@ test('claimSingleInstance: our OWN recycled pid in the file is reclaimed, not mi
   assert.equal(r, null, 'owner === our pid cannot be a different live daemon → reclaim');
   assert.equal(readFileSync(pidPath, 'utf8'), '1234');
 });
+
+// ── stop intent, heartbeat liveness, stale-daemon replacement (1.9.0) ────
+const {
+  pidIsDaemon, shouldReplaceDaemon, isNewerVersion, markStopped, clearStopped, isStopped,
+  stopDaemonAndWait, readDaemonInfo, writeDaemonInfo,
+} = await import('../src/ensure-daemon.js');
+
+test('shouldSpawnDaemon: a `stop` sticks — the hook never respawns a stopped daemon', () => {
+  assert.equal(shouldSpawnDaemon({ autostart: true, stopped: true, daemonPid: 0, lastAttemptMs: 0, now: NOW, cooldownMs: COOL }), false);
+});
+
+test('stop marker: mark → isStopped, clear → not', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'crpc-stop-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const p = join(dir, 'sub', 'stopped');
+  assert.equal(isStopped(p), false);
+  assert.equal(markStopped(p), true);
+  assert.equal(isStopped(p), true);
+  clearStopped(p);
+  assert.equal(isStopped(p), false);
+  clearStopped(p); // idempotent
+});
+
+test('pidIsDaemon: a live pid with a stale heartbeat is a recycled pid, not our daemon', () => {
+  const alive = () => true;
+  const now = 10_000_000;
+  assert.equal(pidIsDaemon(42, { alive, now, info: { pid: 42, beatAt: now - 10_000 } }), true);
+  assert.equal(pidIsDaemon(42, { alive, now, info: { pid: 42, beatAt: now - 6 * 60_000 } }), false);
+  // No heartbeat for THIS pid (pre-1.9 daemon, or the file names another pid): bare probe.
+  assert.equal(pidIsDaemon(42, { alive, now, info: null }), true);
+  assert.equal(pidIsDaemon(42, { alive, now, info: { pid: 7, beatAt: 0 } }), true);
+  assert.equal(pidIsDaemon(42, { alive: () => false, now, info: null }), false);
+  assert.equal(pidIsDaemon(0, { alive, now }), false);
+});
+
+test('shouldReplaceDaemon: replace an older or version-less daemon, never a same/newer one', () => {
+  assert.equal(shouldReplaceDaemon({ info: { pid: 5, version: '1.8.0' }, pid: 5, version: '1.9.0' }), true);
+  assert.equal(shouldReplaceDaemon({ info: { pid: 5, version: '1.9.0' }, pid: 5, version: '1.9.0' }), false);
+  assert.equal(shouldReplaceDaemon({ info: { pid: 5, version: '1.9.1' }, pid: 5, version: '1.9.0' }), false);
+  // pre-1.9 daemons write no info: replace, but at most once per cooldown
+  assert.equal(shouldReplaceDaemon({ info: null, pid: 5, version: '1.9.0', lastAttemptMs: 0, now: NOW }), true);
+  assert.equal(shouldReplaceDaemon({ info: null, pid: 5, version: '1.9.0', lastAttemptMs: NOW - 60_000, now: NOW }), false);
+  assert.equal(shouldReplaceDaemon({ info: null, pid: 5, version: '1.9.0', lastAttemptMs: NOW - 31 * 60_000, now: NOW }), true);
+});
+
+test('isNewerVersion: numeric semver compare', () => {
+  assert.equal(isNewerVersion('1.10.0', '1.9.9'), true);
+  assert.equal(isNewerVersion('1.9.0', '1.9.0'), false);
+  assert.equal(isNewerVersion('1.8.9', '1.9.0'), false);
+  assert.equal(isNewerVersion('junk', '1.9.0'), false);
+});
+
+test('daemon info round-trips through an atomic write', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'crpc-info-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const p = join(dir, 'daemon.json');
+  assert.equal(readDaemonInfo(p), null);
+  writeDaemonInfo({ pid: 9, version: '1.9.0', beatAt: 1 }, p);
+  assert.deepEqual(readDaemonInfo(p), { pid: 9, version: '1.9.0', beatAt: 1 });
+  writeFileSync(p, '{"half":');
+  assert.equal(readDaemonInfo(p), null, 'a torn read is "no info", never a throw');
+});
+
+test('stopDaemonAndWait: waits for a real exit and removes the dead daemon\'s pid file', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'crpc-stopwait-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const child = spawnSync(process.execPath, ['-e', 'console.log(process.pid)'], { encoding: 'utf8' }); // warm
+  assert.equal(child.status, 0);
+  const { spawn } = await import('node:child_process');
+  // A child that ignores SIGTERM, so the SIGKILL fallback is exercised too.
+  const victim = spawn(process.execPath, ['-e', "process.on('SIGTERM',()=>{}); setInterval(()=>{},1000)"], { stdio: 'ignore' });
+  await new Promise((r) => setTimeout(r, 200));
+  const pidPath = join(dir, 'daemon.pid');
+  writeFileSync(pidPath, String(victim.pid));
+  const ok = await stopDaemonAndWait({ pidPath, infoPath: join(dir, 'none.json'), graceMs: 300, killMs: 2000 });
+  assert.equal(ok, true);
+  assert.equal(isAlive(victim.pid), false);
+  assert.throws(() => readFileSync(pidPath), /ENOENT/, 'pid file of the killed daemon is gone');
+});
+
+test('stopDaemonAndWait: nothing running → true, and a stale pid file is cleaned up', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'crpc-stopnone-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const pidPath = join(dir, 'daemon.pid');
+  writeFileSync(pidPath, '2000000000');
+  assert.equal(await stopDaemonAndWait({ pidPath, infoPath: join(dir, 'none.json') }), true);
+  assert.throws(() => readFileSync(pidPath), /ENOENT/);
+});

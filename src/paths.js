@@ -81,6 +81,11 @@ export const STATE_DIR = join(tmpdir(), 'claude-rpc');
 export const STATE_PATH = join(STATE_DIR, 'state.json');
 export const PID_PATH = join(STATE_DIR, 'daemon.pid');
 export const LOG_PATH = join(STATE_DIR, 'daemon.log');
+// The running daemon's identity + heartbeat ({ pid, version, startedAt, beatAt }).
+// The pid file alone can't tell a live daemon from a recycled pid after a
+// reboot or crash (Windows/macOS keep the tmp dir across reboots) — the
+// heartbeat can. See ensure-daemon.daemonAlive.
+export const DAEMON_INFO_PATH = join(STATE_DIR, 'daemon.json');
 // Presence snooze marker (`claude-rpc pause`). Lives in the tmp state dir on
 // purpose — a reboot clearing a forgotten pause is the right failure mode.
 export const PAUSE_PATH = join(STATE_DIR, 'pause.json');
@@ -95,6 +100,10 @@ export const EVENTS_LOG_PATH = join(DATA_DIR, 'events.jsonl');
 // migrate). Persistent (under ~/.claude-rpc) so an update is detected across
 // reboots — see install.selfHealOnUpdate.
 export const VERSION_STAMP = join(DATA_DIR, 'version');
+// `claude-rpc stop` marker. Persistent on purpose: a stopped daemon stays
+// stopped across sessions AND reboots until `start`/`restart`/`setup`. Every
+// launcher (hook self-heal, login autostart, the daemon's own boot) honors it.
+export const STOPPED_PATH = join(DATA_DIR, 'stopped');
 export const CLAUDE_HOME = join(homedir(), '.claude');
 export const CLAUDE_PROJECTS = join(CLAUDE_HOME, 'projects');
 export const CLAUDE_SETTINGS = join(CLAUDE_HOME, 'settings.json');

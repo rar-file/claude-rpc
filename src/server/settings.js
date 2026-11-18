@@ -21,7 +21,7 @@ import { DEFAULT_CONFIG } from '../default-config.js';
 import { loadConfig, mergeConfig } from '../config.js';
 import { applyEdits } from '../config-edit.js';
 import { writeFileAtomic } from '../atomic-rename.js';
-import { daemonAlive, spawnDaemonDetached } from '../ensure-daemon.js';
+import { daemonAlive, spawnDaemonDetached, stopDaemonAndWait, markStopped, clearStopped, isStopped } from '../ensure-daemon.js';
 import { ipcStateFromLog, bridgeFromLog, classifyClientId } from '../doctor.js';
 import { readActiveState } from '../state.js';
 import { findLiveSessions, readAggregate } from '../scanner.js';
@@ -63,7 +63,7 @@ function tailLog(lines = 80) {
 // kind from the log tail — the same reading `claude-rpc doctor` reports.
 export function daemonStatus() {
   const pid = daemonAlive();
-  if (!pid) return { running: false, pid: null, ipc: 'down', client: null };
+  if (!pid) return { running: false, pid: null, ipc: 'down', client: null, stopped: isStopped() };
   const log = tailLog(200);
   return { running: true, pid, ipc: ipcStateFromLog(log), client: bridgeFromLog(log) };
 }
@@ -162,22 +162,15 @@ async function waitDaemon(want, timeoutMs) {
   }
 }
 
-function signal(pid, sig) {
-  try { process.kill(pid, sig); return true; } catch { return false; }
-}
-
-async function stop() {
-  const pid = daemonAlive();
-  if (!pid) return true;
-  signal(pid, 'SIGTERM');
-  if (await waitDaemon(false, 3000)) return true;
-  // Wedged: it ignored SIGTERM for 3s. Don't leave the user with a daemon
-  // they asked to stop.
-  signal(pid, 'SIGKILL');
-  return waitDaemon(false, 1500);
+// Same semantics as `claude-rpc stop`: durable (the marker keeps the hook and
+// login autostart from bringing it back) and confirmed (hard-kill if wedged).
+async function stop({ mark = true } = {}) {
+  if (mark) markStopped();
+  return stopDaemonAndWait();
 }
 
 async function start() {
+  clearStopped();
   if (daemonAlive()) return true;
   const child = spawnDaemonDetached();
   if (!child || !child.pid) return false;
@@ -190,7 +183,7 @@ export async function daemonAction(action) {
   let ok;
   if (action === 'start') ok = await start();
   else if (action === 'stop') ok = await stop();
-  else if (action === 'restart') ok = (await stop()) && (await start());
+  else if (action === 'restart') ok = (await stop({ mark: false })) && (await start());
   else return { error: 'unknown action' };
   const daemon = daemonStatus();
   if (ok) return { ok: true, daemon };

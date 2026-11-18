@@ -378,15 +378,17 @@ async function ensureFirstRunSetup() {
   try { marker = JSON.parse(fs.readFileSync(setupMarkerPath(), 'utf8')); } catch { /* first run */ }
   if (marker && version && marker.version === version) return;
   console.log(`[setup] auto-running (${marker ? `update ${marker.version} → ${version}` : 'first launch'})`);
-  await runSetup({ auto: true, version });
+  // An app UPDATE re-runs setup to re-wire hooks for the new bundled CLI;
+  // `--auto` tells it not to undo a `claude-rpc stop`. First launch starts it.
+  await runSetup({ auto: true, version, update: !!marker });
 }
 
 // Run the CLI's `setup` and tell the user how it went. Success is quiet when
 // automatic (the settings page already shows the daemon running) and
 // confirmed when they asked for it from the tray. Failure always says so,
 // with the tail of what setup printed.
-async function runSetup({ auto, version }) {
-  const result = await runCli(['setup']);
+async function runSetup({ auto, version, update = false }) {
+  const result = await runCli(update ? ['setup', '--auto'] : ['setup']);
   const v = version || await cliVersion();
   if (result.ok && v) markSetupDone(v);
   rebuildTrayMenu();

@@ -448,3 +448,46 @@ test('publishWrapped: posts to /wrapped and surfaces the page URL; maps 403', as
   const offline = await publishWrapped({ community: {} }, payload, {});
   assert.equal(offline.reason, 'no-endpoint');
 });
+
+// ── publish result visibility (1.9.0) ──────────────────────────────────
+const { recordProfileResult, readProfileResult } = await import('../src/community.js');
+
+test('flushProfile: surfaces the board total and per-machine freshness', async () => {
+  const p = makeTempPaths();
+  try {
+    writeFileSync(p.aggregatePath, JSON.stringify({ inputTokens: 10, outputTokens: 5, sessions: 1 }));
+    const body = JSON.stringify({ ok: true, profile: { tokens: 99 }, machines: [
+      { self: true, tokens: 15, updatedAt: 2 }, { self: false, tokens: 84, updatedAt: 1 }] });
+    const r = await flushProfile({ profile: { enabled: true, handle: 'archer' }, community: { instanceId: VALID_ID, endpoint: 'https://x.test' } },
+      { aggregatePath: p.aggregatePath, fetchImpl: fakeFetch({ body }) });
+    assert.equal(r.ok, true);
+    assert.equal(r.site.tokens, 99);
+    assert.deepEqual(r.site.machines, [{ self: true, tokens: 15, updatedAt: 2 }, { self: false, tokens: 84, updatedAt: 1 }]);
+  } finally { p.cleanup(); }
+});
+
+test('flushProfile: a refusal carries the worker\'s reason (409 handle taken)', async () => {
+  const p = makeTempPaths();
+  try {
+    writeFileSync(p.aggregatePath, JSON.stringify({ sessions: 1 }));
+    const r = await flushProfile({ profile: { enabled: true, handle: 'archer' }, community: { instanceId: VALID_ID, endpoint: 'https://x.test' } },
+      { aggregatePath: p.aggregatePath, fetchImpl: fakeFetch({ status: 409, body: '{"error":"handle taken"}' }) });
+    assert.deepEqual(r, { ok: false, reason: 'http-409', error: 'handle taken' });
+  } finally { p.cleanup(); }
+});
+
+test('recordProfileResult: keeps the last success next to a later failure; skips rate limits', () => {
+  const p = makeTempPaths();
+  try {
+    const path = join(p.dir, 'profile-status.json');
+    recordProfileResult({ ok: true, totals: { tokens: 5 }, site: { tokens: 9, machines: null } }, { path, now: 100 });
+    recordProfileResult({ ok: false, reason: 'rate-limited' }, { path, now: 150 });
+    assert.equal(readProfileResult(path).ok, true);
+    recordProfileResult({ ok: false, reason: 'http-409', error: 'handle taken' }, { path, now: 200 });
+    const rec = readProfileResult(path);
+    assert.equal(rec.ok, false);
+    assert.equal(rec.reason, 'http-409');
+    assert.equal(rec.failedAt, 200);
+    assert.equal(rec.at, 100, 'last success kept');
+  } finally { p.cleanup(); }
+});

@@ -39,20 +39,20 @@ test('checkForUpdate: installs a newer release, records it; failure is remembere
   const statePath = join(mkdtempSync(join(tmpdir(), 'upd-')), 'update.json');
   const calls = [];
   const ok = await checkForUpdate({ current: '1.6.0', auto: true, kind: 'npm-global', statePath, cooldownMs: 0,
-    fetchLatestFn: async () => '1.6.1', install: async (v) => { calls.push(v); return { ok: true, output: '' }; } });
+    fetchLatestFn: async () => '1.6.1', install: async (v) => { calls.push(v); return { ok: true, output: '' }; }, verify: () => true, writable: () => true });
   assert.equal(ok.installed, true);
   assert.deepEqual(calls, ['1.6.1']);
   assert.equal(readUpdateState(statePath).updatedTo, '1.6.1');
 
   const bad = await checkForUpdate({ current: '1.6.0', auto: true, kind: 'npm-global', statePath, cooldownMs: 0,
-    fetchLatestFn: async () => '1.6.2', install: async () => ({ ok: false, output: 'EACCES' }) });
+    fetchLatestFn: async () => '1.6.2', install: async () => ({ ok: false, output: 'EACCES' }), writable: () => true });
   assert.equal(bad.installed, false);
   assert.match(bad.error, /EACCES/);
   assert.equal(readUpdateState(statePath).failed.version, '1.6.2');
   // second attempt within the window does not call install again
   let again = 0;
   await checkForUpdate({ current: '1.6.0', auto: true, kind: 'npm-global', statePath, cooldownMs: 0,
-    fetchLatestFn: async () => '1.6.2', install: async () => { again++; return { ok: true, output: '' }; } });
+    fetchLatestFn: async () => '1.6.2', install: async () => { again++; return { ok: true, output: '' }; }, writable: () => true });
   assert.equal(again, 0);
 });
 
@@ -72,10 +72,35 @@ test('cooldown: a new release is only installed after it has been seen for the c
   const statePath = join(mkdtempSync(join(tmpdir(), 'upd-')), 'update.json');
   let installs = 0;
   const run = (now) => checkForUpdate({ current: '1.6.0', auto: true, kind: 'npm-global', statePath, now, cooldownMs: 2 * 3_600_000,
-    fetchLatestFn: async () => '1.6.1', install: async () => { installs++; return { ok: true, output: '' }; } });
+    fetchLatestFn: async () => '1.6.1', install: async () => { installs++; return { ok: true, output: '' }; }, verify: () => true, writable: () => true });
   const t0 = 1_000_000;
   assert.equal((await run(t0)).installed, false);                    // first sighting
   assert.equal((await run(t0 + 3_600_000)).installed, false);        // 1h: still settling
   assert.equal((await run(t0 + 2 * 3_600_000)).installed, true);     // 2h: go
   assert.equal(installs, 1);
+});
+
+test('checkForUpdate: npm "success" that left this copy on the old version is a failure, not a restart loop', async () => {
+  const statePath = join(mkdtempSync(join(tmpdir(), 'upd-')), 'update.json');
+  let installs = 0;
+  const run = () => checkForUpdate({ current: '1.6.0', auto: true, kind: 'npm-global', statePath, cooldownMs: 0,
+    fetchLatestFn: async () => '1.6.1', install: async () => { installs++; return { ok: true, output: '' }; },
+    verify: () => false, writable: () => true });
+  const r = await run();
+  assert.equal(r.installed, false, 'never restart into the same old code');
+  assert.match(r.error, /still v1\.6\.0/);
+  assert.equal(readUpdateState(statePath).failed.version, '1.6.1');
+  await run();
+  assert.equal(installs, 1, 'the failed version is not retried immediately');
+});
+
+test('checkForUpdate: an unwritable global folder is a notice, never an install attempt', async () => {
+  const statePath = join(mkdtempSync(join(tmpdir(), 'upd-')), 'update.json');
+  let installs = 0;
+  const r = await checkForUpdate({ current: '1.6.0', auto: true, kind: 'npm-global', statePath, cooldownMs: 0,
+    fetchLatestFn: async () => '1.6.1', install: async () => { installs++; return { ok: true, output: '' }; }, writable: () => false });
+  assert.equal(r.plan.action, 'notify');
+  assert.match(r.plan.reason, /admin/);
+  assert.equal(installs, 0);
+  assert.equal(readUpdateState(statePath).lastPlan.action, 'notify', 'the reason is kept for `update status`');
 });
